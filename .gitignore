@@ -49,3 +49,6 @@ package.json
 /man/
 /share/
 /src/
+
+# vendors
+/addons_customize/
