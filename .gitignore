@@ -52,3 +52,5 @@ package.json
 
 # vendors
 /addons_customize/
+/addons_vendor/
+/addons_community/
