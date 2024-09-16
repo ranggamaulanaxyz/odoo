@@ -5,11 +5,12 @@ from datetime import timedelta
 
 from markupsafe import Markup
 
-from odoo import _, _lt, api, fields, models
+from odoo import api, fields, models
 from odoo.exceptions import UserError, ValidationError
 from odoo.fields import Command
 from odoo.osv import expression
 from odoo.tools import float_compare, float_is_zero, format_date, groupby
+from odoo.tools.translate import _
 
 
 class SaleOrderLine(models.Model):
@@ -170,6 +171,7 @@ class SaleOrderLine(models.Model):
         compute='_compute_price_unit',
         digits='Product Price',
         store=True, readonly=False, required=True, precompute=True)
+    technical_price_unit = fields.Float()
 
     discount = fields.Float(
         string="Discount (%)",
@@ -243,6 +245,10 @@ class SaleOrderLine(models.Model):
         compute='_compute_qty_invoiced',
         digits='Product Unit of Measure',
         store=True)
+    qty_invoiced_posted = fields.Float(
+        string="Invoiced Quantity (posted)",
+        compute='_compute_qty_invoiced_posted',
+        digits='Product Unit of Measure')
     qty_to_invoice = fields.Float(
         string="Quantity To Invoice",
         compute='_compute_qty_to_invoice',
@@ -273,10 +279,16 @@ class SaleOrderLine(models.Model):
         string="Untaxed Invoiced Amount",
         compute='_compute_untaxed_amount_invoiced',
         store=True)
+    amount_invoiced = fields.Monetary(
+        string="Invoiced Amount",
+        compute='_compute_amount_invoiced')
     untaxed_amount_to_invoice = fields.Monetary(
         string="Untaxed Amount To Invoice",
         compute='_compute_untaxed_amount_to_invoice',
         store=True)
+    amount_to_invoice = fields.Monetary(
+        string="Amount to invoice",
+        compute='_compute_amount_to_invoice')
 
     # Technical computed fields for UX purposes (hide/make fields readonly, ...)
     product_type = fields.Selection(related='product_id.type', depends=['product_id'])
@@ -432,7 +444,7 @@ class SaleOrderLine(models.Model):
             return _("Down Payments")
 
         dp_state = self._get_downpayment_state()
-        name = _lt("Down Payment")
+        name = _("Down Payment")
         if dp_state == 'draft':
             name = _(
                 "Down Payment: %(date)s (Draft)",
@@ -521,9 +533,13 @@ class SaleOrderLine(models.Model):
     @api.depends('product_id', 'product_uom', 'product_uom_qty')
     def _compute_price_unit(self):
         for line in self:
-            # check if there is already invoiced amount. if so, the price shouldn't change as it might have been
-            # manually edited
-            if line.qty_invoiced > 0 or (line.product_id.expense_policy == 'cost' and line.is_expense):
+            # check if the price has been manually set or there is already invoiced amount.
+            # if so, the price shouldn't change as it might have been manually edited.
+            if (
+                line.technical_price_unit not in (0.0, line.price_unit)
+                or line.qty_invoiced > 0
+                or (line.product_id.expense_policy == 'cost' and line.is_expense)
+            ):
                 continue
             if not line.product_uom or not line.product_id:
                 line.price_unit = 0.0
@@ -537,6 +553,7 @@ class SaleOrderLine(models.Model):
                     ),
                     fiscal_position=line.order_id.fiscal_position_id,
                 )
+                line.technical_price_unit = line.price_unit
 
     def _get_display_price(self):
         """Compute the displayed unit price for a given line.
@@ -683,19 +700,17 @@ class SaleOrderLine(models.Model):
 
     @api.depends('product_id', 'product_uom', 'product_uom_qty')
     def _compute_discount(self):
+        discount_enabled = self.env['product.pricelist.item']._is_discount_feature_enabled()
         for line in self:
             if not line.product_id or line.display_type:
                 line.discount = 0.0
 
-            if not (
-                line.order_id.pricelist_id
-                and line.pricelist_item_id._show_discount()
-            ):
+            if not (line.order_id.pricelist_id and discount_enabled):
                 continue
 
             line.discount = 0.0
 
-            if not line.pricelist_item_id:
+            if not (line.pricelist_item_id and line.pricelist_item_id._show_discount()):
                 # No pricelist rule was found for the product
                 # therefore, the pricelist didn't apply any discount/change
                 # to the existing sales price.
@@ -889,6 +904,23 @@ class SaleOrderLine(models.Model):
                         qty_invoiced -= invoice_line.product_uom_id._compute_quantity(invoice_line.quantity, line.product_uom)
             line.qty_invoiced = qty_invoiced
 
+    @api.depends('invoice_lines.move_id.state', 'invoice_lines.quantity')
+    def _compute_qty_invoiced_posted(self):
+        """
+        This method is almost identical to '_compute_qty_invoiced()'. The only difference lies in the fact that
+        for accounting purposes, we only want the quantities of the posted invoices.
+        We need a dedicated computation because the triggers are different and could lead to incorrect values for
+        'qty_invoiced' when computed together.
+        """
+        for line in self:
+            qty_invoiced_posted = 0.0
+            for invoice_line in line._get_invoice_lines():
+                if invoice_line.move_id.state == 'posted':
+                    qty_unsigned = invoice_line.product_uom_id._compute_quantity(invoice_line.quantity, line.product_uom)
+                    qty_signed = qty_unsigned * -invoice_line.move_id.direction_sign
+                    qty_invoiced_posted += qty_signed
+            line.qty_invoiced_posted = qty_invoiced_posted
+
     def _get_invoice_lines(self):
         self.ensure_one()
         if self._context.get('accrual_entry_date'):
@@ -975,6 +1007,18 @@ class SaleOrderLine(models.Model):
                         amount_invoiced -= invoice_line.currency_id._convert(invoice_line.price_subtotal, line.currency_id, line.company_id, invoice_date)
             line.untaxed_amount_invoiced = amount_invoiced
 
+    @api.depends('invoice_lines', 'invoice_lines.price_total', 'invoice_lines.move_id.state')
+    def _compute_amount_invoiced(self):
+        for line in self:
+            amount_invoiced = 0.0
+            for invoice_line in line._get_invoice_lines():
+                invoice = invoice_line.move_id
+                if invoice.state == 'posted':
+                    invoice_date = invoice.invoice_date or fields.Date.context_today(self)
+                    amount_invoiced_unsigned = invoice_line.currency_id._convert(invoice_line.price_total, line.currency_id, line.company_id, invoice_date)
+                    amount_invoiced += amount_invoiced_unsigned * -invoice.direction_sign
+            line.amount_invoiced = amount_invoiced
+
     @api.depends('state', 'product_id', 'untaxed_amount_invoiced', 'qty_delivered', 'product_uom_qty', 'price_unit')
     def _compute_untaxed_amount_to_invoice(self):
         """ Total of remaining amount to invoice on the sale order line (taxes excl.) as
@@ -1022,6 +1066,18 @@ class SaleOrderLine(models.Model):
                     amount_to_invoice = price_subtotal - line.untaxed_amount_invoiced
 
             line.untaxed_amount_to_invoice = amount_to_invoice
+
+    @api.depends('discount', 'price_total', 'product_uom_qty', 'qty_delivered', 'qty_invoiced_posted')
+    def _compute_amount_to_invoice(self):
+        for line in self:
+            if line.product_uom_qty:
+                uom_qty_to_consider = line.qty_delivered if line.product_id.invoice_policy == 'delivery' else line.product_uom_qty
+                qty_to_invoice = uom_qty_to_consider - line.qty_invoiced_posted
+                unit_price_total = line.price_total / line.product_uom_qty
+                price_reduce = unit_price_total * (1 - (line.discount or 0.0) / 100.0)
+                line.amount_to_invoice = price_reduce * qty_to_invoice
+            else:
+                line.amount_to_invoice = 0.0
 
     @api.depends('order_id.partner_id', 'product_id')
     def _compute_analytic_distribution(self):
@@ -1134,11 +1190,14 @@ class SaleOrderLine(models.Model):
             if line.product_id and line.state == 'sale':
                 msg = _("Extra line with %s", line.product_id.display_name)
                 line.order_id.message_post(body=msg)
-                # create an analytic account if at least an expense product
-                if line.product_id.expense_policy not in [False, 'no'] and not line.order_id.analytic_account_id:
-                    line.order_id._create_analytic_account()
 
         return lines
+
+    def _add_precomputed_values(self, vals_list):
+        super()._add_precomputed_values(vals_list)
+        for vals in vals_list:
+            if 'price_unit' in vals and 'technical_price_unit' not in vals:
+                vals['technical_price_unit'] = vals['price_unit']
 
     def write(self, values):
         if 'display_type' in values and self.filtered(lambda line: line.display_type != values.get('display_type')):
@@ -1271,7 +1330,7 @@ class SaleOrderLine(models.Model):
         res = {
             'display_type': self.display_type or 'product',
             'sequence': self.sequence,
-            'name': self.name,
+            'name': self.env['account.move.line']._get_journal_items_full_name(self.name, self.product_id.display_name),
             'product_id': self.product_id.id,
             'product_uom_id': self.product_uom.id,
             'quantity': self.qty_to_invoice,
@@ -1292,15 +1351,8 @@ class SaleOrderLine(models.Model):
         return res
 
     def _set_analytic_distribution(self, inv_line_vals, **optional_values):
-        analytic_account_id = self.order_id.analytic_account_id.id
         if self.analytic_distribution and not self.display_type:
             inv_line_vals['analytic_distribution'] = self.analytic_distribution
-        if analytic_account_id and not self.display_type:
-            analytic_account_id = str(analytic_account_id)
-            if 'analytic_distribution' in inv_line_vals:
-                inv_line_vals['analytic_distribution'][analytic_account_id] = inv_line_vals['analytic_distribution'].get(analytic_account_id, 0) + 100
-            else:
-                inv_line_vals['analytic_distribution'] = {analytic_account_id: 100}
 
     def _prepare_procurement_values(self, group_id=False):
         """ Prepare specific key for moves or other components that will be created from a stock rule
@@ -1443,3 +1495,6 @@ class SaleOrderLine(models.Model):
                 lambda line: line.virtual_id == self.linked_virtual_id
             ).ensure_one()
         ) or self.env['sale.order.line']
+
+    def _sellable_lines_domain(self):
+        return [('is_downpayment', '=', False)]

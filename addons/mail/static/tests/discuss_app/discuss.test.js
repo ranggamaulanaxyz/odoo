@@ -5,7 +5,6 @@ import {
     assertSteps,
     click,
     contains,
-    createFile,
     defineMailModels,
     editInput,
     insertText,
@@ -665,7 +664,7 @@ test("basic top bar rendering", async () => {
     await contains("button:disabled", { text: "Unstar all" });
     await contains(".o-mail-Discuss-threadName", { value: "Starred" });
     await click(".o-mail-DiscussSidebarChannel", { text: "General" });
-    await contains(".o-mail-Discuss-header button[title='Add Users']");
+    await contains(".o-mail-Discuss-header button[title='Invite People']");
     await contains(".o-mail-Discuss-threadName", { value: "General" });
 });
 
@@ -1314,7 +1313,7 @@ test("should auto-pin chat when receiving a new DM", async () => {
     await contains(".o-mail-DiscussSidebarChannel", { text: "Demo" });
 });
 
-test("'Add Users' button should be displayed in the topbar of channels", async () => {
+test("'Invite People' button should be displayed in the topbar of channels", async () => {
     const pyEnv = await startServer();
     const channelId = pyEnv["discuss.channel"].create({
         name: "general",
@@ -1322,10 +1321,10 @@ test("'Add Users' button should be displayed in the topbar of channels", async (
     });
     await start();
     await openDiscuss(channelId);
-    await contains("button[title='Add Users']");
+    await contains("button[title='Invite People']");
 });
 
-test("'Add Users' button should be displayed in the topbar of chats", async () => {
+test("'Invite People' button should be displayed in the topbar of chats", async () => {
     const pyEnv = await startServer();
     const partnerId = pyEnv["res.partner"].create({ name: "Marc Demo" });
     const channelId = pyEnv["discuss.channel"].create({
@@ -1337,10 +1336,10 @@ test("'Add Users' button should be displayed in the topbar of chats", async () =
     });
     await start();
     await openDiscuss(channelId);
-    await contains("button[title='Add Users']");
+    await contains("button[title='Invite People']");
 });
 
-test("'Add Users' button should be displayed in the topbar of groups", async () => {
+test("'Invite People' button should be displayed in the topbar of groups", async () => {
     const pyEnv = await startServer();
     const partnerId = pyEnv["res.partner"].create({ name: "Demo" });
     const channelId = pyEnv["discuss.channel"].create({
@@ -1352,14 +1351,14 @@ test("'Add Users' button should be displayed in the topbar of groups", async () 
     });
     await start();
     await openDiscuss(channelId);
-    await contains("button[title='Add Users']");
+    await contains("button[title='Invite People']");
 });
 
-test("'Add Users' button should not be displayed in the topbar of mailboxes", async () => {
+test("'Invite People' button should not be displayed in the topbar of mailboxes", async () => {
     await start();
     await openDiscuss("mail.box_starred");
     await contains("button", { text: "Unstar all" });
-    await contains("button[title='Add Users']", { count: 0 });
+    await contains("button[title='Invite People']", { count: 0 });
 });
 
 test("Thread avatar image is displayed in top bar of channels of type 'channel' limited to a group", async () => {
@@ -1594,11 +1593,7 @@ test("warning on send with shortcut when attempting to post message with still-u
     await start();
     await openDiscuss(channelId);
     await contains(".o-mail-Composer input[type=file]");
-    const file = await createFile({
-        content: "hello, world",
-        contentType: "text/plain",
-        name: "text.txt",
-    });
+    const file = new File(["hello, world"], "text.txt", { type: "text/plain" });
     await insertText(".o-mail-Composer-input", "Dummy Message");
     await editInput(document.body, ".o-mail-Composer input[type=file]", [file]);
     await contains(".o-mail-AttachmentCard");
@@ -1730,11 +1725,7 @@ test("composer state: attachments save and restore", async () => {
         ".o-mail-Composer:has(textarea[placeholder='Message #General…']) input[type=file]"
     );
     // Add attachment in a message for #general
-    const file = await createFile({
-        content: "hello, world",
-        contentType: "text/plain",
-        name: "text.txt",
-    });
+    const file = new File(["hello, world"], "text.txt", { type: "text/plain" });
     await editInput(
         document.body,
         ".o-mail-Composer:has(textarea[placeholder='Message #General…']) input[type=file]",
@@ -1744,23 +1735,11 @@ test("composer state: attachments save and restore", async () => {
     // Switch to #special
     await click("button", { text: "Special" });
     // Attach files in a message for #special
-    const files = await Promise.all([
-        createFile({
-            content: "hello2, world",
-            contentType: "text/plain",
-            name: "text2.txt",
-        }),
-        createFile({
-            content: "hello3, world",
-            contentType: "text/plain",
-            name: "text3.txt",
-        }),
-        createFile({
-            content: "hello4, world",
-            contentType: "text/plain",
-            name: "text4.txt",
-        }),
-    ]);
+    const files = [
+        new File(["hello2, world"], "text2.txt", { type: "text/plain" }),
+        new File(["hello3, world"], "text3.txt", { type: "text/plain" }),
+        new File(["hello4, world"], "text4.txt", { type: "text/plain" }),
+    ];
     await contains(
         ".o-mail-Composer:has(textarea[placeholder='Message #Special…']) input[type=file]"
     );
@@ -1887,7 +1866,7 @@ test("Correct breadcrumb when open discuss from chat window then see settings", 
     await click(".o_main_navbar i[aria-label='Messages']");
     await click(".o-mail-NotificationItem", { text: "General" });
     await click("[title='Open Actions Menu']");
-    await click("[title='Open in Discuss']");
+    await click(".o-dropdown-item", { text: "Open in Discuss" });
     await click("[title='Channel settings']", {
         parent: [".o-mail-DiscussSidebarChannel", { text: "General" }],
     });
@@ -1948,7 +1927,7 @@ test("Chats input should wait until the previous RPC is done before starting a n
     await openDiscuss();
     await click(".o-mail-DiscussSidebarCategory-add[title='Start a conversation']");
     await insertText(".o-discuss-ChannelSelector input", "m");
-    await contains(".o-mail-NavigableList-item", { text: "Loading" });
+    await contains(".o-mail-NavigableList-item", { text: "Loading…" });
     await insertText(".o-discuss-ChannelSelector input", "a");
     await insertText(".o-discuss-ChannelSelector input", "r");
     deferred1.resolve();

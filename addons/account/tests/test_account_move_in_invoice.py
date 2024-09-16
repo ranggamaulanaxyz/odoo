@@ -122,7 +122,7 @@ class TestAccountMoveInInvoiceOnchanges(AccountTestInvoicingCommon):
             'journal_id': cls.company_data['default_journal_purchase'].id,
             'date': fields.Date.from_string('2019-01-01'),
             'fiscal_position_id': False,
-            'payment_reference': '',
+            'payment_reference': False,
             'invoice_payment_term_id': cls.pay_terms_a.id,
             'amount_untaxed': 960.0,
             'amount_tax': 168.0,
@@ -1549,8 +1549,7 @@ class TestAccountMoveInInvoiceOnchanges(AccountTestInvoicingCommon):
             ],
         })
         move.action_post()
-        action_data = move.action_register_payment()
-        with Form(self.env[action_data['res_model']].with_context(action_data['context'])) as wiz_form:
+        with Form.from_action(self.env, move.action_register_payment()) as wiz_form:
             self.assertEqual(wiz_form.payment_date.strftime('%Y-%m-%d'), '2023-02-01')
             self.assertEqual(wiz_form.amount, 276)  # First installment of 30%
             self.assertTrue(wiz_form.group_payment)
@@ -1969,14 +1968,14 @@ class TestAccountMoveInInvoiceOnchanges(AccountTestInvoicingCommon):
 
         accrual_lines = self.env['account.move'].browse(wizard_res['domain'][0][2]).line_ids.sorted('date')
         self.assertRecordValues(accrual_lines, [
-            {'amount_currency': -480.0, 'debit': 0.0,   'credit': 240.0,    'account_id': self.product_line_vals_1['account_id'],   'reconciled': False},
-            {'amount_currency': 480.0,  'debit': 240.0, 'credit': 0.0,      'account_id': wizard.expense_accrual_account.id,        'reconciled': True},
-            {'amount_currency': -96.0,  'debit': 0.0,   'credit': 48.0,     'account_id': self.product_line_vals_2['account_id'],   'reconciled': False},
-            {'amount_currency': 96.0,   'debit': 48.0,  'credit': 0.0,      'account_id': wizard.expense_accrual_account.id,        'reconciled': True},
-            {'amount_currency': 480.0,  'debit': 240.0, 'credit': 0.0,      'account_id': self.product_line_vals_1['account_id'],   'reconciled': False},
-            {'amount_currency': -480.0, 'debit': 0.0,   'credit': 240.0,    'account_id': wizard.expense_accrual_account.id,        'reconciled': True},
-            {'amount_currency': 96.0,   'debit': 48.0,  'credit': 0.0,      'account_id': self.product_line_vals_2['account_id'],   'reconciled': False},
-            {'amount_currency': -96.0,  'debit': 0.0,   'credit': 48.0,     'account_id': wizard.expense_accrual_account.id,        'reconciled': True},
+            {'name': 'Cut-off BILL/2017/01/0001 60.00%', 'amount_currency': -480.0, 'debit': 0.0,   'credit': 240.0,    'account_id': self.product_line_vals_1['account_id'],   'reconciled': False},
+            {'name': 'Cut-off BILL/2017/01/0001 60.00%', 'amount_currency': 480.0,  'debit': 240.0, 'credit': 0.0,      'account_id': wizard.expense_accrual_account.id,        'reconciled': True},
+            {'name': 'Cut-off BILL/2017/01/0001 60.00%', 'amount_currency': -96.0,  'debit': 0.0,   'credit': 48.0,     'account_id': self.product_line_vals_2['account_id'],   'reconciled': False},
+            {'name': 'Cut-off BILL/2017/01/0001 60.00%', 'amount_currency': 96.0,   'debit': 48.0,  'credit': 0.0,      'account_id': wizard.expense_accrual_account.id,        'reconciled': True},
+            {'name': 'Cut-off BILL/2017/01/0001 60.00%', 'amount_currency': 480.0,  'debit': 240.0, 'credit': 0.0,      'account_id': self.product_line_vals_1['account_id'],   'reconciled': False},
+            {'name': 'Cut-off BILL/2017/01/0001 60.00%', 'amount_currency': -480.0, 'debit': 0.0,   'credit': 240.0,    'account_id': wizard.expense_accrual_account.id,        'reconciled': True},
+            {'name': 'Cut-off BILL/2017/01/0001 60.00%', 'amount_currency': 96.0,   'debit': 48.0,  'credit': 0.0,      'account_id': self.product_line_vals_2['account_id'],   'reconciled': False},
+            {'name': 'Cut-off BILL/2017/01/0001 60.00%', 'amount_currency': -96.0,  'debit': 0.0,   'credit': 48.0,     'account_id': wizard.expense_accrual_account.id,        'reconciled': True},
         ])
 
     def test_in_invoice_reverse_caba(self):

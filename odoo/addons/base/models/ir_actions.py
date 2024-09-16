@@ -309,8 +309,8 @@ class IrActionsActWindow(models.Model):
     res_model = fields.Char(string='Destination Model', required=True,
                             help="Model name of the object to open in the view window")
     target = fields.Selection([('current', 'Current Window'), ('new', 'New Window'), ('inline', 'Inline Edit'), ('fullscreen', 'Full Screen'), ('main', 'Main action of Current Window')], default="current", string='Target Window')
-    view_mode = fields.Char(required=True, default='tree,form',
-                            help="Comma-separated list of allowed view modes, such as 'form', 'tree', 'calendar', etc. (Default: tree,form)")
+    view_mode = fields.Char(required=True, default='list,form',
+                            help="Comma-separated list of allowed view modes, such as 'form', 'list', 'calendar', etc. (Default: list,form)")
     mobile_view_mode = fields.Char(default="kanban", help="First view mode in mobile and small screen environments (default='kanban'). If it can't be found among available view modes, the same mode as for wider screens is used)")
     usage = fields.Char(string='Action Usage',
                         help="Used to filter menu and home actions from the user form.")
@@ -396,7 +396,7 @@ class IrActionsActWindow(models.Model):
 
 
 VIEW_TYPES = [
-    ('tree', 'Tree'),
+    ('list', 'List'),
     ('form', 'Form'),
     ('graph', 'Graph'),
     ('pivot', 'Pivot'),
@@ -815,7 +815,7 @@ class IrActionsServer(models.Model):
 
     def unlink_action(self):
         """ Remove the contextual actions created for the server actions. """
-        self.check_access_rights('write', raise_exception=True)
+        self.check_access('write')
         self.filtered('binding_model_id').write({'binding_model_id': False})
         return True
 
@@ -884,16 +884,14 @@ class IrActionsServer(models.Model):
 
         If applicable, link active_id.<self.link_field_id> to the new record.
         """
-        res = {'name': self.value}
-
-        res = self.env[self.crud_model_id.model].create(res)
+        res_id, _res_name = self.env[self.crud_model_id.model].name_create(self.value)
 
         if self.link_field_id:
             record = self.env[self.model_id.model].browse(self._context.get('active_id'))
             if self.link_field_id.ttype in ['one2many', 'many2many']:
-                record.write({self.link_field_id.name: [Command.link(res.id)]})
+                record.write({self.link_field_id.name: [Command.link(res_id)]})
             else:
-                record.write({self.link_field_id.name: res.id})
+                record.write({self.link_field_id.name: res_id})
 
     def _get_eval_context(self, action=None):
         """ Prepare the context used when evaluating python code, like the
@@ -965,7 +963,7 @@ class IrActionsServer(models.Model):
             else:
                 model_name = action.model_id.model
                 try:
-                    self.env[model_name].check_access_rights("write")
+                    self.env[model_name].check_access("write")
                 except AccessError:
                     _logger.warning("Forbidden server action %r executed while the user %s does not have access to %s.",
                         action.name, self.env.user.login, model_name,
@@ -979,7 +977,7 @@ class IrActionsServer(models.Model):
                 # check access rules on real records only; base automations of
                 # type 'onchange' can run server actions on new records
                 try:
-                    records.check_access_rule('write')
+                    records.check_access('write')
                 except AccessError:
                     _logger.warning("Forbidden server action %r executed while the user %s does not have access to %s.",
                         action.name, self.env.user.login, records,

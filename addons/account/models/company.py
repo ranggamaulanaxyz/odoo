@@ -140,6 +140,20 @@ class ResCompany(models.Model):
     account_use_credit_limit = fields.Boolean(
         string='Sales Credit Limit', help='Enable the use of credit limit on partners.')
 
+    batch_payment_sequence_id = fields.Many2one(
+        comodel_name='ir.sequence',
+        readonly=True,
+        copy=False,
+        default=lambda self: self.env['ir.sequence'].sudo().create({
+            'name': _("Batch Payment Number Sequence"),
+            'implementation': 'no_gap',
+            'padding': 5,
+            'use_date_range': True,
+            'company_id': self.id,
+            'prefix': 'BATCH/%(year)s/',
+        }),
+    )
+
     #Fields of the setup step for opening move
     account_opening_move_id = fields.Many2one(string='Opening Journal Entry', comodel_name='account.move', help="The journal entry containing the initial balance of all this company's accounts.")
     account_opening_journal_id = fields.Many2one(string='Opening Journal', comodel_name='account.journal', related='account_opening_move_id.journal_id', help="Journal where the opening entry of this company's accounting has been posted.", readonly=False)
@@ -239,6 +253,14 @@ class ResCompany(models.Model):
         required=True,
         help="Default on whether the sales price used on the product and invoices with this Company includes its taxes."
     )
+
+    def get_next_batch_payment_communication(self):
+        '''
+        When in need of a batch payment communication reference (several invoices paid at the same time)
+        use batch_payment_sequence_id to get it (eventually create it first): e.g BATCH/2024/00001
+        '''
+        self.ensure_one()
+        return self.sudo().batch_payment_sequence_id.next_by_id()
 
     def _get_company_root_delegated_field_names(self):
         return super()._get_company_root_delegated_field_names() + [
@@ -397,9 +419,9 @@ class ResCompany(models.Model):
         for account in accounts:
             account.write({'code': self.get_new_account_code(account.code, old_code, new_code)})
 
-    def _get_fiscalyear_lock_statement_lines_redirect_action(self, unreconciled_statement_lines):
-        """ Get the action redirecting to the statement lines that are not already reconciled when setting a fiscal
-        year lock date.
+    def _get_unreconciled_statement_lines_redirect_action(self, unreconciled_statement_lines):
+        """ Get the action redirecting to the statement lines that are not already reconciled.
+        It can i.e. be used when setting a fiscal year lock date or hashing all entries until a certain date.
 
         :param unreconciled_statement_lines: The statement lines.
         :return: A dictionary representing a window action.
@@ -422,6 +444,14 @@ class ResCompany(models.Model):
                 'domain': [('id', 'in', unreconciled_statement_lines.ids)],
             })
         return action
+
+    def _get_unreconciled_statement_lines_domain(self, last_date):
+        return [
+            ('company_id', 'child_of', self.ids),
+            ('is_reconciled', '=', False),
+            ('date', '<=', last_date),
+            ('move_id.state', 'in', ('draft', 'posted')),
+        ]
 
     def _validate_locks(self, values):
         """Check that the lock date changes are valid.
@@ -457,7 +487,7 @@ class ResCompany(models.Model):
             if draft_entries:
                 error_msg = _('There are still draft entries in the period you want to hard lock. You should either post or delete them.')
                 action_error = {
-                    'view_mode': 'tree',
+                    'view_mode': 'list',
                     'name': _('Draft Entries'),
                     'res_model': 'account.move',
                     'type': 'ir.actions.act_window',
@@ -469,63 +499,14 @@ class ResCompany(models.Model):
 
         # Check for unreconciled bank statement lines
         if fiscal_lock_date:
-            unreconciled_statement_lines = self.env['account.bank.statement.line'].search([
-                ('company_id', 'child_of', self.ids),
-                ('is_reconciled', '=', False),
-                ('date', '<=', fiscal_lock_date),
-                ('move_id.state', 'in', ('draft', 'posted')),
-            ])
+            unreconciled_statement_lines = self.env['account.bank.statement.line'].search(
+                self._get_unreconciled_statement_lines_domain(fiscal_lock_date)
+            )
             if unreconciled_statement_lines:
                 error_msg = _("There are still unreconciled bank statement lines in the period you want to lock."
                             "You should either reconcile or delete them.")
-                action_error = self._get_fiscalyear_lock_statement_lines_redirect_action(unreconciled_statement_lines)
+                action_error = self._get_unreconciled_statement_lines_redirect_action(unreconciled_statement_lines)
                 raise RedirectWarning(error_msg, action_error, _('Show Unreconciled Bank Statement Line'))
-
-        # Check for unhashed journal entries
-        if fiscal_lock_date or sale_lock_date or purchase_lock_date:
-            # Check if there are still unhashed journal entries
-            # Only check journals that have at least one hashed entry.
-            journals_to_check = self.env['account.journal']
-            for journal in self.env['account.journal'].search([
-                ('restrict_mode_hash_table', '=', True),
-            ]):
-                if self.env['account.move'].search_count([
-                    ('inalterable_hash', '!=', False),
-                    ('journal_id', '=', journal.id),
-                ], limit=1):
-                    journals_to_check |= journal
-            lock_date_domains = []
-            if fiscal_lock_date:
-                lock_date_domains.append([('date', '<=', fiscal_lock_date)])
-            for lock_date, journal_type in [(sale_lock_date, 'sale'), (purchase_lock_date, 'purchase')]:
-                if lock_date:
-                    lock_date_domains.append([
-                        ('date', '<=', lock_date),
-                        ('journal_id.type', '=', journal_type),
-                    ])
-            chains_to_hash = self.env['account.move'].search([
-                ('restrict_mode_hash_table', '=', True),
-                ('inalterable_hash', '=', False),
-                ('journal_id', 'in', journals_to_check.ids),
-                *expression.OR(lock_date_domains),
-            ])._get_chains_to_hash(force_hash=True, raise_if_no_document=False)
-
-            move_ids = [move.id for chain in chains_to_hash for move in chain['moves']]
-            if move_ids:
-                msg = _("Some journal entries have not been hashed yet. You should hash them before setting the lock dates.")
-                action = {
-                    'type': 'ir.actions.act_window',
-                    'name': _('Journal Entries to Hash'),
-                    'res_model': 'account.move',
-                    'domain': [('id', 'in', move_ids)],
-                    'views': [(False, 'tree'), (False, 'form')],
-                }
-                if len(move_ids) == 1:
-                    action.update({
-                        'res_id': move_ids[0],
-                        'views': [(False, 'form')],
-                    })
-                raise RedirectWarning(msg, action, _('Show Journal Entries to Hash'))
 
     def _get_user_lock_date(self, soft_lock_date_field, ignore_exceptions=False):
         """Get the lock date called `soft_lock_date_field` for this company depending on the user.
@@ -872,7 +853,7 @@ class ResCompany(models.Model):
             self.env.reset()     # clear the set of environments
             env = self.env()     # get an environment that refers to the new registry
             for company in self.filtered(lambda c: c.country_id and not c.chart_template):
-                template_code = self.env['account.chart.template']._guess_chart_template(company.country_id)
+                template_code = company.parent_id.chart_template or self.env['account.chart.template']._guess_chart_template(company.country_id)
                 if template_code != 'generic_coa':
                     @self.env.cr.precommit.add
                     def try_loading(template_code=template_code, company=company):
@@ -895,7 +876,7 @@ class ResCompany(models.Model):
         return self.env.ref('account.action_report_account_hash_integrity').report_action(self.id)
 
     def _check_hash_integrity(self):
-        """Checks that all posted moves have still the same data as when they were posted
+        """Checks that all hashed moves have still the same data as when they were hashed
         and raises an error with the result.
         """
         if not self.env.user.has_group('account.group_account_user'):
@@ -905,15 +886,7 @@ class ResCompany(models.Model):
         results = []
 
         for journal in journals:
-            if not journal.restrict_mode_hash_table:
-                results.append({
-                    'journal_name': journal.name,
-                    'restricted_by_hash_table': 'X',
-                    'status': 'not_restricted',
-                    'msg_cover': _('This journal is not restricted'),
-                })
-                continue
-
+            restricted_by_hash_table_flag = 'V' if journal.restrict_mode_hash_table else 'X'
             # We need the `sudo()` to ensure that all the moves are searched, no matter the user's access rights.
             # This is required in order to generate consistent hashes.
             # It is not an issue, since the data is only used to compute a hash and not to return the actual values.
@@ -937,7 +910,7 @@ class ResCompany(models.Model):
                 if not moves and not last_move:
                     results.append({
                         'journal_name': journal.name,
-                        'restricted_by_hash_table': 'V',
+                        'restricted_by_hash_table': restricted_by_hash_table_flag,
                         'status': 'no_data',
                         'msg_cover': _('There is no journal entry flagged for accounting data inalterability yet.'),
                     })
@@ -967,7 +940,7 @@ class ResCompany(models.Model):
             for prefix, prefix_result in prefix2result.items():
                 if corrupted_move := prefix_result['corrupted_move']:
                     results.append({
-                        'restricted_by_hash_table': 'V',
+                        'restricted_by_hash_table': restricted_by_hash_table_flag,
                         'journal_name': f"{journal.name} ({prefix}...)",
                         'status': 'corrupted',
                         'msg_cover': _(
@@ -978,7 +951,7 @@ class ResCompany(models.Model):
                     })
                 else:
                     results.append({
-                        'restricted_by_hash_table': 'V',
+                        'restricted_by_hash_table': restricted_by_hash_table_flag,
                         'journal_name': f"{journal.name} ({prefix}...)",
                         'status': 'verified',
                         'msg_cover': _("Entries are correctly hashed"),

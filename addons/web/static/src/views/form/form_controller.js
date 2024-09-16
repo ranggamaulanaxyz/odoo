@@ -64,7 +64,6 @@ export async function loadSubViews(fieldNodes, fields, context, resModel, viewSe
 
         fieldInfo.views = fieldInfo.views || {};
         let viewType = fieldInfo.viewMode || "list,kanban";
-        viewType = viewType.replace("tree", "list");
         if (viewType.includes(",")) {
             viewType = isSmall ? "kanban" : "list";
         }
@@ -303,11 +302,13 @@ export class FormController extends Component {
             );
         }
 
-        useExternalListener(document, "visibilitychange", () => {
-            if (document.visibilityState === "hidden") {
-                this.model.root.save();
-            }
-        });
+        if (!this.env.inDialog) {
+            useExternalListener(document, "visibilitychange", () => {
+                if (document.visibilityState === "hidden") {
+                    this.model.root.save();
+                }
+            });
+        }
     }
 
     get cogMenuProps() {
@@ -432,7 +433,7 @@ export class FormController extends Component {
 
     async beforeLeave() {
         if (this.model.root.dirty) {
-            return this.model.root.save({
+            return this.save({
                 reload: false,
                 onError: this.onSaveError.bind(this),
             });

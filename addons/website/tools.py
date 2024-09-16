@@ -8,10 +8,11 @@ from unittest.mock import Mock, MagicMock, patch
 from werkzeug.exceptions import NotFound
 from werkzeug.test import EnvironBuilder
 
-import odoo
-from odoo.tests.common import HttpCase, HOST
+import odoo.http
 from odoo.tools.misc import hmac, DotDict, frozendict
 from odoo.tools import config
+
+HOST = '127.0.0.1'
 
 
 @contextlib.contextmanager
@@ -22,7 +23,8 @@ def MockRequest(
         # website_sale
         sale_order_id=None, website_sale_current_pl=None,
 ):
-
+    # TODO move MockRequest to a package in addons/web/tests
+    from odoo.tests.common import HttpCase  # noqa: PLC0415
     lang_code = context.get('lang', env.context.get('lang', 'en_US'))
     env = env(context=dict(context, lang=lang_code))
     request = Mock(
@@ -62,6 +64,7 @@ def MockRequest(
         cr=env.cr,
         uid=env.uid,
         context=env.context,
+        cookies=cookies,
         lang=env['res.lang']._get_data(code=lang_code),
         website=website,
         render=lambda *a, **kw: '<MockResponse>',

@@ -4,6 +4,7 @@ import { assignDefined, compareDatetime, nearestGreaterThanOrEqual } from "@mail
 import { rpc } from "@web/core/network/rpc";
 
 import { _t } from "@web/core/l10n/translation";
+import { formatList } from "@web/core/l10n/utils";
 import { user } from "@web/core/user";
 import { Deferred } from "@web/core/utils/concurrency";
 import { isMobileOS } from "@web/core/browser/feature_detection";
@@ -40,8 +41,8 @@ export class Thread extends Record {
     static insert(data) {
         return super.insert(...arguments);
     }
-    static new(data) {
-        const thread = super.new(data);
+    static new() {
+        const thread = super.new(...arguments);
         Record.onChange(thread, ["state"], () => {
             if (thread.state === "open" && !this.store.env.services.ui.isSmall) {
                 const cw = this.store.ChatWindow?.insert({ thread });
@@ -353,6 +354,10 @@ export class Thread extends Record {
         return this.selfMember?.message_unread_counter > 0 || this.needactionMessages.length > 0;
     }
 
+    get isMuted() {
+        return this.mute_until_dt || this.store.settings.mute_until_dt;
+    }
+
     get typesAllowingCalls() {
         return ["chat", "channel", "group"];
     }
@@ -377,11 +382,7 @@ export class Thread extends Record {
             return this.custom_channel_name || this.correspondent.persona.nameOrDisplayName;
         }
         if (this.channel_type === "group" && !this.name) {
-            const listFormatter = new Intl.ListFormat(user.lang?.replace("_", "-"), {
-                type: "conjunction",
-                style: "long",
-            });
-            return listFormatter.format(
+            return formatList(
                 this.channelMembers.map((channelMember) => channelMember.persona.name)
             );
         }

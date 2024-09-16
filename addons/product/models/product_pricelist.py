@@ -71,6 +71,14 @@ class Pricelist(models.Model):
 
         return res
 
+    def copy_data(self, default=None):
+        default = dict(default or {})
+        vals_list = super().copy_data(default=default)
+        if 'name' not in default:
+            for pricelist, vals in zip(self, vals_list):
+                vals['name'] = _("%s (copy)", pricelist.name)
+        return vals_list
+
     def _get_products_price(self, products, *args, **kwargs):
         """Compute the pricelist prices for the specified products, quantity & uom.
 
@@ -363,3 +371,11 @@ class Pricelist(models.Model):
                 pricelists='\n'.join(linked_items.base_pricelist_id.mapped('display_name')),
                 other_pricelists='\n'.join(linked_items.pricelist_id.mapped('display_name')),
             ))
+
+    def action_open_pricelist_report(self):
+        self.ensure_one()
+        return {
+            'name': _("Pricelist Report Preview"),
+            'type': 'ir.actions.client',
+            'tag': 'generate_pricelist_report',
+        }

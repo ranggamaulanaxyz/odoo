@@ -3,6 +3,7 @@
 import base64
 import binascii
 import io
+from typing import Tuple, Union
 
 from PIL import Image, ImageOps
 # We can preload Ico too because it is considered safe
@@ -16,11 +17,11 @@ from random import randrange
 
 from odoo.exceptions import UserError
 from odoo.tools.misc import DotDict
-from odoo.tools.translate import _
+from odoo.tools.translate import LazyTranslate
 
 
 __all__ = ["image_process"]
-
+_lt = LazyTranslate('base')
 
 # Preload PIL with the minimal subset of image formats we need
 Image.preinit()
@@ -56,16 +57,15 @@ EXIF_TAG_ORIENTATION_TO_TRANSPOSE_METHODS = { # Initial side on 1st row/col:
 IMAGE_MAX_RESOLUTION = 50e6
 
 
-class ImageProcess():
+class ImageProcess:
 
     def __init__(self, source, verify_resolution=True):
-        """Initialize the `source` image for processing.
+        """Initialize the ``source`` image for processing.
 
-        :param source: the original image binary
+        :param bytes source: the original image binary
 
             No processing will be done if the `source` is falsy or if
             the image is SVG.
-
         :param verify_resolution: if True, make sure the original image size is not
             excessive before starting to process it. The max allowed resolution is
             defined by `IMAGE_MAX_RESOLUTION`.
@@ -85,7 +85,7 @@ class ImageProcess():
             try:
                 self.image = Image.open(io.BytesIO(source))
             except (OSError, binascii.Error):
-                raise UserError(_("This file could not be decoded as an image file."))
+                raise UserError(_lt("This file could not be decoded as an image file."))
 
             # Original format has to be saved before fixing the orientation or
             # doing any other operations because the information will be lost on
@@ -96,18 +96,15 @@ class ImageProcess():
 
             w, h = self.image.size
             if verify_resolution and w * h > IMAGE_MAX_RESOLUTION:
-                raise UserError(_("Image size excessive, uploaded images must be smaller than %s million pixels.", str(IMAGE_MAX_RESOLUTION / 1e6)))
+                raise UserError(_lt("Image size excessive, uploaded images must be smaller than %s million pixels.", str(IMAGE_MAX_RESOLUTION / 1e6)))
 
     def image_quality(self, quality=0, output_format=''):
         """Return the image resulting of all the image processing
         operations that have been applied previously.
 
-        Return False if the initialized `image` was falsy, and return
-        the initialized `image` without change if it was SVG.
-
-        Also return the initialized `image` if no operations have been applied
-        and the `output_format` is the same as the original format and the
-        quality is not specified.
+        The source is returned as-is if it's an SVG, or if no operations have
+        been applied, the `output_format` is the same as the original format,
+        and the quality is not specified.
 
         :param int quality: quality setting to apply. Default to 0.
 
@@ -116,11 +113,12 @@ class ImageProcess():
               was changed, otherwise the original image is returned.
             - for PNG: set falsy to prevent conversion to a WEB palette.
             - for other formats: no effect.
-        :param str output_format: the output format. Can be PNG, JPEG, GIF, or ICO.
-            Default to the format of the original image. BMP is converted to
-            PNG, other formats than those mentioned above are converted to JPEG.
-        :return: image
-        :rtype: bytes or False
+
+        :param str output_format: Can be PNG, JPEG, GIF, or ICO.
+            Default to the format of the original image if a valid output format,
+            otherwise BMP is converted to PNG and the rest are converted to JPEG.
+        :return: the final image, or ``False`` if the original ``source`` was falsy.
+        :rtype: bytes | False
         """
         if not self.image:
             return self.source
@@ -240,6 +238,9 @@ class ImageProcess():
                 new_w, new_h = w, (new_h * w) // new_w
             if new_h > h:
                 new_w, new_h = (new_w * h) // new_h, h
+
+            # Dimensions should be at least 1.
+            new_w, new_h = max(new_w, 1), max(new_h, 1)
 
             # Correctly place the center of the crop.
             x_offset = int((w - new_w) * center_x)
@@ -421,30 +422,28 @@ def binary_to_image(source):
     try:
         return Image.open(io.BytesIO(source))
     except (OSError, binascii.Error):
-        raise UserError(_("This file could not be decoded as an image file."))
+        raise UserError(_lt("This file could not be decoded as an image file."))
 
-def base64_to_image(base64_source):
+def base64_to_image(base64_source: Union[str, bytes]) -> Image:
     """Return a PIL image from the given `base64_source`.
 
     :param base64_source: the image base64 encoded
-    :type base64_source: string or bytes
-    :rtype: ~PIL.Image.Image
     :raise: UserError if the base64 is incorrect or the image can't be identified by PIL
     """
     try:
         return Image.open(io.BytesIO(base64.b64decode(base64_source)))
     except (OSError, binascii.Error):
-        raise UserError(_("This file could not be decoded as an image file."))
+        raise UserError(_lt("This file could not be decoded as an image file."))
 
 
-def image_apply_opt(image, output_format, **params):
-    """Return the given PIL `image` using `params`.
+def image_apply_opt(image: Image, output_format: str, **params) -> bytes:
+    """Return the serialization of the provided `image` to `output_format`
+    using `params`.
 
-    :type image: ~PIL.Image.Image
-    :param str output_format: :meth:`~PIL.Image.Image.save`'s ``format`` parameter
+    :param image: the image to encode
+    :param output_format: :meth:`~PIL.Image.Image.save`'s ``format`` parameter
     :param dict params: params to expand when calling :meth:`~PIL.Image.Image.save`
     :return: the image formatted
-    :rtype: bytes
     """
     if output_format == 'JPEG' and image.mode not in ['1', 'L', 'RGB']:
         image = image.convert("RGB")
@@ -476,7 +475,7 @@ def get_webp_size(source):
     :return: (width, height) tuple, or None if not supported
     """
     if not (source[0:4] == b'RIFF' and source[8:15] == b'WEBPVP8'):
-        raise UserError(_("This file is not a webp file."))
+        raise UserError(_lt("This file is not a webp file."))
 
     vp8_type = source[15]
     if vp8_type == 0x20:  # 0x20 = ' '
@@ -530,23 +529,22 @@ def is_image_size_above(base64_source_1, base64_source_2):
     return image_source.width > image_target.width or image_source.height > image_target.height
 
 
-def image_guess_size_from_field_name(field_name):
+def image_guess_size_from_field_name(field_name: str) -> Tuple[int, int]:
     """Attempt to guess the image size based on `field_name`.
 
     If it can't be guessed or if it is a custom field: return (0, 0) instead.
 
-    :param str field_name: the name of a field
+    :param field_name: the name of a field
     :return: the guessed size
-    :rtype: tuple (width, height)
     """
     if field_name == 'image':
         return (1024, 1024)
     if field_name.startswith('x_'):
         return (0, 0)
     try:
-        suffix = int(field_name.split('_')[-1])
+        suffix = int(field_name.rsplit('_', 1)[-1])
     except ValueError:
-        return (0, 0)
+        return 0, 0
 
     if suffix < 16:
         # If the suffix is less than 16, it's probably not the size
@@ -555,7 +553,7 @@ def image_guess_size_from_field_name(field_name):
     return (suffix, suffix)
 
 
-def image_data_uri(base64_source):
+def image_data_uri(base64_source: bytes) -> str:
     """This returns data URL scheme according RFC 2397
     (https://tools.ietf.org/html/rfc2397) for all kind of supported images
     (PNG, GIF, JPG and SVG), defaulting on PNG type if not mimetype detected.

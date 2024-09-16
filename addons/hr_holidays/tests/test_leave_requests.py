@@ -7,11 +7,9 @@ from freezegun import freeze_time
 from pytz import timezone
 
 from odoo import fields, Command
-from odoo.exceptions import ValidationError
+from odoo.exceptions import UserError, ValidationError
 from odoo.tools import date_utils, mute_logger
 from odoo.tests import Form, tagged
-
-from odoo.exceptions import UserError
 
 from odoo.addons.hr_holidays.tests.common import TestHrHolidaysCommon
 
@@ -234,6 +232,18 @@ class TestLeaveRequests(TestHrHolidaysCommon):
         allocation_form.name = 'New Allocation Request'
         allocation_form.save()
 
+    def test_allocation_constrain_dates_check(self):
+        with self.assertRaises(UserError):
+            self.env['hr.leave.allocation'].create({
+                'name': 'Test allocation',
+                'holiday_status_id': self.holidays_type_2.id,
+                'number_of_days': 1,
+                'employee_id': self.employee_emp_id,
+                'state': 'confirm',
+                'date_from': time.strftime('%Y-%m-10'),
+                'date_to': time.strftime('%Y-%m-01'),
+            })
+
     @mute_logger('odoo.models.unlink', 'odoo.addons.mail.models.mail_mail')
     def test_employee_is_absent(self):
         """ Only the concerned employee should be considered absent """
@@ -265,8 +275,8 @@ class TestLeaveRequests(TestHrHolidaysCommon):
             'request_unit_hours': True,
             'request_date_from': date(2019, 5, 6),
             'request_date_to': date(2019, 5, 6),
-            'request_hour_from': '8',  # 8:00 AM in the employee's timezone
-            'request_hour_to': '17',  # 5:00 PM in the employee's timezone
+            'request_hour_from': 8,  # 8:00 AM in the employee's timezone
+            'request_hour_to': 17,  # 5:00 PM in the employee's timezone
         })
         self.assertEqual(leave.date_from, datetime(2019, 5, 5, 20, 0, 0), "It should have been localized before saving in UTC")
         self.assertEqual(leave.date_to, datetime(2019, 5, 6, 5, 0, 0), "It should have been localized before saving in UTC")
@@ -283,8 +293,8 @@ class TestLeaveRequests(TestHrHolidaysCommon):
             'company_id': company.id,
             'request_date_from': date(2019, 5, 6),
             'request_date_to': date(2019, 5, 6),
-            'request_hour_from': '8',  # 8:00 AM in the company's timezone
-            'request_hour_to': '17',  # 5:00 PM in the company's timezone
+            'request_hour_from': 8,  # 8:00 AM in the company's timezone
+            'request_hour_to': 17,  # 5:00 PM in the company's timezone
         })
         self.assertEqual(leave.date_from, datetime(2019, 5, 6, 6, 0, 0), "It should have been localized in the Employee timezone")
         self.assertEqual(leave.date_to, datetime(2019, 5, 6, 15, 0, 0), "It should have been localized in the Employee timezone")
@@ -559,7 +569,7 @@ class TestLeaveRequests(TestHrHolidaysCommon):
 
     def test_leave_with_public_holiday_other_company(self):
         other_company = self.env['res.company'].create({
-            'name': 'Test Company',
+            'name': 'Test Company 2',
         })
         # Create a public holiday for the second company
         p_leave = self.env['resource.calendar.leaves'].create({
@@ -905,7 +915,6 @@ class TestLeaveRequests(TestHrHolidaysCommon):
                 ml=10, lt=5, rl=5, vrl=5, vlt=5,
             )
 
-
     def test_cancel_leave(self):
         with freeze_time('2020-09-15'):
             self.env['hr.leave.allocation'].create({
@@ -1070,12 +1079,12 @@ class TestLeaveRequests(TestHrHolidaysCommon):
             'request_unit_hours': True,
             'request_date_from': '2019-12-26',
             'request_date_to': '2019-12-26',
-            'request_hour_from': '8',
-            'request_hour_to': '12',
+            'request_hour_from': 8,
+            'request_hour_to': 12,
         })
 
         self.assertEqual(sick_leave.duration_display, '3 days')
-        self.assertEqual(comp_leave.duration_display, '4 hours')
+        self.assertEqual(comp_leave.duration_display, '4:00 hours')
 
         calendar.global_leave_ids = [(0, 0, {
             'name': 'Winter Holidays',
@@ -1086,7 +1095,7 @@ class TestLeaveRequests(TestHrHolidaysCommon):
 
         msg = "hr_holidays: duration_display should update after adding an overlapping holiday"
         self.assertEqual(sick_leave.duration_display, '2 days', msg)
-        self.assertEqual(comp_leave.duration_display, '0 hours', msg)
+        self.assertEqual(comp_leave.duration_display, '0:00 hours', msg)
 
     def test_duration_display_public_leave_include(self):
         """

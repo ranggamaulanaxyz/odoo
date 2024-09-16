@@ -99,7 +99,6 @@ export function pointsAwardedAre(points_str) {
         {
             content: "loyalty points awarded " + points_str,
             trigger: '.loyalty-points-won:contains("' + points_str + '")',
-            run: function () {}, // it's a check
         },
     ];
 }
@@ -152,6 +151,16 @@ export function clickPhysicalGiftCard(code = "Sell physical gift card?") {
         {
             trigger: `ul.info-list .text-wrap:contains("${code}")`,
             run: "click",
+        },
+    ];
+}
+
+export function checkPartnerPoints(name, points) {
+    return [
+        ...ProductScreen.clickPartnerButton(),
+        {
+            content: `Check '${name}' has ${points} Loyalty Points`,
+            trigger: `.partner-list .partner-line:contains(${name}) .partner-line-balance:contains(${points} Loyalty Point(s))`,
         },
     ];
 }

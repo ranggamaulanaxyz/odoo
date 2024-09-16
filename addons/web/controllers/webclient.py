@@ -15,18 +15,11 @@ import odoo.modules.registry
 from odoo import http
 from odoo.modules import get_manifest
 from odoo.http import request
-from odoo.tools import lazy
-from odoo.tools.misc import file_open, file_path
+from odoo.tools.misc import file_path
 from .utils import _local_web_translations
 
 
 _logger = logging.getLogger(__name__)
-
-
-@lazy
-def CONTENT_MAXAGE():
-    warnings.warn("CONTENT_MAXAGE is a deprecated alias to odoo.http.STATIC_CACHE_LONG", DeprecationWarning)
-    return http.STATIC_CACHE_LONG
 
 
 class WebClient(http.Controller):
@@ -79,16 +72,14 @@ class WebClient(http.Controller):
 
         translations_per_module, lang_params = request.env["ir.http"].get_translations_for_webclient(mods, lang)
 
-        body = json.dumps({
+        body = {
             'lang': lang,
             'lang_parameters': lang_params,
             'modules': translations_per_module,
             'multi_lang': len(request.env['res.lang'].sudo().get_installed()) > 1,
-        })
-        response = request.make_response(body, [
-            # this method must specify a content-type application/json instead of using the default text/html set because
-            # the type of the route is set to HTTP, but the rpc is made with a get and expects JSON
-            ('Content-Type', 'application/json'),
+        }
+        # The type of the route is set to HTTP, but the rpc is made with a get and expects JSON
+        response = request.make_json_response(body, [
             ('Cache-Control', f'public, max-age={http.STATIC_CACHE_LONG}'),
         ])
         return response

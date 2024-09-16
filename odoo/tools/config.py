@@ -75,7 +75,7 @@ class configmanager(object):
         self.options = {
             'admin_passwd': 'admin',
             'csv_internal_sep': ',',
-            'publisher_warranty_url': 'http://services.openerp.com/publisher-warranty/',
+            'publisher_warranty_url': 'http://services.odoo.com/publisher-warranty/',
             'reportgz': False,
             'root_path': None,
             'websocket_keep_alive_timeout': 3600,
@@ -87,7 +87,6 @@ class configmanager(object):
         self.blacklist_for_save = set([
             'publisher_warranty_url', 'load_language', 'root_path',
             'init', 'save', 'config', 'update', 'stop_after_init', 'dev_mode', 'shell_interface',
-            'longpolling_port',
         ])
 
         # dictionary mapping option destination (keys in self.options) to MyOptions.
@@ -137,8 +136,6 @@ class configmanager(object):
                               "Keep empty to listen on all interfaces (0.0.0.0)")
         group.add_option("-p", "--http-port", dest="http_port", my_default=8069,
                          help="Listen port for the main HTTP service", type="int", metavar="PORT")
-        group.add_option("--longpolling-port", dest="longpolling_port", my_default=0,
-                         help="Deprecated alias to the gevent-port option", type="int", metavar="PORT")
         group.add_option("--gevent-port", dest="gevent_port", my_default=8072,
                          help="Listen port for the gevent worker", type="int", metavar="PORT")
         group.add_option("--no-http", dest="http_enable", action="store_false", my_default=True,
@@ -458,7 +455,7 @@ class configmanager(object):
             self.options['server_wide_modules'] = 'base,web'
 
         # if defined do not take the configfile value even if the defined value is None
-        keys = ['gevent_port', 'http_interface', 'http_port', 'longpolling_port', 'http_enable', 'x_sendfile',
+        keys = ['gevent_port', 'http_interface', 'http_port', 'http_enable', 'x_sendfile',
                 'db_name', 'db_user', 'db_password', 'db_host', 'db_replica_host', 'db_sslmode',
                 'db_port', 'db_replica_port', 'db_template', 'logfile', 'pidfile', 'smtp_port',
                 'email_from', 'smtp_server', 'smtp_user', 'smtp_password', 'from_filter',
@@ -568,13 +565,6 @@ class configmanager(object):
         return opt
 
     def _warn_deprecated_options(self):
-        if self.options.get('longpolling_port', 0):
-            warnings.warn(
-                "The longpolling-port is a deprecated alias to "
-                "the gevent-port option, please use the latter.",
-                DeprecationWarning)
-            self.options['gevent_port'] = self.options.pop('longpolling_port')
-
         for old_option_name, new_option_name in [
             ('geoip_database', 'geoip_city_db'),
             ('osv_memory_age_limit', 'transient_age_limit')
@@ -780,8 +770,7 @@ class configmanager(object):
         return os.path.join(self['data_dir'], 'filestore', dbname)
 
     def set_admin_password(self, new_password):
-        hash_password = crypt_context.hash if hasattr(crypt_context, 'hash') else crypt_context.encrypt
-        self.options['admin_passwd'] = hash_password(new_password)
+        self.options['admin_passwd'] = crypt_context.hash(new_password)
 
     def verify_admin_password(self, password):
         """Verifies the super-admin password, possibly updating the stored hash if needed"""

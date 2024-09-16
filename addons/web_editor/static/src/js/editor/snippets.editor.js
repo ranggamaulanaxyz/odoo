@@ -3,8 +3,7 @@
 import { clamp } from "@web/core/utils/numbers";
 import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 import { useService, useBus } from "@web/core/utils/hooks";
-import dom from "@web/legacy/js/core/dom";
-import Widget from "@web_editor/js/core/widget";
+import publicWidget from "@web/legacy/js/public/public_widget";
 import { useDragAndDrop } from "@web_editor/js/editor/drag_and_drop";
 import options from "@web_editor/js/editor/snippets.options";
 import weUtils from "@web_editor/js/common/utils";
@@ -35,6 +34,7 @@ import { RPCError } from "@web/core/network/rpc";
 import { ColumnLayoutMixin } from "@web_editor/js/common/column_layout_mixin";
 import { Tooltip as OdooTooltip } from "@web/core/tooltip/tooltip";
 import { AddSnippetDialog } from "@web_editor/js/editor/add_snippet_dialog";
+import { scrollTo } from "@web_editor/js/common/scrolling";
 
 let cacheSnippetTemplate = {};
 
@@ -44,148 +44,10 @@ var globalSelector = {
     is: () => false,
 };
 
-// Helper function to determine if an element is scrollable
-function isScrollable(element) {
-    if (!element) {
-        return false;
-    }
-    const overflowY = window.getComputedStyle(element).overflowY;
-    return overflowY === 'auto' || overflowY === 'scroll' ||
-        (overflowY === 'visible' && element === element.ownerDocument.scrollingElement);
-}
-
-/**
- * Finds the closest scrollable element for the given element.
- *
- * @param {Element} element - The element to find the closest scrollable element for.
- * @returns {Element} The closest scrollable element.
- */
-function closestScrollable(element) {
-    const document = element.ownerDocument || window.document;
-
-    while (element && element !== document.scrollingElement) {
-        if (element instanceof Document) {
-            return null;
-        }
-        if (isScrollable(element)) {
-            return element;
-        }
-        element = element.parentElement;
-    }
-    return element || document.scrollingElement;
-}
-
-/**
- * Computes the size by which a scrolling point should be decreased so that
- * the top fixed elements of the page appear above that scrolling point.
- *
- * @param {Document} [doc=document]
- * @returns {number}
- */
-function scrollFixedOffset(doc = document) {
-    let size = 0;
-    const elements = doc.querySelectorAll('.o_top_fixed_element');
-
-    elements.forEach(el => {
-        size += el.offsetHeight;
-    });
-
-    return size;
-}
-
-/**
- * @param {HTMLElement|string} el - the element to scroll to. If "el" is a
- *      string, it must be a valid selector of an element in the DOM or
- *      '#top' or '#bottom'. If it is an HTML element, it must be present
- *      in the DOM.
- *      Limitation: if the element is using a fixed position, this
- *      function cannot work except if is the header (el is then either a
- *      string set to '#top' or an HTML element with the "top" id) or the
- *      footer (el is then a string set to '#bottom' or an HTML element
- *      with the "bottom" id) for which exceptions have been made.
- * @param {number} [options] - options for the scroll behavior
- * @param {number} [options.extraOffset=0]
- *      extra offset to add on top of the automatic one (the automatic one
- *      being computed based on fixed header sizes)
- * @param {number} [options.forcedOffset]
- *      offset used instead of the automatic one (extraOffset will be
- *      ignored too)
- * @param {HTMLElement} [options.scrollable] the element to scroll
- * @return {Promise}
- */
-function scrollTo(el, options = {}) {
-    if (!el) {
-        throw new Error("The scrollTo function was called without any given element");
-    }
-    if (typeof el === 'string') {
-        el = document.querySelector(el);
-    }
-    const isTopOrBottomHidden = (el.id === 'top' || el.id === 'bottom');
-    const scrollable = isTopOrBottomHidden ? document.scrollingElement : (options.scrollable || closestScrollable(el.parentElement));
-    const scrollDocument = scrollable.ownerDocument;
-    const isInOneDocument = isTopOrBottomHidden || scrollDocument === el.ownerDocument;
-    const iframe = !isInOneDocument && Array.from(scrollable.querySelectorAll('iframe')).find(node => node.contentDocument.contains(el));
-    const topLevelScrollable = scrollDocument.scrollingElement;
-
-    function _computeScrollTop() {
-        if (el.id === 'top') {
-            return 0;
-        }
-        if (el.id === 'bottom') {
-            return scrollable.scrollHeight - scrollable.clientHeight;
-        }
-
-        el.classList.add("o_check_scroll_position");
-        let offsetTop = el.getBoundingClientRect().top + window.scrollY;
-        el.classList.remove("o_check_scroll_position");
-        if (el.classList.contains('d-none')) {
-            el.classList.remove('d-none');
-            offsetTop = el.getBoundingClientRect().top + window.scrollY;
-            el.classList.add('d-none');
-        }
-        const isDocScrollingEl = scrollable === el.ownerDocument.scrollingElement;
-        let elPosition = offsetTop - (scrollable.getBoundingClientRect().top - (isDocScrollingEl ? 0 : scrollable.scrollTop));
-        if (!isInOneDocument && iframe) {
-            elPosition += iframe.getBoundingClientRect().top + window.scrollY;
-        }
-        let offset = options.forcedOffset;
-        if (offset === undefined) {
-            offset = (scrollable === topLevelScrollable ? scrollFixedOffset(scrollDocument) : 0) + (options.extraOffset || 0);
-        }
-        return Math.max(0, elPosition - offset);
-    }
-
-    const originalScrollTop = _computeScrollTop();
-
-    return new Promise(resolve => {
-        const start = scrollable.scrollTop;
-        const change = originalScrollTop - start;
-        const duration = options.duration || 600;
-        const startTime = performance.now();
-
-        function animateScroll(currentTime) {
-            const elapsedTime = currentTime - startTime;
-            const progress = Math.min(elapsedTime / duration, 1);
-            const easeInOutQuad = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-            const newScrollTop = start + change * easeInOutQuad;
-
-            scrollable.scrollTop = newScrollTop;
-
-            if (elapsedTime < duration) {
-                requestAnimationFrame(animateScroll);
-            } else {
-                resolve();
-            }
-        }
-
-        requestAnimationFrame(animateScroll);
-    });
-}
-
 /**
  * Management of the overlay and option list for a snippet.
  */
-var SnippetEditor = Widget.extend({
+var SnippetEditor = publicWidget.Widget.extend({
     template: 'web_editor.snippet_overlay',
     events: {
         'click .oe_snippet_remove': '_onRemoveClick',
@@ -206,7 +68,7 @@ var SnippetEditor = Widget.extend({
 
     /**
      * @constructor
-     * @param {Widget} parent
+     * @param {PublicWidget} parent
      * @param {Element} target
      * @param {Object} templateOptions
      * @param {jQuery} $editable
@@ -283,7 +145,8 @@ var SnippetEditor = Widget.extend({
         // Snippets are replaceable only if they are not within another snippet.
         // (e.g., a "s_countdown" is not replaceable when it is dropped as inner
         // content)
-        if (this.$target[0].matches("[data-snippet]:not([data-snippet] *), .oe_structure > *")) {
+        if (this.$target[0].matches("[data-snippet]:not([data-snippet] *), .oe_structure > *")
+                && !this.$target[0].matches(".oe_structure_solo *")) {
             this.trigger_up('find_snippet_template', {
                 snippet: this.$target[0],
                 callback: (snippet) => {
@@ -2350,8 +2213,9 @@ class SnippetsMenu extends Component {
                 return;
             }
             const range = selection.getRangeAt(0);
-            $(range.startContainer).closest('.o_default_snippet_text').removeClass('o_default_snippet_text');
-            alreadySelectedElements.delete(range.startContainer);
+            const $defaultTextEl = $(range.startContainer).closest('.o_default_snippet_text');
+            $defaultTextEl.removeClass('o_default_snippet_text');
+            alreadySelectedElements.delete($defaultTextEl[0]);
         });
         const refreshSnippetEditors = debounce(() => {
             for (const snippetEditor of this.snippetEditors) {
@@ -3281,7 +3145,7 @@ class SnippetsMenu extends Component {
                 return $from.closest(selector, parentNode).filter(filterFunc);
             };
             functions.all = function ($from) {
-                return ($from ? dom.cssFind($from, selector) : self.$body.find(selector)).filter(filterFunc);
+                return ($from ? self.cssFind($from, selector) : self.$body.find(selector)).filter(filterFunc);
             };
         } else {
             functions.is = function ($from) {
@@ -3303,10 +3167,10 @@ class SnippetsMenu extends Component {
                 }).filter(filterFunc);
             };
             functions.all = isChildren ? function ($from) {
-                return dom.cssFind($from || self.getEditableArea(), selector).filter(filterFunc);
+                return self.cssFind($from || self.getEditableArea(), selector).filter(filterFunc);
             } : function ($from) {
                 $from = $from || self.getEditableArea();
-                return $from.filter(selector).add(dom.cssFind($from, selector)).filter(filterFunc);
+                return $from.filter(selector).add(self.cssFind($from, selector)).filter(filterFunc);
             };
         }
         return functions;
@@ -3538,6 +3402,33 @@ class SnippetsMenu extends Component {
         }).then(function () {
             return snippetEditor;
         });
+    }
+    /**
+     * jQuery find function behavior is:
+     *
+     *     $('A').find('B C') <=> $('A B C')
+     *
+     * The searches behavior to find options' DOM needs to be:
+     *
+     *     $('A').find('B C') <=> $('A B C, B A C, AB C')
+     *
+     * This is what this function does.
+     *
+     * @todo get rid of this function and use a simple querySelectorAll, which
+     *       does not have this problem. The only issue is that jQuery selectors
+     *       support more things than querySelectorAll ones but we could stop
+     *       relying on that and/or add other filtering systems.
+     * @param {jQuery} $from - the jQuery element(s) from which to search
+     * @param {string} selector - the CSS selector to match
+     * @returns {jQuery}
+     */
+    cssFind($from, selector) {
+        // No way to correctly parse a complex jQuery selector but having no
+        // spaces should be a good-enough condition to use a simple find
+        if (selector.indexOf(' ') >= 0) {
+            return $from.closest('body').find(selector).filter((i, $el) => $from.has($el).length);
+        }
+        return $from.find(selector);
     }
     /**
      * There may be no location where some snippets might be dropped. This mades

@@ -46,6 +46,10 @@ export class DynamicList extends DataPoint {
         return this.records.find((record) => record.isInEdition);
     }
 
+    get isRecordCountTrustable() {
+        return true;
+    }
+
     get limit() {
         return this.config.limit;
     }
@@ -164,9 +168,7 @@ export class DynamicList extends DataPoint {
     }
 
     selectDomain(value) {
-        return this.model.mutex.exec(() => {
-            this.isDomainSelected = value;
-        });
+        return this.model.mutex.exec(() => this._selectDomain(value));
     }
 
     sortBy(fieldName) {
@@ -186,18 +188,7 @@ export class DynamicList extends DataPoint {
     }
 
     toggleSelection() {
-        return this.model.mutex.exec(() => {
-            if (this.selection.length === this.records.length) {
-                this.records.forEach((record) => {
-                    record._toggleSelection(false);
-                });
-                this.isDomainSelected = false;
-            } else {
-                this.records.forEach((record) => {
-                    record._toggleSelection(true);
-                });
-            }
-        });
+        return this.model.mutex.exec(() => this._toggleSelection());
     }
 
     unarchive(isSelected) {
@@ -344,6 +335,10 @@ export class DynamicList extends DataPoint {
         }
     }
 
+    _selectDomain(value) {
+        this.isDomainSelected = value;
+    }
+
     async _toggleArchive(isSelected, state) {
         const method = state ? "action_archive" : "action_unarchive";
         const context = this.context;
@@ -370,6 +365,19 @@ export class DynamicList extends DataPoint {
             });
         } else {
             return reload();
+        }
+    }
+
+    async _toggleSelection() {
+        if (this.selection.length === this.records.length) {
+            this.records.forEach((record) => {
+                record._toggleSelection(false);
+            });
+            this._selectDomain(false);
+        } else {
+            this.records.forEach((record) => {
+                record._toggleSelection(true);
+            });
         }
     }
 }

@@ -84,6 +84,7 @@ class StockPicking(models.Model):
             'location_id': self.location_id.id,
             'location_dest_id': self.location_dest_id.id,
             'company_id': self.company_id.id,
+            'never_product_template_attribute_value_ids': first_line.attribute_value_ids.filtered(lambda a: a.attribute_id.create_variant == 'no_variant'),
         }
 
     def _create_move_from_pos_order_lines(self, lines):
@@ -247,6 +248,35 @@ class StockMove(models.Model):
         # Moves with product_id not in related_order_lines. This can happend e.g. when product_id has a phantom-type bom.
         moves_to_assign = self.filtered(lambda m: m.product_id.id not in lines_data or m.product_id.tracking == 'none'
                                                   or (not m.picking_type_id.use_existing_lots and not m.picking_type_id.use_create_lots))
+
+        # Check for any conversion issues in the moves before setting quantities
+        uoms_with_issues = set()
+        for move in moves_to_assign.filtered(lambda m: m.product_uom_qty and m.product_uom != m.product_id.uom_id):
+            converted_qty = move.product_uom._compute_quantity(
+                move.product_uom_qty,
+                move.product_id.uom_id,
+                rounding_method='HALF-UP'
+            )
+            if not converted_qty:
+                uoms_with_issues.add(
+                    (move.product_uom.name, move.product_id.uom_id.name)
+                )
+
+        if uoms_with_issues:
+            error_message_lines = [
+                _("Conversion Error: The following unit of measure conversions result in a zero quantity due to rounding:")
+            ]
+            for uom_from, uom_to in uoms_with_issues:
+                error_message_lines.append(_(' - From "%(uom_from)s" to "%(uom_to)s"', uom_from=uom_from, uom_to=uom_to))
+
+            error_message_lines.append(
+                _("\nThis issue occurs because the quantity becomes zero after rounding during the conversion. "
+                "To fix this, adjust the conversion factors or rounding method to ensure that even the smallest quantity in the original unit "
+                "does not round down to zero in the target unit.")
+            )
+
+            raise UserError('\n'.join(error_message_lines))
+
         for move in moves_to_assign:
             move.quantity = move.product_uom_qty
         moves_remaining = self - moves_to_assign

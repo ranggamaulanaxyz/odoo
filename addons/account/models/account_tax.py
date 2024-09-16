@@ -196,7 +196,6 @@ class AccountTax(models.Model):
     is_used = fields.Boolean(string="Tax used", compute='_compute_is_used')
     repartition_lines_str = fields.Char(string="Repartition Lines", tracking=True, compute='_compute_repartition_lines_str')
     invoice_legal_notes = fields.Html(string="Legal Notes", help="Legal mentions that have to be printed on the invoices.")
-    total_tax_factor = fields.Float(compute='_compute_total_tax_factor')
 
     @api.constrains('company_id', 'name', 'type_tax_use', 'tax_scope', 'country_id')
     def _constrains_name(self):
@@ -366,7 +365,9 @@ class AccountTax(models.Model):
             for line in old_line_values_dict.keys() & new_line_values_dict.keys()
         ]
         added_and_deleted_lines = [
-            (line, _('Removed'), old_line_values_dict[line]) if line in old_line_values_dict else (line, _('New'), new_line_values_dict[line])
+            (line, self.env._('Removed'), old_line_values_dict[line])
+            if line in old_line_values_dict
+            else (line, self.env._('New'), new_line_values_dict[line])
             for line in old_line_values_dict.keys() ^ new_line_values_dict.keys()
         ]
 
@@ -447,11 +448,6 @@ class AccountTax(models.Model):
                     Command.create({'document_type': 'refund', 'repartition_type': 'tax', 'tag_ids': []}),
                 ]
 
-    @api.depends('invoice_repartition_line_ids.factor', 'invoice_repartition_line_ids.repartition_type')
-    def _compute_total_tax_factor(self):
-        for tax in self:
-            tax.total_tax_factor = sum(tax.invoice_repartition_line_ids.filtered(lambda x: x.repartition_type == 'tax').mapped('factor'))
-
     @staticmethod
     def _parse_name_search(name):
         """
@@ -477,10 +473,10 @@ class AccountTax(models.Model):
         return ''.join(list_name)
 
     @api.model
-    def _name_search(self, name, domain=None, operator='ilike', limit=None, order=None):
+    def _search_display_name(self, operator, value):
         if operator in ("ilike", "like"):
-            name = AccountTax._parse_name_search(name)
-        return super()._name_search(name, domain, operator, limit, order)
+            value = AccountTax._parse_name_search(value)
+        return super()._search_display_name(operator, value)
 
     def _search_name(self, operator, value):
         if operator not in ("ilike", "like") or not isinstance(value, str):
@@ -534,6 +530,11 @@ class AccountTax(models.Model):
                 for child in tax.children_tax_ids
             ):
                 raise ValidationError(_('The application scope of taxes in a group must be either the same as the group or left empty.'))
+            if any(
+                child.amount_type == 'group'
+                for child in tax.children_tax_ids
+            ):
+                raise ValidationError(_('Nested group of taxes are not allowed.'))
 
     @api.constrains('company_id')
     def _check_company_consistency(self):
@@ -602,7 +603,7 @@ class AccountTax(models.Model):
                     name += ' (%s)' % type_tax_use.get(record.type_tax_use)
                 if len(self.env.companies) > 1 and self.env.context.get('params', {}).get('model') == 'product.template':
                     name += ' (%s)' % record.company_id.display_name
-                if record.country_id != record.company_id.account_fiscal_country_id:
+                if record.country_id != record.company_id._accessible_branches()[:1].account_fiscal_country_id:
                     name += ' (%s)' % record.country_code
             record.display_name = name
 
@@ -792,7 +793,7 @@ class AccountTax(models.Model):
                 yield tax_after
 
         def add_extra_base(other_tax, sign):
-            tax_amount = taxes_data[tax.id]['tax_amount_factorized']
+            tax_amount = taxes_data[tax.id]['tax_amount']
             if 'tax_amount' not in taxes_data[other_tax.id]:
                 taxes_data[other_tax.id]['extra_base_for_tax'] += sign * tax_amount
             taxes_data[other_tax.id]['extra_base_for_base'] += sign * tax_amount
@@ -800,43 +801,41 @@ class AccountTax(models.Model):
         if tax.price_include:
 
             # Suppose:
+            # 1.
             # t1: price-excluded fixed tax of 1, include_base_amount
             # t2: price-included 10% tax
             # On a price unit of 120, t1 is computed first since the tax amount affects the price unit.
             # Then, t2 can be computed on 120 + 1 = 121.
             # However, since t1 is not price-included, its base amount is computed by removing first the tax amount of t2.
-            if not special_mode:
+            # 2.
+            # t1: price-included fixed tax of 1
+            # t2: price-included 10% tax
+            # On a price unit of 122, base amount of t2 is computed as 122 - 1 = 121
+            if special_mode in (False, 'total_included'):
+                if not tax.include_base_amount:
+                    for other_tax in get_tax_after():
+                        if other_tax.price_include:
+                            add_extra_base(other_tax, -1)
                 for other_tax in get_tax_before():
                     add_extra_base(other_tax, -1)
 
             # Suppose:
+            # 1.
             # t1: price-included 10% tax
             # t2: price-excluded 10% tax
             # If the price unit is 121, the base amount of t1 is computed as 121 / 1.1 = 110
             # With special_mode = 'total_excluded', 110 is provided as price unit.
             # To compute the base amount of t2, we need to add back the tax amount of t1.
-            elif special_mode == 'total_excluded':
-                for other_tax in get_tax_after():
-                    if not taxes_data[other_tax.id]['price_include']:
-                        add_extra_base(other_tax, 1)
-
-            # Suppose:
-            # t1: fixed tax of 1
+            # 2.
+            # t1: price-included fixed tax of 1, include_base_amount
             # t2: price-included 10% tax
-            # t3: price-excluded 10% tax
-            # With a price unit of 121:
-            # The tax amount of t1 is 1.
-            # The tax amount of t2 is 121 * 0.1 / 1.1 = 11.
-            # The base of t2 is 121 - 11 = 110.
-            # The base of t1 is 110 - 1 = 109.
-            # The tax amount of t3 is 121 * 0.1 = 12.1.
-            # So, the total included is 109 + 1 + 11 + 12.1 = 133.1.
-            # With special_mode = 'total_included', 133.1 is provided as price unit.
-            # When evaluating t3 and t2, we need to subtract the amount of those taxes from the base of t1.
-            # The base of t1 is 133.1 - 12.1 - 11 - 1 = 109.
-            elif special_mode == 'total_included':
-                for other_tax in get_tax_before():
-                    add_extra_base(other_tax, -1)
+            # On a price unit of 121, with t1 being include_base_amount, the base amount of t2 is 121
+            # With special_mode = 'total_excluded' 109 is provided as price unit.
+            # To compute the base amount of t2, we need to add the tax amount of t1 first
+            else:  # special_mode == 'total_excluded'
+                for other_tax in get_tax_after():
+                    if not other_tax.price_include or tax.include_base_amount:
+                        add_extra_base(other_tax, 1)
 
         elif not tax.price_include:
 
@@ -847,6 +846,7 @@ class AccountTax(models.Model):
                         add_extra_base(other_tax, 1)
 
             # Suppose:
+            # 1.
             # t1: price-excluded 10% tax, include base amount
             # t2: price-excluded 10% tax
             # On a price unit of 100,
@@ -855,12 +855,18 @@ class AccountTax(models.Model):
             # With special_mode = 'total_included', 121 is provided as price unit.
             # The tax amount of t2 is computed like a price-included tax: 121 / 1.1 = 110.
             # Since t1 is 'include base amount', t2 has already been subtracted from the price unit.
-            elif special_mode == 'total_included':
+            # 2.
+            # t1: price-excluded fixed tax of 1
+            # t2: price-excluded 10% tax
+            # On a price unit of 110, the tax of t2 is 110 * 1.1 = 121
+            # With special_mode = 'total_included', 122 is provided as price unit.
+            # The base amount of t2 should be computed by removing the tax amount of t1 first
+            else:  # special_mode == 'total_included'
                 if not tax.include_base_amount:
-                    for other_tax in get_tax_before():
-                        add_extra_base(other_tax, -1)
                     for other_tax in get_tax_after():
                         add_extra_base(other_tax, -1)
+                for other_tax in get_tax_before():
+                    add_extra_base(other_tax, -1)
 
     def _eval_tax_amount_fixed_amount(self, batch, raw_base, evaluation_context):
         """ Eval the tax amount for a single tax during the first ascending order for fixed taxes.
@@ -889,7 +895,7 @@ class AccountTax(models.Model):
         """
         self.ensure_one()
         if self.amount_type == 'percent':
-            total_percentage = sum(tax.total_tax_factor * tax.amount for tax in batch) / 100.0
+            total_percentage = sum(tax.amount for tax in batch) / 100.0
             to_price_excluded_factor = 1 / (1 + total_percentage) if total_percentage != -1 else 0.0
             return raw_base * to_price_excluded_factor * self.amount / 100.0
 
@@ -912,7 +918,7 @@ class AccountTax(models.Model):
             return raw_base * self.amount / 100.0
 
         if self.amount_type == 'division':
-            total_percentage = sum(tax.total_tax_factor * tax.amount for tax in batch) / 100.0
+            total_percentage = sum(tax.amount for tax in batch) / 100.0
             incl_base_multiplicator = 1.0 if total_percentage == 1.0 else 1 - total_percentage
             return raw_base * self.amount / 100.0 / incl_base_multiplicator
 
@@ -955,9 +961,8 @@ class AccountTax(models.Model):
         """
         def add_tax_amount_to_results(tax, tax_amount):
             taxes_data[tax.id]['tax_amount'] = tax_amount
-            taxes_data[tax.id]['tax_amount_factorized'] = tax_amount * tax.total_tax_factor
             if rounding_method == 'round_per_line':
-                taxes_data[tax.id]['tax_amount_factorized'] = float_round(taxes_data[tax.id]['tax_amount_factorized'], precision_rounding=precision_rounding)
+                taxes_data[tax.id]['tax_amount'] = float_round(taxes_data[tax.id]['tax_amount'], precision_rounding=precision_rounding)
 
             sorted_taxes._propagate_extra_taxes_base(tax, taxes_data, special_mode=special_mode)
 
@@ -1039,7 +1044,7 @@ class AccountTax(models.Model):
             if 'tax_amount' not in taxes_data[tax.id]:
                 continue
 
-            total_tax_amount = sum(taxes_data[other_tax.id]['tax_amount_factorized'] for other_tax in taxes_data[tax.id]['batch'])
+            total_tax_amount = sum(taxes_data[other_tax.id]['tax_amount'] for other_tax in taxes_data[tax.id]['batch'])
             base = raw_base + taxes_data[tax.id]['extra_base_for_base']
             if taxes_data[tax.id]['price_include'] and special_mode in (False, 'total_included'):
                 base -= total_tax_amount
@@ -1049,7 +1054,7 @@ class AccountTax(models.Model):
 
         if taxes_data_list:
             total_excluded = taxes_data_list[0]['base']
-            tax_amount = sum(tax_data['tax_amount_factorized'] for tax_data in taxes_data_list)
+            tax_amount = sum(tax_data['tax_amount'] for tax_data in taxes_data_list)
             total_included = total_excluded + tax_amount
         else:
             total_included = total_excluded = raw_base
@@ -1062,8 +1067,7 @@ class AccountTax(models.Model):
                     'tax': tax_data['tax'],
                     'group': batching_results['group_per_tax'].get(tax_data['tax'].id) or self.env['account.tax'],
                     'batch': batching_results['batch_per_tax'][tax_data['tax'].id],
-                    'tax_amount_unfactorized': tax_data['tax_amount'],
-                    'tax_amount': tax_data['tax_amount_factorized'],
+                    'tax_amount': tax_data['tax_amount'],
                     'base_amount': tax_data['base'],
                 }
                 for tax_data in taxes_data_list
@@ -1148,13 +1152,17 @@ class AccountTax(models.Model):
 
             # Split naively by repartition line.
             rep_lines = tax[repartition_lines_field].filtered(lambda x: x.repartition_type == 'tax')
-            repartition_line_amounts = [tax_data['tax_amount_unfactorized'] * line.factor for line in rep_lines]
+            repartition_line_amounts = [tax_data['tax_amount'] * line.factor for line in rep_lines]
             if rounding_method == 'round_per_line':
                 repartition_line_amounts = [currency.round(x) for x in repartition_line_amounts]
             total_repartition_line_amount = sum(repartition_line_amounts)
 
             # Fix the rounding error caused by rounding.
-            total_error = tax_data['tax_amount'] - total_repartition_line_amount
+            total_factor = sum(rep_lines.mapped('factor'))
+            total_tax_amount = tax_data['tax_amount'] * total_factor
+            if rounding_method == 'round_per_line':
+                total_tax_amount = currency.round(total_tax_amount)
+            total_error = total_tax_amount - total_repartition_line_amount
             error_sign = -1 if total_error < 0.0 else 1
             total_error *= error_sign
             for index, _amount in enumerate(repartition_line_amounts):
@@ -1177,14 +1185,12 @@ class AccountTax(models.Model):
                 else:
                     rep_line_tags = rep_line.tag_ids
 
-                tax_rep_values = {
+                tax_rep_values_list.append({
                     **tax_data,
                     'tax_amount': line_amount,
                     'tax_repartition_line': rep_line,
                     'tags': tax_data['tags'] | rep_line_tags,
-                }
-                tax_rep_values.pop('tax_amount_unfactorized')
-                tax_rep_values_list.append(tax_rep_values)
+                })
         return tax_rep_values_list
 
     def flatten_taxes_hierarchy(self):
@@ -1959,7 +1965,7 @@ class AccountTax(models.Model):
                 'formatted_tax_group_base_amount': formatLang(self.env, tax_detail['display_base_amount_currency'], currency_obj=currency),
                 'display_formatted_tax_group_base_amount': not all(x['tax'].amount_type == 'fixed' for x in tax_detail['group_tax_details']),
             })
-            encountered_base_amounts.add(tax_detail['display_base_amount_currency'])
+            encountered_base_amounts.add(currency.round(tax_detail['display_base_amount_currency']))
 
         # Compute amounts.
         subtotals = []

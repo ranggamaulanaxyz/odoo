@@ -97,6 +97,7 @@ li.oe-nested {
 .o_portal_address {
     span[itemprop="telephone"] {
         white-space: nowrap;
+        display: inline-block;
     }
 }
 
@@ -150,4 +151,10 @@ div[name=comment] p, div[name=address] p {
             margin-bottom: $spacer;
         }
     }
+}
+
+// The default ir.qweb.field.contact uses a text-truncate on the address span
+// which doesn't work in wkhtml and breaks the wrapping behavior.
+span[itemprop="streetAddress"] {
+    white-space: normal;
 }

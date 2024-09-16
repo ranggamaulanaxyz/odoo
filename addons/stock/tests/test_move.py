@@ -2203,10 +2203,10 @@ class StockMove(TransactionCase):
         self.env["stock.quant"].create({
             "product_id": self.product.id,
             "location_id": self.stock_location.id,
-            "inventory_quantity": 3.0,
+            "inventory_quantity": 15.0,
         }).action_apply_inventory()
         product_in_past = self.product.with_context(to_date=fields.Date.add(fields.Date.today(), days=-7))
-        self.assertAlmostEqual(self.product.qty_available, 3.0)
+        self.assertAlmostEqual(self.product.qty_available, 15.0)
         self.assertAlmostEqual(product_in_past.qty_available, 0)
 
         # Make a move with a demand of 2, but confirms only 1
@@ -2230,7 +2230,24 @@ class StockMove(TransactionCase):
         self.assertAlmostEqual(move_partial.quantity, 1)
 
         # Check the quantity in the past is still 0
-        self.assertAlmostEqual(self.product.qty_available, 2.0)
+        self.assertAlmostEqual(self.product.qty_available, 14.0)
+        self.assertAlmostEqual(product_in_past.qty_available, 0)
+
+        # Make a move with another UoM
+        move = self.env["stock.move"].create({
+            "name": "test_move",
+            "location_id": self.stock_location.id,
+            "location_dest_id": self.customer_location.id,
+            "product_id": self.product.id,
+            "product_uom": self.uom_dozen.id,
+            "product_uom_qty": 1.0,
+        })
+        move._action_confirm()
+        move._action_assign()
+        move.picked = True
+        move._action_done()
+
+        self.assertAlmostEqual(self.product.qty_available, 2.0)  # 14 - a dozen
         self.assertAlmostEqual(product_in_past.qty_available, 0)
 
     def test_product_tree_views(self):
@@ -2914,9 +2931,7 @@ class StockMove(TransactionCase):
         move_stock_pack.picked = True
 
         # create the backorder in the uom of the quants
-        backorder_wizard_dict = picking_stock_pack.button_validate()
-        backorder_wizard = Form(self.env[backorder_wizard_dict['res_model']].with_context(backorder_wizard_dict['context'])).save()
-        backorder_wizard.process()
+        Form.from_action(self.env, picking_stock_pack.button_validate()).save().process()
         self.assertEqual(move_stock_pack.state, 'done')
         self.assertEqual(move_stock_pack.quantity, 0.5)
         self.assertEqual(move_stock_pack.product_uom_qty, 0.5)
@@ -5898,7 +5913,7 @@ class StockMove(TransactionCase):
         delivery.move_ids.filtered(lambda ml: ml.product_id == product4).quantity = 2
         (delivery.move_ids[:2] | delivery.move_ids[3]).picked = True
         backorder_wizard_dict = delivery.button_validate()
-        backorder_wizard_form = Form(self.env[backorder_wizard_dict['res_model']].with_context(backorder_wizard_dict['context']))
+        backorder_wizard_form = Form.from_action(self.env, backorder_wizard_dict)
         backorder_wizard_form.save().process()  # Creates the backorder.
 
         first_backorder = self.env['stock.picking'].search([('backorder_id', '=', delivery.id)], limit=1)
@@ -5925,7 +5940,7 @@ class StockMove(TransactionCase):
         first_backorder.move_ids.filtered(lambda ml: ml.product_id == product4).quantity = 8
         first_backorder.move_ids.picked = True
         backorder_wizard_dict = first_backorder.button_validate()
-        backorder_wizard_form = Form(self.env[backorder_wizard_dict['res_model']].with_context(backorder_wizard_dict['context']))
+        backorder_wizard_form = Form.from_action(self.env, backorder_wizard_dict)
         backorder_wizard_form.save().process()  # Creates the backorder.
 
         second_backorder = self.env['stock.picking'].search([('backorder_id', '=', first_backorder.id)], limit=1)
@@ -5969,7 +5984,7 @@ class StockMove(TransactionCase):
         second_backorder.move_line_ids.filtered(lambda ml: ml.product_id == product2).unlink()
         second_backorder.move_ids.picked = True
         backorder_wizard_dict = second_backorder.button_validate()
-        backorder_wizard_form = Form(self.env[backorder_wizard_dict['res_model']].with_context(backorder_wizard_dict['context']))
+        backorder_wizard_form = Form.from_action(self.env, backorder_wizard_dict)
         backorder_wizard_form.save().process_cancel_backorder()
 
         # Checks again the values for the original delivery.
@@ -6154,7 +6169,7 @@ class StockMove(TransactionCase):
         delivery.action_confirm()
 
         backorder_wizard_dict = delivery.button_validate()
-        backorder_wizard_form = Form(self.env[backorder_wizard_dict['res_model']].with_context(backorder_wizard_dict['context']))
+        backorder_wizard_form = Form.from_action(self.env, backorder_wizard_dict)
         backorder_wizard_form.save().process()
         picking.backorder_ids.action_cancel()
 
@@ -6570,9 +6585,7 @@ class StockMove(TransactionCase):
         # Complete one move and create a backorder with the remaining move
         move_product.quantity = 1
         move_consu.quantity = 0
-        backorder_wizard_dict = picking.button_validate()
-        backorder_wizard = Form(self.env[backorder_wizard_dict['res_model']].with_context(backorder_wizard_dict['context'])).save()
-        backorder_wizard.with_user(self.user_stock_user).process()
+        Form.from_action(self.env, picking.button_validate()).save().with_user(self.user_stock_user).process()
         backorder = self.env['stock.picking'].search([('backorder_id', '=', picking.id)])
 
         self.assertEqual(picking.scheduled_date, today + relativedelta(day=5))
@@ -6834,3 +6847,15 @@ class StockMove(TransactionCase):
         })
         receipt.action_confirm()
         self.assertNotEqual(old_reference, receipt.move_ids.reference)
+
+    def test_internal_picking_uses_shipping_policy_from_picking_type(self):
+        picking_type_internal = self.env.ref('stock.picking_type_internal')
+
+        for move_type in ["direct", "one"]:
+            picking_type_internal.move_type = move_type
+
+            picking = self.env['stock.picking'].create({
+                'picking_type_id': picking_type_internal.id,
+            })
+
+            self.assertEqual(picking.move_type, move_type)

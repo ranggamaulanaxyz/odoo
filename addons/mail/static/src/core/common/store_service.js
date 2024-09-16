@@ -364,7 +364,13 @@ export class Store extends BaseStore {
                         insertData.push(vals);
                     }
                 }
-                res[modelName] = store[modelName].insert(insertData, options);
+                const records = store[modelName].insert(insertData, options);
+                if (!res[modelName]) {
+                    res[modelName] = records;
+                } else {
+                    const knownRecordIds = new Set(res[modelName].map((r) => r.localId));
+                    res[modelName].push(...records.filter((r) => !knownRecordIds.has(r.localId)));
+                }
             }
             // Delete after all inserts to make sure a relation potentially registered before the
             // delete doesn't re-add the deleted record by mistake.
@@ -381,7 +387,7 @@ export class Store extends BaseStore {
             partners_to: [this.self.id],
         });
         this.ChatWindow.get(thread)?.update({ autofocus: 0 });
-        this.env.services["discuss.rtc"].toggleCall(thread, { video: true });
+        this.env.services["discuss.rtc"].toggleCall(thread, { camera: true });
         this.openInviteThread = thread;
     }
 
@@ -417,15 +423,13 @@ export class Store extends BaseStore {
                     views: [[false, "form"]],
                     res_id: id,
                 })
-            ).then(() => {
-                if (!this.env.isSmall) {
-                    thread.open(true, { autofocus: false });
-                }
-            });
+            ).then(() => this.onLinkFollowed(thread));
             return true;
         }
         return false;
     }
+
+    onLinkFollowed(fromThread) {}
 
     setup() {
         super.setup();
@@ -477,10 +481,6 @@ export class Store extends BaseStore {
         body,
         { mentionedChannels = [], mentionedPartners = [], specialMentions = [] } = {}
     ) {
-        if (this.self.type !== "partner") {
-            // mentions are not supported for guests
-            return {};
-        }
         const validMentions = {};
         validMentions.threads = mentionedChannels.filter((thread) =>
             body.includes(`#${thread.displayName}`)
@@ -507,13 +507,10 @@ export class Store extends BaseStore {
         thread,
     }) {
         const subtype = isNote ? "mail.mt_note" : "mail.mt_comment";
-        const validMentions =
-            this.self.type === "partner"
-                ? this.getMentionsFromText(body, {
-                      mentionedChannels,
-                      mentionedPartners,
-                  })
-                : undefined;
+        const validMentions = this.getMentionsFromText(body, {
+            mentionedChannels,
+            mentionedPartners,
+        });
         const partner_ids = validMentions?.partners.map((partner) => partner.id) ?? [];
         const recipientEmails = [];
         const recipientAdditionalValues = {};
@@ -531,26 +528,39 @@ export class Store extends BaseStore {
         }
         const postData = {
             body: await prettifyMessageContent(body, validMentions),
-            attachment_ids: attachments.map(({ id }) => id),
             message_type: "comment",
-            partner_ids,
             subtype_xmlid: subtype,
         };
-        if (thread.model === "discuss.channel" && validMentions?.specialMentions) {
+        if (attachments.length) {
+            postData.attachment_ids = attachments.map(({ id }) => id);
+        }
+        if (partner_ids.length) {
+            Object.assign(postData, { partner_ids });
+        }
+        if (thread.model === "discuss.channel" && validMentions?.specialMentions.length) {
             postData.special_mentions = validMentions.specialMentions;
         }
-        return {
+        const params = {
             context: {
                 mail_post_autofollow: !isNote && thread.hasWriteAccess,
             },
             post_data: postData,
-            attachment_tokens: attachments.map((attachment) => attachment.accessToken),
-            canned_response_ids: cannedResponseIds,
-            partner_emails: recipientEmails,
-            partner_additional_values: recipientAdditionalValues,
             thread_id: thread.id,
             thread_model: thread.model,
         };
+        if (attachments.length) {
+            params.attachment_tokens = attachments.map((attachment) => attachment.access_token);
+        }
+        if (cannedResponseIds?.length) {
+            params.canned_response_ids = cannedResponseIds;
+        }
+        if (recipientEmails.length) {
+            Object.assign(params, {
+                partner_emails: recipientEmails,
+                partner_additional_values: recipientAdditionalValues,
+            });
+        }
+        return params;
     }
 
     getNextTemporaryId() {

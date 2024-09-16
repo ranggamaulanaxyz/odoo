@@ -1,12 +1,14 @@
 import { describe, expect, test } from "@odoo/hoot";
-import { press, queryFirst } from "@odoo/hoot-dom";
+import { getActiveElement, press, queryFirst, queryOne } from "@odoo/hoot-dom";
 import { animationFrame, tick } from "@odoo/hoot-mock";
+import { Component, xml } from "@odoo/owl";
 import { patchWithCleanup } from "@web/../tests/web_test_helpers";
+import { useAutofocus } from "@web/core/utils/hooks";
 import { Plugin } from "../src/plugin";
 import { MAIN_PLUGINS } from "../src/plugin_sets";
 import { setupEditor } from "./_helpers/editor";
 import { getContent } from "./_helpers/selection";
-import { tripleClick } from "./_helpers/user_actions";
+import { insertText, tripleClick } from "./_helpers/user_actions";
 
 test("getEditableSelection should work, even if getSelection returns null", async () => {
     const { editor } = await setupEditor("<p>a[b]</p>");
@@ -71,28 +73,28 @@ test("fix selection P in the beggining being a direct child of the editable p be
     expect(getContent(el)).toBe(`<p>a[]</p><div>b</div>`);
 });
 
-describe("inEditable", () => {
-    test("inEditable should be true", async () => {
+describe("documentSelectionIsInEditable", () => {
+    test("documentSelectionIsInEditable should be true", async () => {
         const { editor } = await setupEditor("<p>a[]b</p>");
-        const selection = editor.shared.getEditableSelection();
-        expect(selection.inEditable).toBe(true);
+        const selectionData = editor.shared.getSelectionData();
+        expect(selectionData.documentSelectionIsInEditable).toBe(true);
     });
 
-    test("inEditable should be false when it is set outside the editable", async () => {
+    test("documentSelectionIsInEditable should be false when it is set outside the editable", async () => {
         const { editor } = await setupEditor("<p>ab</p>");
-        const selection = editor.shared.getEditableSelection();
-        expect(selection.inEditable).toBe(false);
+        const selectionData = editor.shared.getSelectionData();
+        expect(selectionData.documentSelectionIsInEditable).toBe(false);
     });
 
-    test("inEditable should be false when it is set outside the editable after retrieving it", async () => {
+    test("documentSelectionIsInEditable should be false when it is set outside the editable after retrieving it", async () => {
         const { editor } = await setupEditor("<p>ab[]</p>");
         const selection = document.getSelection();
-        let editableSelection = editor.shared.getEditableSelection();
-        expect(editableSelection.inEditable).toBe(true);
+        let selectionData = editor.shared.getSelectionData();
+        expect(selectionData.documentSelectionIsInEditable).toBe(true);
         selection.setPosition(document.body);
         // value is updated directly !
-        editableSelection = editor.shared.getEditableSelection();
-        expect(editableSelection.inEditable).toBe(false);
+        selectionData = editor.shared.getSelectionData();
+        expect(selectionData.documentSelectionIsInEditable).toBe(false);
     });
 });
 
@@ -157,4 +159,54 @@ test("press 'ctrl+a' in 'contenteditable' should only select his content", async
     expect(getContent(el)).toBe(
         `<div contenteditable="false"><p contenteditable="true">[ab]</p><p contenteditable="true">cd</p></div>`
     );
+});
+
+test("restore a selection when you are not in the editable shouldn't move the focus", async () => {
+    class TestInput extends Component {
+        static template = xml`<input t-ref="input" t-att-value="'eee'" class="test"/>`;
+        static props = ["*"];
+
+        setup() {
+            useAutofocus({ refName: "input", mobile: true });
+        }
+    }
+
+    class TestPlugin extends Plugin {
+        static name = "test";
+        static dependencies = ["overlay"];
+        static resources = (p) => ({
+            powerboxItems: [
+                {
+                    category: "widget",
+                    name: "Test",
+                    action() {
+                        p.showOverlay();
+                    },
+                },
+            ],
+        });
+
+        setup() {
+            this.overlay = this.shared.createOverlay(TestInput);
+        }
+
+        showOverlay() {
+            this.overlay.open({
+                props: {},
+            });
+        }
+    }
+
+    const { editor } = await setupEditor("<p>te[]st</p>", {
+        config: { Plugins: [...MAIN_PLUGINS, TestPlugin] },
+    });
+    insertText(editor, "/test");
+    press("enter");
+    await animationFrame();
+    expect(getActiveElement()).toBe(queryOne("input.test"));
+
+    // Something trigger restore
+    const cursors = editor.shared.preserveSelection();
+    cursors.restore();
+    expect(getActiveElement()).toBe(queryOne("input.test"));
 });

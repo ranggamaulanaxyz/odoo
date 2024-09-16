@@ -1462,10 +1462,15 @@ class MailCommon(common.TransactionCase, MailCase):
             cls.env['ir.model']._get(test_record._name).with_context(lang=lang_code).name = 'Spanish Model Description'
 
         # Translate some code strings used in mailing
-        code_translations.python_translations[('test_mail', 'es_ES')]['NotificationButtonTitle'] = 'SpanishButtonTitle'
-        cls.addClassCleanup(code_translations.python_translations[('test_mail', 'es_ES')].pop, 'NotificationButtonTitle')
-        code_translations.python_translations[('mail', 'es_ES')]['View %s'] = 'SpanishView %s'
-        cls.addClassCleanup(code_translations.python_translations[('mail', 'es_ES')].pop, 'View %s')
+        code_translations.python_translations[('test_mail', 'es_ES')] = {
+            **code_translations.python_translations[('test_mail', 'es_ES')],
+            'NotificationButtonTitle': 'SpanishButtonTitle'
+        }
+        code_translations.python_translations[('mail', 'es_ES')] = {
+            **code_translations.python_translations[('mail', 'es_ES')],
+            'View %s': 'SpanishView %s'
+        }
+        cls.addClassCleanup(code_translations.python_translations.clear)
 
         # Prepare some translated value for template if given
         if test_template:
@@ -1552,7 +1557,7 @@ class MailCommon(common.TransactionCase, MailCase):
         Not written in a modular way to avoid complex override for a simple test tool.
         """
         for data in threads_data:
-            if not issubclass(self.env.registry[data["model"]], self.env.registry["rating.mixin"]):
+            if "rating.mixin" not in self.env.registry or not issubclass(self.env.registry[data["model"]], self.env.registry["rating.mixin"]):
                 data.pop("rating_avg", None)
                 data.pop("rating_count", None)
         return list(threads_data)

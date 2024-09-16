@@ -19,7 +19,6 @@ class AccountChartTemplate(models.AbstractModel):
         """Generate the demo data related to accounting."""
         # This is a generator because data created here might be referenced by xml_id to data
         # created later but defined in this same function.
-        self._get_demo_data_products(company)
         return {
             'account.move': self._get_demo_data_move(company),
             'account.bank.statement': self._get_demo_data_statement(company),
@@ -81,18 +80,6 @@ class AccountChartTemplate(models.AbstractModel):
                 }
             }
         return {}
-
-    @api.model
-    def _get_demo_data_products(self, company=False):
-        prod_templates = self.env['product.product'].search(self.env['product.product']._check_company_domain(company))
-        if self.env.company.account_sale_tax_id:
-            prod_templates_sale = prod_templates.filtered(
-                lambda p: not p.taxes_id.filtered_domain(p.taxes_id._check_company_domain(company)))
-            prod_templates_sale.write({'taxes_id': [Command.link(self.env.company.account_sale_tax_id.id)]})
-        if self.env.company.account_purchase_tax_id:
-            prod_templates_purchase = prod_templates.filtered(
-                lambda p: not p.supplier_taxes_id.filtered_domain(p.taxes_id._check_company_domain(company)))
-            prod_templates_purchase.write({'supplier_taxes_id': [Command.link(self.env.company.account_purchase_tax_id.id)]})
 
     @api.model
     def _get_demo_data_move(self, company=False):
@@ -295,13 +282,6 @@ class AccountChartTemplate(models.AbstractModel):
             ],
             limit=1,
         )
-        ccd_journal = self.env['account.journal'].search(
-            domain=[
-                *self.env['account.journal']._check_company_domain(cid),
-                ('type', '=', 'credit'),
-            ],
-            limit=1,
-        )
         return {
             'demo_bank_statement_1': {
                 'name': f'{bnk_journal.name} - {time.strftime("%Y")}-01-01/1',
@@ -320,19 +300,6 @@ class AccountChartTemplate(models.AbstractModel):
                         'amount': 1275.0,
                         'date': time.strftime('%Y-01-01'),
                         'partner_id': 'base.res_partner_12',
-                    }),
-                ]
-            },
-            'demo_credit_statement_1': {
-                'name': f'{ccd_journal.name} - {time.strftime("%Y")}-01-01/1',
-                'balance_end_real': -1055.0,
-                'balance_start': 0.0,
-                'line_ids': [
-                    Command.create({
-                        'journal_id': ccd_journal.id,
-                        'payment_ref': 'Initial balance',
-                        'amount': -1055.0,
-                        'date': time.strftime('%Y-01-01'),
                     }),
                 ]
             },

@@ -98,7 +98,7 @@ class Partner extends models.Model {
                     </t>
                 </templates>
             </kanban>`,
-        "list,false": `<tree><field name="foo"/></tree>`,
+        "list,false": `<list><field name="foo"/></list>`,
         "pivot,false": `<pivot/>`,
         "search,false": `<search><field name="foo" string="Foo"/></search>`,
         "search,4": `
@@ -117,7 +117,7 @@ class Pony extends models.Model {
         { id: 9, name: "Fluttershy" },
     ];
     _views = {
-        "list,false": `<tree><field name="name"/></tree>`,
+        "list,false": `<list><field name="name"/></list>`,
         "form,false": `<form><field name="name"/></form>`,
         "search,false": `<search/>`,
     };
@@ -507,7 +507,7 @@ test.tags("desktop")("switch buttons are updated when switching between views", 
     });
 });
 test.tags("desktop")("pager is updated when switching between views", async () => {
-    Partner._views["list,false"] = `<tree limit="3"><field name="foo"/></tree>`;
+    Partner._views["list,false"] = `<list limit="3"><field name="foo"/></list>`;
 
     await mountWithCleanup(WebClient);
     await getService("action").doAction(4);
@@ -954,6 +954,39 @@ test.tags("desktop")("execute_action of type object: disable buttons (2)", async
     expect(".o_form_button_create").not.toHaveProperty("disabled", true, {
         message: "control panel buttons should still be enabled",
     });
+});
+
+test.tags("desktop")("view button: block ui attribute", async () => {
+    Partner._views["form,false"] = `
+            <form>
+                <header>
+                    <button name="4" string="Execute action" type="action" block-ui="1"/>
+                </header>
+            </form>`;
+
+    const def = new Deferred();
+    // delay the action
+    onRpc("onchange", () => def);
+
+    await mountWithCleanup(WebClient);
+    await getService("action").doAction(3);
+    expect(".o_list_view").toHaveCount(1);
+
+    // open first record in form view
+    await contains(".o_list_view .o_data_cell").click();
+    expect(".o_form_view").toHaveCount(1);
+    expect(".o-main-components-container .o_blockUI").toHaveCount(0);
+
+    // click on 'Execute action', to execute action 4
+    await contains('.o_form_view button[name="4"]').click();
+    expect(".o-main-components-container .o_blockUI").toHaveCount(1, {
+        message: "interface should be blocked during loading",
+    });
+
+    def.resolve();
+    await animationFrame();
+    expect(".o_kanban_view").toHaveCount(1);
+    expect(".o-main-components-container .o_blockUI").toHaveCount(0);
 });
 
 test("execute_action of type object raises error: re-enables buttons", async () => {
@@ -1676,7 +1709,7 @@ test.tags("desktop")("save current search", async () => {
 });
 
 test.tags("desktop")("list with default_order and favorite filter with no orderedBy", async () => {
-    Partner._views["list,1"] = '<tree default_order="foo desc"><field name="foo"/></tree>';
+    Partner._views["list,1"] = '<list default_order="foo desc"><field name="foo"/></list>';
     defineActions([
         {
             id: 100,
@@ -1824,7 +1857,7 @@ test.tags("desktop")(
 );
 
 test.tags("desktop")("destroy action with lazy loaded controller", async () => {
-    redirect("/web#action=3&id=2&view_type=form");
+    redirect("/odoo/action-3/2");
 
     await mountWithCleanup(WebClient);
     await animationFrame(); // blank component
@@ -2272,7 +2305,7 @@ test("do not restore after action button clicked", async () => {
 
 test("debugManager is active for views", async () => {
     serverState.debug = "1";
-    onRpc("check_access_rights", () => true);
+    onRpc("has_access", () => true);
     await mountWithCleanup(WebClient);
     await getService("action").doAction(1);
     expect(".o-dropdown--menu .o-dropdown-item:contains('Edit View: Kanban')").toHaveCount(0);
@@ -2502,7 +2535,7 @@ test("load a tree", async () => {
         type: "ir.actions.act_window",
         target: "current",
         res_model: "partner",
-        views: [[false, "tree"]],
+        views: [[false, "list"]],
     });
     expect(".o_list_view").toHaveCount(1);
 });
@@ -2559,7 +2592,7 @@ test.tags("desktop")("sample server: populate groups", async () => {
     });
 
     expect(".o_kanban_view .o_view_sample_data").toHaveCount(1);
-    expect(".o_column_title").toHaveText("December 2022");
+    expect(".o_column_title").toHaveText("December 2022\n(16)");
 
     await switchView("pivot");
     expect(".o_pivot_view .o_view_sample_data").toHaveCount(1);

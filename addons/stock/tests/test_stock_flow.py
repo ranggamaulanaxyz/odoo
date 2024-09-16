@@ -2138,6 +2138,7 @@ class TestStockFlow(TestStockCommon):
             picking.action_confirm()
             return picking
 
+        self.env['stock.picking.type'].browse(self.picking_type_out).reservation_method = 'at_confirm'
         out01 = create_picking(self.picking_type_out, self.stock_location, self.customer_location)
         out02 = create_picking(self.picking_type_out, self.stock_location, self.customer_location, sequence=2, delay=1)
         in01 = create_picking(self.picking_type_in, self.supplier_location, self.stock_location, delay=2)
@@ -2182,9 +2183,7 @@ class TestStockFlow(TestStockCommon):
         })
         move_out.quantity = 7
         move_out.picked = True
-        action_dict = picking_out.button_validate()
-        backorder_wizard = Form(self.env[action_dict['res_model']].with_context(action_dict['context'])).save()
-        backorder_wizard.process()
+        Form.from_action(self.env, picking_out.button_validate()).save().process()
 
         bo = self.env['stock.picking'].search([('backorder_id', '=', picking_out.id)])
         self.assertEqual(bo.state, 'assigned')
@@ -2378,8 +2377,8 @@ class TestStockFlow(TestStockCommon):
         steps), the out-move should be automatically assigned.
         """
         self.env['ir.config_parameter'].sudo().set_param('stock.picking_no_auto_reserve', False)
-
         warehouse = self.env['stock.warehouse'].search([('company_id', '=', self.env.company.id)], limit=1)
+        warehouse.out_type_id.reservation_method = 'by_date'
         warehouse.reception_steps = 'two_steps'
 
         out_move = self.env['stock.move'].create({
@@ -2536,9 +2535,7 @@ class TestStockFlow(TestStockCommon):
         # update the quantity recvied
         move1.quantity = 2
         move2.quantity = 0
-        res = picking.button_validate()
-        wizard = Form(self.env[res['res_model']].with_context(res['context'])).save()
-        wizard.process()
+        Form.from_action(self.env, picking.button_validate()).save().process()
         backorder = picking.backorder_ids
         self.assertRecordValues(backorder.move_ids[0], [{'product_id': self.productB.id, 'quantity': 10}])
         self.assertRecordValues(backorder.move_ids[1], [{'product_id': self.productA.id, 'quantity': 8}])
@@ -2647,8 +2644,7 @@ class TestStockFlowPostInstall(TestStockCommon):
         self.assertIsInstance(res, dict)
         self.assertEqual(res.get('res_model'), 'stock.backorder.confirmation')
 
-        wizard = Form(self.env[res['res_model']].with_context(res['context'])).save()
-        wizard.process()
+        Form.from_action(self.env, res).save().process()
 
         backorder = picking.backorder_ids
         self.assertEqual(backorder.move_ids.product_uom_qty, 2)

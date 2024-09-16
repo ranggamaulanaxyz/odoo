@@ -52,6 +52,7 @@ class ResConfigSettings(models.TransientModel):
     pos_module_pos_discount = fields.Boolean(related='pos_config_id.module_pos_discount', readonly=False)
     pos_module_pos_hr = fields.Boolean(related='pos_config_id.module_pos_hr', readonly=False)
     pos_module_pos_restaurant = fields.Boolean(related='pos_config_id.module_pos_restaurant', readonly=False)
+    pos_module_pos_avatax = fields.Boolean(related='pos_config_id.module_pos_avatax', readonly=False)
     pos_is_order_printer = fields.Boolean(compute='_compute_pos_printer', store=True, readonly=False)
     pos_printer_ids = fields.Many2many(related='pos_config_id.printer_ids', readonly=False)
 
@@ -73,7 +74,6 @@ class ResConfigSettings(models.TransientModel):
     pos_iface_print_skip_screen = fields.Boolean(related='pos_config_id.iface_print_skip_screen', readonly=False)
     pos_iface_print_via_proxy = fields.Boolean(string='Print via Proxy', compute='_compute_pos_iface_print_via_proxy', readonly=False, store=True)
     pos_iface_scan_via_proxy = fields.Boolean(string='Scan via Proxy', compute='_compute_pos_iface_scan_via_proxy', readonly=False, store=True)
-    pos_iface_start_categ_id = fields.Many2one('pos.category', string='Initial Category', compute='_compute_pos_iface_start_categ_id', readonly=False, store=True)
     pos_iface_tax_included = fields.Selection(related='pos_config_id.iface_tax_included', readonly=False)
     pos_iface_tipproduct = fields.Boolean(related='pos_config_id.iface_tipproduct', readonly=False)
     pos_invoice_journal_id = fields.Many2one(related='pos_config_id.invoice_journal_id', readonly=False)
@@ -99,7 +99,6 @@ class ResConfigSettings(models.TransientModel):
     pos_sequence_id = fields.Many2one(related='pos_config_id.sequence_id')
     pos_set_maximum_difference = fields.Boolean(related='pos_config_id.set_maximum_difference', readonly=False)
     pos_ship_later = fields.Boolean(related='pos_config_id.ship_later', readonly=False)
-    pos_start_category = fields.Boolean(related='pos_config_id.start_category', readonly=False)
     pos_tax_regime_selection = fields.Boolean(related='pos_config_id.tax_regime_selection', readonly=False)
     pos_tip_product_id = fields.Many2one('product.product', string='Tip Product', compute='_compute_pos_tip_product_id', readonly=False, store=True)
     pos_use_pricelist = fields.Boolean(related='pos_config_id.use_pricelist', readonly=False)
@@ -115,6 +114,7 @@ class ResConfigSettings(models.TransientModel):
     pos_module_pos_sms = fields.Boolean(related="pos_config_id.module_pos_sms", readonly=False)
     pos_is_closing_entry_by_product = fields.Boolean(related='pos_config_id.is_closing_entry_by_product', readonly=False)
     pos_order_edit_tracking = fields.Boolean(related="pos_config_id.order_edit_tracking", readonly=False)
+    pos_orderlines_sequence_in_cart_by_category = fields.Boolean(related='pos_config_id.orderlines_sequence_in_cart_by_category', readonly=False)
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -210,14 +210,6 @@ class ResConfigSettings(models.TransientModel):
                 res_config.pos_iface_available_categ_ids = False
             else:
                 res_config.pos_iface_available_categ_ids = res_config.pos_config_id.iface_available_categ_ids
-
-    @api.depends('pos_start_category', 'pos_config_id')
-    def _compute_pos_iface_start_categ_id(self):
-        for res_config in self:
-            if not res_config.pos_start_category:
-                res_config.pos_iface_start_categ_id = False
-            else:
-                res_config.pos_iface_start_categ_id = res_config.pos_config_id.iface_start_categ_id
 
     @api.depends('pos_iface_available_categ_ids')
     def _compute_pos_selectable_categ_ids(self):

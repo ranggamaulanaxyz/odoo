@@ -4,32 +4,47 @@ import ast
 import json
 from collections import defaultdict
 
-from odoo import api, fields, models, _, _lt
+from odoo import api, fields, models
 from odoo.osv import expression
 from odoo.tools import Query, SQL
+from odoo.tools.misc import unquote
+from odoo.tools.translate import _
 
 
 class ProjectProject(models.Model):
     _inherit = 'project.project'
 
+    def _domain_sale_line_id(self):
+        domain = expression.AND([
+            self.env['sale.order.line']._sellable_lines_domain(),
+            self.env['sale.order.line']._domain_sale_line_service(),
+            [
+                ('order_partner_id', '=?', unquote("partner_id")),
+            ],
+        ])
+        return str(domain)
+
     allow_billable = fields.Boolean("Billable")
     sale_line_id = fields.Many2one(
         'sale.order.line', 'Sales Order Item', copy=False,
         compute="_compute_sale_line_id", store=True, readonly=False, index='btree_not_null',
-        domain=lambda self: self.env['sale.order.line']._domain_sale_line_service_str("[('order_partner_id', '=?', partner_id)]"),
+        domain=_domain_sale_line_id,
         help="Sales order item that will be selected by default on the tasks and timesheets of this project,"
             " except if the employee set on the timesheets is explicitely linked to another sales order item on the project.\n"
             "It can be modified on each task and timesheet entry individually if necessary.")
-    sale_order_id = fields.Many2one(string='Sales Order', related='sale_line_id.order_id', export_string_translation=False)
+    sale_order_id = fields.Many2one(related='sale_line_id.order_id', export_string_translation=False)
     has_any_so_to_invoice = fields.Boolean('Has SO to Invoice', compute='_compute_has_any_so_to_invoice', export_string_translation=False)
     sale_order_line_count = fields.Integer(compute='_compute_sale_order_count', groups='sales_team.group_sale_salesman', export_string_translation=False)
     sale_order_count = fields.Integer(compute='_compute_sale_order_count', groups='sales_team.group_sale_salesman', export_string_translation=False)
     has_any_so_with_nothing_to_invoice = fields.Boolean('Has a SO with an invoice status of No', compute='_compute_has_any_so_with_nothing_to_invoice', export_string_translation=False)
     invoice_count = fields.Integer(compute='_compute_invoice_count', groups='account.group_account_readonly', export_string_translation=False)
-    vendor_bill_count = fields.Integer(related='analytic_account_id.vendor_bill_count', groups='account.group_account_readonly', export_string_translation=False)
+    vendor_bill_count = fields.Integer(related='account_id.vendor_bill_count', groups='account.group_account_readonly', export_string_translation=False)
     partner_id = fields.Many2one(compute="_compute_partner_id", store=True, readonly=False)
     display_sales_stat_buttons = fields.Boolean(compute='_compute_display_sales_stat_buttons', export_string_translation=False)
     sale_order_state = fields.Selection(related='sale_order_id.state', export_string_translation=False)
+    reinvoiced_sale_order_id = fields.Many2one('sale.order', string='Sales Order', groups='sales_team.group_sale_salesman', domain="[('partner_id', '=', partner_id)]",
+        help="Products added to stock pickings, whose operation type is configured to generate analytic costs, will be re-invoiced in this sales order if they are set up for it.",
+    )
 
     @api.model
     def _map_tasks_default_values(self, project):
@@ -100,13 +115,13 @@ class ProjectProject(models.Model):
 
     def _compute_invoice_count(self):
         data = self.env['account.move.line']._read_group(
-            [('move_id.move_type', 'in', ['out_invoice', 'out_refund']), ('analytic_distribution', 'in', self.analytic_account_id.ids)],
+            [('move_id.move_type', 'in', ['out_invoice', 'out_refund']), ('analytic_distribution', 'in', self.account_id.ids)],
             groupby=['analytic_distribution'],
             aggregates=['__count'],
         )
         data = {int(account_id): move_count for account_id, move_count in data}
         for project in self:
-            project.invoice_count = data.get(project.analytic_account_id.id, 0)
+            project.invoice_count = data.get(project.account_id.id, 0)
 
     @api.depends('allow_billable', 'partner_id')
     def _compute_display_sales_stat_buttons(self):
@@ -120,6 +135,16 @@ class ProjectProject(models.Model):
             'target': 'self',
             'url': self.get_portal_url(),
         }
+
+    @api.onchange('reinvoiced_sale_order_id')
+    def _onchange_reinvoiced_sale_order_id(self):
+        if not self.sale_line_id and self.reinvoiced_sale_order_id.order_line:
+            self.sale_line_id = self.reinvoiced_sale_order_id.order_line[0]
+
+    @api.onchange('sale_line_id')
+    def _onchange_sale_line_id(self):
+        if not self.reinvoiced_sale_order_id and self.sale_line_id:
+            self.reinvoiced_sale_order_id = self.sale_line_id.order_id
 
     def action_view_sols(self):
         self.ensure_one()
@@ -145,7 +170,7 @@ class ProjectProject(models.Model):
             action_window.update({
                 'domain': [('id', 'in', all_sale_order_lines.ids)],
                 'views': [
-                    (self.env.ref('sale_project.view_order_line_tree_with_create').id, 'tree'),
+                    (self.env.ref('sale_project.view_order_line_tree_with_create').id, 'list'),
                     (self.env.ref('sale_project.sale_order_line_view_form_editable').id, 'form'),
                 ],
             })
@@ -163,7 +188,7 @@ class ProjectProject(models.Model):
                 "create": self.env.context.get('create_for_project_id', embedded_action_context),
                 "show_sale": True,
                 'default_partner_id': self.partner_id.id,
-                'default_analytic_account_id': self.analytic_account_id.id,
+                'default_project_id': self.id,
                 "create_for_project_id": self.id if embedded_action_context else False,
                 "from_embedded_action": embedded_action_context
             },
@@ -180,7 +205,7 @@ class ProjectProject(models.Model):
         else:
             action_window.update({
                 "domain": [('id', 'in', all_sale_orders.ids)],
-                "views": [[False, "tree"], [False, "kanban"], [False, "calendar"], [False, "pivot"],
+                "views": [[False, "list"], [False, "kanban"], [False, "calendar"], [False, "pivot"],
                            [False, "graph"], [False, "activity"], [False, "form"]],
             })
         return action_window
@@ -188,7 +213,7 @@ class ProjectProject(models.Model):
     def action_get_list_view(self):
         action = super().action_get_list_view()
         if self.allow_billable:
-            action['views'] = [(self.env.ref('sale_project.project_milestone_view_tree').id, 'tree'), (False, 'form')]
+            action['views'] = [(self.env.ref('sale_project.project_milestone_view_tree').id, 'list'), (False, 'form')]
         return action
 
     def action_profitability_items(self, section_name, domain=None, res_id=False):
@@ -250,7 +275,7 @@ class ProjectProject(models.Model):
         move_lines = self.env['account.move.line'].search_fetch(
             [
                 ('move_id.move_type', 'in', ['out_invoice', 'out_refund']),
-                ('analytic_distribution', 'in', self.analytic_account_id.ids),
+                ('analytic_distribution', 'in', self.account_id.ids),
             ],
             ['move_id'],
         )
@@ -259,10 +284,9 @@ class ProjectProject(models.Model):
             'name': _('Invoices'),
             'type': 'ir.actions.act_window',
             'res_model': 'account.move',
-            'views': [[False, 'tree'], [False, 'form'], [False, 'kanban']],
+            'views': [[False, 'list'], [False, 'form'], [False, 'kanban']],
             'domain': [('id', 'in', invoice_ids)],
             'context': {
-                'create': self.env.context.get('from_embedded_action', False),
                 'default_move_type': 'out_invoice',
                 'default_partner_id': self.partner_id.id,
                 'project_id': self.id
@@ -353,8 +377,11 @@ class ProjectProject(models.Model):
         SaleOrderLine = self.env['sale.order.line']
         sale_order_line_domain = [
             '&',
-            ('order_id', 'any', [('analytic_account_id', 'in', self.analytic_account_id.ids)]),
-            ('display_type', '=', False),
+                ('display_type', '=', False),
+                ('order_id', 'any', ['|',
+                    ('id', 'in', self.reinvoiced_sale_order_id.ids),
+                    ('project_id', 'in', self.ids),
+                ]),
         ]
         sale_order_line_query = SaleOrderLine._where_calc(sale_order_line_domain)
         sale_order_line_sql = sale_order_line_query.select(
@@ -368,32 +395,66 @@ class ProjectProject(models.Model):
 
     def get_panel_data(self):
         panel_data = super().get_panel_data()
+        if self.allow_billable:
+            sale_items = self.get_sale_items_data(limit=5)
+            revenues = panel_data['profitability_items']['revenues']['data']
+            for section in revenues:
+                if section['id'] in sale_items:
+                    section['sale_items'] = sale_items[section['id']]['data']
+                    section['displayLoadMore'] = sale_items[section['id']]['displayLoadMore']
+                    section['isFolded'] = True
         return {
             **panel_data,
             'show_sale_items': self.allow_billable,
-            'sale_items': self._get_sale_items() if self.allow_billable else {},
         }
 
-    def get_sale_items_data(self, offset=0, limit=None, with_action=True):
+    def get_sale_items_data(self, offset=0, limit=None, with_action=True, section_id=None):
         if not self.env.user.has_group('project.group_project_user'):
             return {}
-        sols = self.env['sale.order.line'].sudo().search(
-            self._get_sale_items_domain(),
-            offset=offset,
-            limit=limit,
-        )
+
+        all_sols = self.env['sale.order.line']
+        sols_per_section_id = self._get_items_id_per_section_id()
+
+        if section_id:
+            all_sols = self.env['sale.order.line'].sudo().search(
+                self._get_domain_from_section_id(section_id),
+                offset=offset,
+                limit=limit,
+            )
+        else:
+            for section in sols_per_section_id:
+                sols = self.env['sale.order.line'].sudo().search(
+                    self._get_domain_from_section_id(section),
+                    offset=offset,
+                    limit=limit and limit + 1,
+                )
+                if limit and len(sols) == limit + 1:
+                    sols = sols - sols[5]
+                    sols_per_section_id[section]['displayLoadMore'] = True
+                sols_per_section_id[section]['data'] = sols
+                all_sols |= sols
+
         # filter to only get the action for the SOLs that the user can read
-        action_per_sol = sols.sudo(False)._filter_access_rules_python('read')._get_action_per_item() if with_action else {}
+        action_per_sol = all_sols.sudo(False)._filtered_access('read')._get_action_per_item() if with_action else {}
 
         def get_action(sol_id):
             """ Return the action vals to call it in frontend if the user can access to the SO related """
             action, res_id = action_per_sol.get(sol_id, (None, None))
             return {'action': {'name': action, 'resId': res_id, 'buttonContext': json.dumps({'active_id': sol_id, 'default_project_id': self.id})}} if action else {}
 
-        return [{
-            **sol_read,
-            **get_action(sol_read['id']),
-        } for sol_read in sols.with_context(with_price_unit=True).read(['display_name', 'product_uom_qty', 'qty_delivered', 'qty_invoiced', 'product_uom'])]
+        if section_id:
+            # The 'section_id' param is set, which means the method was called with the 'load more' button. We don't have to sort the result.
+            return [{
+                **sol_read,
+                **get_action(sol_read['id']),
+            } for sol_read in all_sols.with_context(with_price_unit=True)._read_format(['name', 'product_uom_qty', 'qty_delivered', 'qty_invoiced', 'product_uom', 'product_id'])]
+
+        for section in sols_per_section_id:
+            sols = []
+            for sol_read in sols_per_section_id[section]['data'].with_context(with_price_unit=True)._read_format(['name', 'product_uom_qty', 'qty_delivered', 'qty_invoiced', 'product_uom', 'product_id']):
+                sols.append({**sol_read, **get_action(sol_read['id'])})
+            sols_per_section_id[section]['data'] = sols
+        return sols_per_section_id
 
     def _get_sale_items_domain(self, additional_domain=None):
         sale_items = self.sudo()._get_sale_order_items()
@@ -403,21 +464,22 @@ class ProjectProject(models.Model):
             ('state', '=', 'sale'),
             ('display_type', '=', False),
             '|',
-                '|',
-                    ('project_id', 'in', self.ids),
-                    ('project_id', '=', False),
+                ('project_id', 'in', [*self.ids, False]),
                 ('id', 'in', sale_items.ids),
         ]
         if additional_domain:
             domain = expression.AND([domain, additional_domain])
         return domain
 
-    def _get_sale_items(self, with_action=True):
-        domain = self._get_sale_items_domain()
+    def _get_items_id_per_section_id(self):
         return {
-            'total': self.env['sale.order.line'].sudo().search_count(domain),
-            'data': self.get_sale_items_data(limit=5, with_action=with_action),
+            'materials': {'data': [], 'displayLoadMore': False},
+            'service_revenues': {'data': [], 'displayLoadMore': False},
         }
+
+    def _get_domain_from_section_id(self, section_id):
+        #  When the sale_timesheet module is not installed, all service products are grouped under the 'service revenues' section.
+        return self._get_sale_items_domain([('product_type', '!=' if section_id == 'materials' else '=', 'service')])
 
     def _show_profitability(self):
         self.ensure_one()
@@ -429,10 +491,10 @@ class ProjectProject(models.Model):
     def _get_profitability_labels(self):
         return {
             **super()._get_profitability_labels(),
-            'service_revenues': _lt('Other Services'),
-            'materials': _lt('Materials'),
-            'other_invoice_revenues': _lt('Customer Invoices'),
-            'downpayments': _lt('Down Payments'),
+            'service_revenues': self.env._('Other Services'),
+            'materials': self.env._('Materials'),
+            'other_invoice_revenues': self.env._('Customer Invoices'),
+            'downpayments': self.env._('Down Payments'),
         }
 
     def _get_profitability_sequence_per_invoice_type(self):
@@ -495,7 +557,7 @@ class ProjectProject(models.Model):
                     'id': 'downpayments',
                     'sequence': sequence_per_invoice_type['downpayments'],
                     'invoiced': downpayment_amount_invoiced,
-                    'to_invoice': -downpayment_amount_invoiced
+                    'to_invoice': -downpayment_amount_invoiced,
                 }
                 if with_action and (
                     self.env.user.has_group('sales_team.group_sale_salesman_all_leads,')
@@ -543,7 +605,7 @@ class ProjectProject(models.Model):
                 materials = revenues_dict.get(section_name, {})
                 sale_order_items = self.env['sale.order.line'] \
                     .browse(materials.pop('record_ids', [])) \
-                    ._filter_access_rules_python('read')
+                    ._filtered_access('read')
                 if sale_order_items:
                     args = [section_name, [('id', 'in', sale_order_items.ids)]]
                     if len(sale_order_items) == 1:
@@ -594,7 +656,7 @@ class ProjectProject(models.Model):
         invoices_move_lines = self.env['account.move.line'].sudo().search_fetch(
             expression.AND([
                 self._get_revenues_items_from_invoices_domain([('id', 'not in', excluded_move_line_ids)]),
-                [('analytic_distribution', 'in', self.analytic_account_id.ids)]
+                [('analytic_distribution', 'in', self.account_id.ids)]
             ]),
             ['price_subtotal', 'parent_state', 'currency_id', 'analytic_distribution', 'move_type', 'move_id']
         )
@@ -607,7 +669,7 @@ class ProjectProject(models.Model):
                 # an analytic account can appear several time in an analytic distribution with different repartition percentage
                 analytic_contribution = sum(
                     percentage for ids, percentage in move_line.analytic_distribution.items()
-                    if str(self.analytic_account_id.id) in ids.split(',')
+                    if str(self.account_id.id) in ids.split(',')
                 ) / 100.
                 if move_line.parent_state == 'draft':
                     if move_line.move_type == 'out_invoice':
@@ -685,7 +747,7 @@ class ProjectProject(models.Model):
             self_sudo = self.sudo()
             buttons.append({
                 'icon': 'dollar',
-                'text': _lt('Sales Orders'),
+                'text': self.env._('Sales Orders'),
                 'number': self_sudo.sale_order_count,
                 'action_type': 'object',
                 'action': 'action_view_sos',
@@ -698,7 +760,7 @@ class ProjectProject(models.Model):
         if self.env.user.has_group('sales_team.group_sale_salesman_all_leads'):
             buttons.append({
                 'icon': 'dollar',
-                'text': _lt('Sales Order Items'),
+                'text': self.env._('Sales Order Items'),
                 'number': self.sale_order_line_count,
                 'action_type': 'object',
                 'action': 'action_view_sols',
@@ -709,18 +771,18 @@ class ProjectProject(models.Model):
             self_sudo = self.sudo()
             buttons.append({
                 'icon': 'pencil-square-o',
-                'text': _lt('Invoices'),
+                'text': self.env._('Invoices'),
                 'number': self_sudo.invoice_count,
                 'action_type': 'object',
                 'action': 'action_open_project_invoices',
-                'show': bool(self.analytic_account_id) and self_sudo.invoice_count > 0,
+                'show': bool(self.account_id) and self_sudo.invoice_count > 0,
                 'sequence': 30,
             })
         if self.env.user.has_group('account.group_account_readonly'):
             self_sudo = self.sudo()
             buttons.append({
                 'icon': 'pencil-square-o',
-                'text': _lt('Vendor Bills'),
+                'text': self.env._('Vendor Bills'),
                 'number': self_sudo.vendor_bill_count,
                 'action_type': 'object',
                 'action': 'action_open_project_vendor_bills',
@@ -763,7 +825,7 @@ class ProjectProject(models.Model):
         move_lines = self.env['account.move.line'].search_fetch(
             [
                 ('move_id.move_type', 'in', ['in_invoice', 'in_refund']),
-                ('analytic_distribution', 'in', self.analytic_account_id.ids),
+                ('analytic_distribution', 'in', self.account_id.ids),
             ],
             ['move_id'],
         )
@@ -772,14 +834,18 @@ class ProjectProject(models.Model):
             'name': _('Vendor Bills'),
             'type': 'ir.actions.act_window',
             'res_model': 'account.move',
-            'views': [[False, 'tree'], [False, 'form'], [False, 'kanban']],
+            'views': [[False, 'list'], [False, 'form'], [False, 'kanban']],
             'domain': [('id', 'in', vendor_bill_ids)],
             'context': {
                 'default_move_type': 'in_invoice',
                 'project_id': self.id,
-            }
+            },
+            'help': "<p class='o_view_nocontent_smiling_face'>%s</p><p>%s</p>" % (
+                _("Create a vendor bill"),
+                _("Create invoices, register payments and keep track of the discussions with your vendors."),
+            ),
         }
-        if len(vendor_bill_ids) == 1:
+        if not self.env.context.get('from_embedded_action') and len(vendor_bill_ids) == 1:
             action_window['views'] = [[False, 'form']]
             action_window['res_id'] = vendor_bill_ids[0]
         return action_window

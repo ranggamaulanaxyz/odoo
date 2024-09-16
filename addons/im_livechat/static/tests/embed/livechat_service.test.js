@@ -37,7 +37,11 @@ test("persisted session history", async () => {
     });
     expirableStorage.setItem(
         "im_livechat.saved_state",
-        JSON.stringify({ store: { "discuss.channel": [{ id: channelId }] }, persisted: true })
+        JSON.stringify({
+            store: { "discuss.channel": [{ id: channelId }] },
+            persisted: true,
+            livechatUserId: serverState.publicUserId,
+        })
     );
     pyEnv["mail.message"].create({
         author_id: serverState.partnerId,
@@ -123,26 +127,11 @@ test("Only necessary requests are made when creating a new chat", async () => {
             },
             post_data: {
                 body: "Hello!",
-                attachment_ids: [],
                 message_type: "comment",
-                partner_ids: [],
                 subtype_xmlid: "mail.mt_comment",
             },
-            attachment_tokens: [],
-            canned_response_ids: [],
-            partner_emails: [],
-            partner_additional_values: {},
             thread_id: threadId,
             thread_model: "discuss.channel",
-        })}`,
-        `/mail/data - ${JSON.stringify({
-            channels_as_member: true, // called because mail/core/web is loaded in test bundle
-            context: {
-                lang: "en",
-                tz: "taht",
-                uid: serverState.userId,
-                allowed_company_ids: [1],
-            },
         })}`,
     ]);
 });

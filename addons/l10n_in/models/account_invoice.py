@@ -85,8 +85,8 @@ class AccountMove(models.Model):
         def build_warning(record, action_name, message, views, domain=False):
             return {
                 'message': message,
-                'action_text': _("View %s", action_name),
-                'action': record._get_records_action(name=_("Check %s", action_name), target='current', views=views, domain=domain or [])
+                'action_text': self.env._("View %s", action_name),
+                'action': record._get_records_action(name=self.env._("Check %s", action_name), target='current', views=views, domain=domain or [])
             }
 
         indian_invoice = self.filtered(lambda m: m.country_code == 'IN' and m.move_type != 'entry')
@@ -111,7 +111,7 @@ class AccountMove(models.Model):
                         message=msg,
                         action_name=_("Journal Items(s)"),
                         record=lines,
-                        views=[(self.env.ref("l10n_in.view_move_line_tree_hsn_l10n_in").id, "tree")],
+                        views=[(self.env.ref("l10n_in.view_move_line_tree_hsn_l10n_in").id, "list")],
                         domain=[('id', 'in', lines.ids)]
                     )
                 } if lines else {}
@@ -159,6 +159,10 @@ class AccountMove(models.Model):
         # TO OVERRIDE
         self.ensure_one()
         return False
+
+    def _can_be_unlinked(self):
+        self.ensure_one()
+        return (self.country_code != 'IN' or not self.posted_before) and super()._can_be_unlinked()
 
     def _generate_qr_code(self, silent_errors=False):
         self.ensure_one()

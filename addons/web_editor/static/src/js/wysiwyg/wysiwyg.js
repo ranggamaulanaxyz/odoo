@@ -187,6 +187,7 @@ export class Wysiwyg extends Component {
                 this.odooEditor.historyPauseSteps();
                 try {
                     this._processAndApplyColor(colorType, props.color, true);
+                    this.odooEditor._computeHistorySelection();
                 } finally {
                     this.odooEditor.historyUnpauseSteps();
                 }
@@ -494,6 +495,7 @@ export class Wysiwyg extends Component {
             preHistoryUndo: () => {
                 this.destroyLinkTools();
             },
+            beforeAnyCommand: this._beforeAnyCommand.bind(this),
             commands: powerboxOptions.commands,
             categories: powerboxOptions.categories,
             plugins: options.editorPlugins,
@@ -523,9 +525,14 @@ export class Wysiwyg extends Component {
         }
 
         this._initialValue = this.getValue();
-        const $wrapwrap = $('#wrapwrap');
-        if ($wrapwrap.length) {
-            $wrapwrap[0].addEventListener('scroll', this.odooEditor.multiselectionRefresh, { passive: true });
+
+        // TODO this code should be reviewed. Previously, it searched for the
+        // wrapwrap and added some scroll handler if found... we are now
+        // continuing to search for it, but it is not clear why. As the wrapwrap
+        // will be removed, this code will not stay for too long anyway.
+        if ($('wrapwrap').length) {
+            this.multiSelectionTarget = $().getScrollingTarget(this.odooEditor.document);
+            this.multiSelectionTarget.addEventListener('scroll', this.odooEditor.multiselectionRefresh, { passive: true });
         }
 
         this.$editable.on('click', '[data-oe-field][data-oe-sanitize-prevent-edition]', () => {
@@ -900,10 +907,7 @@ export class Wysiwyg extends Component {
         const $body = $(document.body);
         $body.off('mousemove', this.resizerMousemove);
         $body.off('mouseup', this.resizerMouseup);
-        const $wrapwrap = $('#wrapwrap');
-        if ($wrapwrap.length && this.odooEditor) {
-            $('#wrapwrap')[0].removeEventListener('scroll', this.odooEditor.multiselectionRefresh, { passive: true });
-        }
+        this.multiSelectionTarget?.removeEventListener('scroll', this.odooEditor.multiselectionRefresh, { passive: true });
         this.$editable?.off('.Wysiwyg');
         this.toolbarEl?.remove();
         this.imageCropEL?.remove();
@@ -1452,6 +1456,7 @@ export class Wysiwyg extends Component {
                 this._onClick = ev => {
                     if (
                         !ev.target.closest('#create-link') &&
+                        !ev.target.closest(".o_technical_modal") &&
                         (!ev.target.closest('.oe-toolbar') || !ev.target.closest('we-customizeblock-option')) &&
                         !ev.target.closest('.ui-autocomplete') &&
                         (!this.state.linkToolProps || ![ev.target, ...wysiwygUtils.ancestors(ev.target)].includes(this.linkToolsInfos.link))
@@ -3589,6 +3594,23 @@ export class Wysiwyg extends Component {
             el.setAttribute('src', newAttachmentSrc);
             // Also update carousel thumbnail.
             weUtils.forwardToThumbnail(el);
+        }
+    }
+
+    /**
+     * @private
+     */
+    _beforeAnyCommand() {
+        // Remove any marker of default text in the selection on which the
+        // command is being applied. Note that this needs to be done *before*
+        // the command and not after because some commands (e.g. font-size)
+        // rely on some elements not to have the class to fully work.
+        for (const node of OdooEditorLib.getSelectedNodes(this.$editable[0])) {
+            const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+            const defaultTextEl = el.closest('.o_default_snippet_text');
+            if (defaultTextEl) {
+                defaultTextEl.classList.remove('o_default_snippet_text');
+            }
         }
     }
 

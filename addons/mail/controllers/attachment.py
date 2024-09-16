@@ -48,7 +48,9 @@ class AttachmentController(http.Controller):
     @http.route("/mail/attachment/upload", methods=["POST"], type="http", auth="public")
     @add_guest_to_context
     def mail_attachment_upload(self, ufile, thread_id, thread_model, is_pending=False, **kwargs):
-        thread = request.env[thread_model].with_context(active_test=False).search([("id", "=", thread_id)])
+        thread = request.env[thread_model]._get_thread_with_access(
+            int(thread_id), mode=request.env[thread_model]._mail_post_access, **kwargs
+        )
         if not thread:
             raise NotFound()
         if thread_model == "discuss.channel" and not thread.allow_public_upload and not request.env.user._is_internal():
@@ -75,7 +77,7 @@ class AttachmentController(http.Controller):
             # sudo: ir.attachment - posting a new attachment on an accessible thread
             attachment = request.env["ir.attachment"].sudo().create(vals)
             attachment._post_add_create(**kwargs)
-            res = {"data": Store(attachment, access_token=True).get_result()}
+            res = {"data": Store(attachment, extra_fields=["access_token"]).get_result()}
         except AccessError:
             res = {"error": _("You are not allowed to upload an attachment here.")}
         return request.make_json_response(res)

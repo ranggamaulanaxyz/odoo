@@ -7,6 +7,7 @@ import pytz
 import secrets
 
 from odoo import api, fields, models, _, Command
+from odoo.http import request
 from odoo.osv.expression import OR, AND
 from odoo.exceptions import AccessError, ValidationError, UserError
 from odoo.tools import convert, SQL
@@ -19,7 +20,10 @@ class PosConfig(models.Model):
     _check_company_auto = True
 
     def _default_warehouse_id(self):
-        return self.env['stock.warehouse'].search(self.env['stock.warehouse']._check_company_domain(self.env.company), limit=1).id
+        warehouse = self.env['stock.warehouse'].search(self.env['stock.warehouse']._check_company_domain(self.env.company), limit=1).id
+        if not warehouse:
+            self.env['stock.warehouse']._warehouse_redirect_warning()
+        return warehouse
 
     def _default_picking_type_id(self):
         return self.env['stock.warehouse'].search(self.env['stock.warehouse']._check_company_domain(self.env.company), limit=1).pos_type_id.id
@@ -103,8 +107,6 @@ class PosConfig(models.Model):
     iface_print_skip_screen = fields.Boolean(string='Skip Preview Screen', default=True,
         help='The receipt screen will be skipped if the receipt can be printed automatically.')
     iface_tax_included = fields.Selection([('subtotal', 'Tax-Excluded Price'), ('total', 'Tax-Included Price')], string="Tax Display", default='total', required=True)
-    iface_start_categ_id = fields.Many2one('pos.category', string='Initial Category',
-        help='The point of sale will display this product category by default. If no category is specified, all available products will be shown.')
     iface_available_categ_ids = fields.Many2many('pos.category', string='Available PoS Product Categories',
         help='The point of sale will only display products which are within one of the selected category trees. If no category is specified, all available products will be shown')
     customer_display_type = fields.Selection(selection=lambda self: self._get_customer_display_types(), string='Customer Facing Display', help="Show checkout to customers.", default='local')
@@ -154,9 +156,9 @@ class PosConfig(models.Model):
     default_bill_ids = fields.Many2many('pos.bill', string="Coins/Bills")
     use_pricelist = fields.Boolean("Use a pricelist.")
     tax_regime_selection = fields.Boolean("Tax Regime Selection value")
-    start_category = fields.Boolean("Start Category", default=False)
     limit_categories = fields.Boolean("Restrict Categories")
     module_pos_restaurant = fields.Boolean("Is a Bar/Restaurant")
+    module_pos_avatax = fields.Boolean("AvaTax PoS Integration", help="Use automatic taxes mapping with Avatax in PoS")
     module_pos_discount = fields.Boolean("Global Discounts")
     is_posbox = fields.Boolean("PosBox")
     is_header_or_footer = fields.Boolean("Custom Header & Footer")
@@ -195,6 +197,8 @@ class PosConfig(models.Model):
         string='Closing Entry by product',
         help="Display the breakdown of sales lines by product in the automatically generated closing entry.")
     order_edit_tracking = fields.Boolean(string="Track orders edits", help="Store edited orders in the backend", default=False)
+    orderlines_sequence_in_cart_by_category = fields.Boolean(string="Order cart by category's sequence", default=False,
+        help="When active, orderlines will be sorted based on product category and sequence in the product screen's order cart.")
 
     @api.model
     def _load_pos_data_domain(self, data):
@@ -327,13 +331,6 @@ class PosConfig(models.Model):
                                         " the Accounting application."))
             if config.invoice_journal_id.currency_id and config.invoice_journal_id.currency_id != config.currency_id:
                 raise ValidationError(_("The invoice journal must be in the same currency as the Sales Journal or the company currency if that is not set."))
-
-    @api.constrains('iface_start_categ_id', 'iface_available_categ_ids')
-    def _check_start_categ(self):
-        for config in self:
-            allowed_categ_ids = config.iface_available_categ_ids or self.env['pos.category'].search([])
-            if config.iface_start_categ_id and config.iface_start_categ_id not in allowed_categ_ids:
-                raise ValidationError(_("Start category should belong in the available categories."))
 
     def _check_payment_method_ids(self):
         self.ensure_one()
@@ -608,9 +605,13 @@ class PosConfig(models.Model):
         if not self.current_session_id:
             self.env['pos.session'].create({'user_id': self.env.uid, 'config_id': self.id})
         path = '/pos/web' if self._force_http() else '/pos/ui'
+        pos_url = path + '?config_id=%d&from_backend=True' % self.id
+        debug = request and request.session.debug
+        if debug:
+            pos_url += '&debug=%s' % debug
         return {
             'type': 'ir.actions.act_url',
-            'url': path + '?config_id=%d' % self.id,
+            'url': pos_url,
             'target': 'self',
         }
 
@@ -649,7 +650,7 @@ class PosConfig(models.Model):
         self._check_pricelists()  # The pricelist company might have changed after the first opening of the session
         return {
             'name': _('Session'),
-            'view_mode': 'form,tree',
+            'view_mode': 'form,list',
             'res_model': 'pos.session',
             'res_id': session_id,
             'view_id': False,
@@ -857,8 +858,7 @@ class PosConfig(models.Model):
         cash_pm_from_ref = cash_ref and self.env.ref(cash_ref, raise_if_not_found=False)
         if cash_pm_from_ref:
             try:
-                cash_pm_from_ref.check_access_rights('read')
-                cash_pm_from_ref.check_access_rule('read')
+                cash_pm_from_ref.check_access('read')
                 cash_pm = cash_pm_from_ref
             except AccessError:
                 cash_pm = self._create_cash_payment_method()

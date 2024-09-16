@@ -8,15 +8,15 @@ export class RestaurantTable extends Base {
         super.setup(vals);
 
         this.table_number = vals.table_number || 0;
-
         this.uiState = {
-            orderCount: 0,
-            changeCount: 0,
-            skipCount: 0,
+            initialPosition: {},
         };
     }
     isParent(t) {
         return t.parent_id && (t.parent_id.id === this.id || this.isParent(t.parent_id));
+    }
+    getParent() {
+        return this.parent_id?.getParent() || this;
     }
     getParentSide() {
         if (!this.parent_id) {
@@ -62,8 +62,20 @@ export class RestaurantTable extends Base {
             y: this.getY() + this.height / 2,
         };
     }
+    get orders() {
+        return this.models["pos.order"].filter(
+            (o) =>
+                o.table_id?.id === this.id &&
+                // Include the orders that are in tipping state.
+                (!o.finalized || o.uiState.screen_data?.value?.name === "TipScreen")
+        );
+    }
     getOrder() {
         return this.parent_id?.getOrder?.() || this["<-pos.order.table_id"][0];
+    }
+    get hasOrder() {
+        const order = this.getOrder();
+        return order && !order.finalized;
     }
     setPositionAsIfLinked(parent, side) {
         // console.log("132")

@@ -60,17 +60,9 @@ test("many2many_avatar_user in kanban view", async () => {
         "m2x.avatar.user,false,kanban": `
             <kanban>
                 <templates>
-                    <t t-name="kanban-box">
-                        <div>
-                            <field name="user_id"/>
-                            <div class="oe_kanban_footer">
-                                <div class="o_kanban_record_bottom">
-                                    <div class="oe_kanban_bottom_right">
-                                        <field name="user_ids" widget="many2many_avatar_user"/>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                    <t t-name="kanban-card">
+                        <field name="user_id"/>
+                        <field name="user_ids" widget="many2many_avatar_user"/>
                     </t>
                 </templates>
             </kanban>`,
@@ -223,7 +215,7 @@ test('many2one_avatar_user widget edited by the smart action "Assign to me" in l
     pyEnv["m2x.avatar.user"].create([{ user_id: userId_2 }, { user_id: userId_1 }]);
     const views = {
         "m2x.avatar.user,false,list":
-            '<tree multi_edit="1"><field name="user_id" widget="many2one_avatar_user"/></tree>',
+            '<list multi_edit="1"><field name="user_id" widget="many2one_avatar_user"/></list>',
     };
     await pyEnv.withUser(userId_2, async () => {
         const { openView } = await start({ serverData: { views } });
@@ -320,7 +312,7 @@ test("avatar_user widget displays the appropriate user image in list view", asyn
     const avatarUserId = pyEnv["m2x.avatar.user"].create({ user_id: userId });
     const views = {
         "m2x.avatar.user,false,list":
-            '<tree><field name="user_id" widget="many2one_avatar_user"/></tree>',
+            '<list><field name="user_id" widget="many2one_avatar_user"/></list>',
     };
     const { openView } = await start({ serverData: { views } });
     await openView({
@@ -339,10 +331,8 @@ test("avatar_user widget displays the appropriate user image in kanban view", as
         "m2x.avatar.user,false,kanban": `
                 <kanban>
                     <templates>
-                        <t t-name="kanban-box">
-                            <div>
-                                <field name="user_id" widget="many2one_avatar_user"/>
-                            </div>
+                        <t t-name="kanban-card">
+                            <field name="user_id" widget="many2one_avatar_user"/>
                         </t>
                     </templates>
                 </kanban>`,
@@ -384,10 +374,8 @@ test("avatar card preview", async (assert) => {
         "m2x.avatar.user,false,kanban": `
                 <kanban>
                     <templates>
-                        <t t-name="kanban-box">
-                            <div>
-                                <field name="user_id" widget="many2one_avatar_user"/>
-                            </div>
+                        <t t-name="kanban-card">
+                            <field name="user_id" widget="many2one_avatar_user"/>
                         </t>
                     </templates>
                 </kanban>`,
@@ -438,7 +426,7 @@ test("many2one_avatar_user widget in list view", async () => {
     pyEnv["m2x.avatar.user"].create({ user_id: userId });
     const views = {
         "m2x.avatar.user,false,list":
-            '<tree><field name="user_id" widget="many2one_avatar_user"/></tree>',
+            '<list><field name="user_id" widget="many2one_avatar_user"/></list>',
     };
     const { openView } = await start({ serverData: { views } });
     await openView({

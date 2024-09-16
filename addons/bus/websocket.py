@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from weakref import WeakSet
 
 from werkzeug.local import LocalStack
+from werkzeug.datastructures import ImmutableMultiDict, MultiDict
 from werkzeug.exceptions import BadRequest, HTTPException, ServiceUnavailable
 
 import odoo
@@ -30,7 +31,7 @@ from odoo.modules.registry import Registry
 from odoo.service import model as service_model
 from odoo.service.server import CommonServer
 from odoo.service.security import check_session
-from odoo.tools import config
+from odoo.tools import config, lazy_property
 
 _logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def acquire_cursor(db):
     """ Try to acquire a cursor up to `MAX_TRY_ON_POOL_ERROR` """
     for tryno in range(1, MAX_TRY_ON_POOL_ERROR + 1):
         with suppress(PoolError):
-            return odoo.registry(db).cursor()
+            return Registry(db).cursor()
         time.sleep(random.uniform(DELAY_ON_POOL_ERROR, DELAY_ON_POOL_ERROR * tryno))
     raise PoolError('Failed to acquire cursor after %s retries' % MAX_TRY_ON_POOL_ERROR)
 
@@ -227,7 +228,7 @@ class Websocket:
     # How much time (in second) the history of last dispatched notifications is
     # kept in memory for each websocket.
     # To avoid duplicate notifications, we fetch them based on their ids.
-    # However during parallel transactions, ids are assigned immediately (whe
+    # However during parallel transactions, ids are assigned immediately (when
     # they are requested), but the notifications are dispatched at the time of
     # the commit. This means lower id notifications might be dispatched after
     # higher id notifications.
@@ -868,6 +869,13 @@ class WebsocketRequest:
         """
         self.update_env(context=dict(self.env.context, **overrides))
 
+    @lazy_property
+    def cookies(self):
+        cookies = MultiDict(self.httprequest.cookies)
+        if self.registry:
+            self.registry['ir.http']._sanitize_cookies(cookies)
+        return ImmutableMultiDict(cookies)
+
 
 class WebsocketConnectionHandler:
     SUPPORTED_VERSIONS = {'13'}
@@ -881,7 +889,7 @@ class WebsocketConnectionHandler:
     # Latest version of the websocket worker. This version should be incremented
     # every time `websocket_worker.js` is modified to force the browser to fetch
     # the new worker bundle.
-    _VERSION = "1.0.10"
+    _VERSION = "18.0-1"
 
     @classmethod
     def websocket_allowed(cls, request):

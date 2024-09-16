@@ -31,7 +31,7 @@ class AccountMove(models.Model):
                 'product_id': l.product_id.id,
                 'name': l.product_id.name,
                 'account_id': l.product_id.product_tmpl_id.get_product_accounts()['stock_input'].id,
-                'price_unit': l.currency_id._convert(l.price_subtotal, l.company_currency_id, l.company_id, self.invoice_date),
+                'price_unit': l.currency_id._convert(l.price_subtotal, l.company_currency_id, l.company_id, self.invoice_date or fields.Date.context_today(l)),
                 'split_method': l.product_id.split_method_landed_cost or 'equal',
             }) for l in landed_costs_lines],
         })
@@ -43,7 +43,7 @@ class AccountMove(models.Model):
         action = self.env["ir.actions.actions"]._for_xml_id("stock_landed_costs.action_stock_landed_cost")
         domain = [('id', 'in', self.landed_costs_ids.ids)]
         context = dict(self.env.context, default_vendor_bill_id=self.id)
-        views = [(self.env.ref('stock_landed_costs.view_stock_landed_cost_tree2').id, 'tree'), (False, 'form'), (False, 'kanban')]
+        views = [(self.env.ref('stock_landed_costs.view_stock_landed_cost_tree2').id, 'list'), (False, 'form'), (False, 'kanban')]
         return dict(action, domain=domain, context=context, views=views)
 
     def _post(self, soft=True):
@@ -75,4 +75,8 @@ class AccountMoveLine(models.Model):
         return layers.filtered(lambda svl: not svl.stock_landed_cost_id)
 
     def _eligible_for_cogs(self):
-        return super()._eligible_for_cogs() or (self.product_id.type == 'service' and self.product_id.landed_cost_ok)
+        return super()._eligible_for_cogs() or (
+            self.product_id.type == "service"
+            and self.product_id.landed_cost_ok
+            and self.product_id.valuation == "real_time"
+        )

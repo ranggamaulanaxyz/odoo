@@ -1,20 +1,20 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 import json
-import logging
 
 from datetime import datetime
 
 from werkzeug.exceptions import Forbidden, NotFound
 from werkzeug.urls import url_decode, url_encode, url_parse
 
-from odoo import _, _lt, fields
+from odoo import fields
 from odoo.exceptions import ValidationError
 from odoo.fields import Command
 from odoo.http import request, route
 from odoo.osv import expression
 from odoo.tools import clean_context, float_round, groupby, lazy, single_email_re, str2bool, SQL
 from odoo.tools.json import scriptsafe as json_scriptsafe
+from odoo.tools.translate import _
 
 from odoo.addons.payment import utils as payment_utils
 from odoo.addons.payment.controllers import portal as payment_portal
@@ -22,8 +22,6 @@ from odoo.addons.portal.controllers.portal import _build_url_w_params
 from odoo.addons.sale.controllers import portal as sale_portal
 from odoo.addons.website.controllers.main import QueryURL
 from odoo.addons.website.models.ir_http import sitemap_qs2dom
-
-_logger = logging.getLogger(__name__)
 
 
 class TableCompute:
@@ -441,7 +439,7 @@ class WebsiteSale(payment_portal.PaymentPortal):
         sitemap=False,
     )
     def product_document(self, product_template, document_id):
-        product_template.check_access_rights('read')
+        product_template.check_access('read')
 
         document = request.env['product.document'].browse(document_id).sudo().exists()
         if not document or not document.active:
@@ -725,15 +723,15 @@ class WebsiteSale(payment_portal.PaymentPortal):
             return request.redirect('/web/login')
 
         order = request.website.sale_get_order()
+        if order and order.state != 'draft':
+            request.session['sale_order_id'] = None
+            order = request.website.sale_get_order()
         if order and order.carrier_id:
             # Express checkout is based on the amout of the sale order. If there is already a
             # delivery line, Express Checkout form will display and compute the price of the
             # delivery two times (One already computed in the total amount of the SO and one added
             # in the form while selecting the delivery carrier)
             order._remove_delivery_line()
-        if order and order.state != 'draft':
-            request.session['sale_order_id'] = None
-            order = request.website.sale_get_order()
 
         request.session['website_sale_cart_quantity'] = order.cart_quantity
 
@@ -974,14 +972,14 @@ class WebsiteSale(payment_portal.PaymentPortal):
         if order_sudo._has_deliverable_products():
             available_dms = order_sudo._get_delivery_methods()
             checkout_page_values['delivery_methods'] = available_dms
-            delivery_method = order_sudo._get_preferred_delivery_method(available_dms)
-            rate = delivery_method.rate_shipment(order_sudo)
-            if (
-                not order_sudo.carrier_id
-                or not rate.get('success')
-                or order_sudo.amount_delivery != rate['price']
-            ):
-                order_sudo._set_delivery_method(delivery_method, rate=rate)
+            if delivery_method := order_sudo._get_preferred_delivery_method(available_dms):
+                rate = delivery_method.rate_shipment(order_sudo)
+                if (
+                    not order_sudo.carrier_id
+                    or not rate.get('success')
+                    or order_sudo.amount_delivery != rate['price']
+                ):
+                    order_sudo._set_delivery_method(delivery_method, rate=rate)
             can_skip_delivery = self.can_skip_delivery_step(order_sudo, available_dms)
 
         if try_skip_step and can_skip_delivery:
@@ -1158,7 +1156,7 @@ class WebsiteSale(payment_portal.PaymentPortal):
                     )  # On the main partner only, if the VAT was set.
                 )
             ),
-            'vat_label': _lt("VAT"),
+            'vat_label': request.env._("VAT"),
         }
 
     @route(

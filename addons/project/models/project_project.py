@@ -4,12 +4,14 @@ import ast
 import json
 from datetime import timedelta
 
-from odoo import api, Command, fields, models, _, _lt
+from odoo import api, Command, fields, models
 from odoo.addons.mail.tools.discuss import Store
 from odoo.addons.rating.models import rating_data
 from odoo.exceptions import UserError
 from odoo.osv.expression import AND
 from odoo.tools import get_lang, SQL
+from odoo.tools.misc import unquote
+from odoo.tools.translate import _
 from .project_update import STATUS_COLOR
 from .project_task import CLOSED_STATES
 
@@ -24,6 +26,7 @@ class Project(models.Model):
         'mail.thread',
         'mail.activity.mixin',
         'mail.tracking.duration.mixin',
+        'analytic.plan.fields.mixin',
     ]
     _order = "sequence, name, id"
     _rating_satisfaction_days = 30  # takes 30 days by default
@@ -86,20 +89,15 @@ class Project(models.Model):
     partner_id = fields.Many2one('res.partner', string='Customer', auto_join=True, tracking=True, domain="['|', ('company_id', '=?', company_id), ('company_id', '=', False)]")
     company_id = fields.Many2one('res.company', string='Company', compute="_compute_company_id", inverse="_inverse_company_id", store=True, readonly=False)
     currency_id = fields.Many2one('res.currency', compute="_compute_currency_id", string="Currency", readonly=True, export_string_translation=False)
-    analytic_account_id = fields.Many2one('account.analytic.account', string="Analytic Account", copy=False, ondelete='set null',
-        domain="['|', ('company_id', '=', False), ('company_id', '=?', company_id)]", check_company=True,
-        help="Analytic account to which this project, its tasks and its timesheets are linked. \n"
-            "Track the costs and revenues of your project by setting this analytic account on your related documents (e.g. sales orders, invoices, purchase orders, vendor bills, expenses etc.).\n"
-            "This analytic account can be changed on each task individually if necessary.\n"
-            "An analytic account is required in order to use timesheets.")
-    analytic_account_balance = fields.Monetary(related="analytic_account_id.balance")
+    analytic_account_balance = fields.Monetary(related="account_id.balance")
+    account_id = fields.Many2one('account.analytic.account', copy=False, domain="['|', ('company_id', '=', False), ('company_id', '=?', company_id)]", ondelete='set null')
 
     favorite_user_ids = fields.Many2many(
         'res.users', 'project_favorite_user_rel', 'project_id', 'user_id',
         string='Members', export_string_translation=False, copy=False)
     is_favorite = fields.Boolean(compute='_compute_is_favorite', readonly=False, search='_search_is_favorite',
         compute_sudo=True, string='Show Project on Dashboard', export_string_translation=False)
-    label_tasks = fields.Char(string='Use Tasks as', default=lambda s: _('Tasks'), translate=True,
+    label_tasks = fields.Char(string='Use Tasks as', default=lambda s: s.env._('Tasks'), translate=True,
         help="Name used to refer to the tasks of your project e.g. tasks, tickets, sprints, etc...")
     tasks = fields.One2many('project.task', 'project_id', string="Task Activities")
     resource_calendar_id = fields.Many2one(
@@ -171,6 +169,7 @@ class Project(models.Model):
         tracking=True, index=True, copy=False, default=_default_stage_id, group_expand='_read_group_expand_full')
 
     update_ids = fields.One2many('project.update', 'project_id', export_string_translation=False)
+    update_count = fields.Integer(compute='_compute_total_update_ids', export_string_translation=False)
     last_update_id = fields.Many2one('project.update', string='Last Update', copy=False, export_string_translation=False)
     last_update_status = fields.Selection(selection=[
         ('on_track', 'On Track'),
@@ -231,12 +230,12 @@ class Project(models.Model):
             project.access_warning = _(
                 "This project is currently restricted to \"Invited internal users\". The project's visibility will be changed to \"invited portal users and all internal users (public)\" in order to make it accessible to the recipients.")
 
-    @api.depends('analytic_account_id.company_id', 'partner_id.company_id')
+    @api.depends('account_id.company_id', 'partner_id.company_id')
     def _compute_company_id(self):
         for project in self:
             # if a new restriction is put on the account or the customer, the restriction on the project is updated.
-            if project.analytic_account_id.company_id:
-                project.company_id = project.analytic_account_id.company_id
+            if project.account_id.company_id:
+                project.company_id = project.account_id.company_id
             if not project.company_id and project.partner_id.company_id:
                 project.company_id = project.partner_id.company_id
 
@@ -252,7 +251,7 @@ class Project(models.Model):
         Ensures that the new company of the project is valid for the partner
         """
         for project in self:
-            account = project.analytic_account_id
+            account = project.account_id
             if project.partner_id and project.partner_id.company_id and project.company_id != project.partner_id.company_id:
                 raise UserError(_('The project and the associated partner must be linked to the same company.'))
             if not account or not account.company_id:
@@ -371,6 +370,18 @@ class Project(models.Model):
             else:
                 project.access_instruction_message = ''
 
+    @api.depends('update_ids')
+    def _compute_total_update_ids(self):
+        update_count_per_project = dict(
+            self.env['project.update']._read_group(
+                [('project_id', 'in', self.ids)],
+                ['project_id'],
+                ['id:count'],
+            )
+        )
+        for project in self:
+            project.update_count = update_count_per_project.get(project, 0)
+
     @api.model
     def _map_tasks_default_values(self, project):
         """ get the default value for the copied task on project duplication.
@@ -411,7 +422,7 @@ class Project(models.Model):
         vals_list = super().copy_data(default=default)
         if default and 'name' in default:
             return vals_list
-        return [dict(vals, name=_("%s (copy)", project.name)) for project, vals in zip(self, vals_list)]
+        return [dict(vals, name=self.env._("%s (copy)", project.name)) for project, vals in zip(self, vals_list)]
 
     def copy(self, default=None):
         default = dict(default or {})
@@ -532,10 +543,10 @@ class Project(models.Model):
         if 'active' in vals:
             # archiving/unarchiving a project does it on its tasks, too
             self.with_context(active_test=False).mapped('tasks').write({'active': vals['active']})
-        if 'name' in vals and self.analytic_account_id:
+        if 'name' in vals and self.account_id:
             projects_read_group = self.env['project.project']._read_group(
-                [('analytic_account_id', 'in', self.analytic_account_id.ids)],
-                ['analytic_account_id'],
+                [('account_id', 'in', self.account_id.ids)],
+                ['account_id'],
                 having=[('__count', '=', 1)],
             )
             analytic_account_to_update = self.env['account.analytic.account'].browse([
@@ -548,8 +559,8 @@ class Project(models.Model):
         # Delete the empty related analytic account
         analytic_accounts_to_delete = self.env['account.analytic.account']
         for project in self:
-            if project.analytic_account_id and not project.analytic_account_id.line_ids:
-                analytic_accounts_to_delete |= project.analytic_account_id
+            if project.account_id and not project.account_id.line_ids:
+                analytic_accounts_to_delete |= project.account_id
         self.with_context(active_test=False).tasks.unlink()
         result = super(Project, self).unlink()
         analytic_accounts_to_delete.unlink()
@@ -642,6 +653,19 @@ class Project(models.Model):
                 res -= waiting_subtype
         return res
 
+    def _notify_get_recipients_groups(self, message, model_description, msg_vals=None):
+        """ Give access to the portal user/customer if the project visibility is portal. """
+        groups = super()._notify_get_recipients_groups(message, model_description, msg_vals=msg_vals)
+        if not self:
+            return groups
+
+        self.ensure_one()
+        portal_privacy = self.privacy_visibility == 'portal'
+        for group_name, _group_method, group_data in groups:
+            if group_name in ('customer', 'user') or group_name == 'portal_customer' and not portal_privacy:
+                group_data['has_button_access'] = False
+        return groups
+
     # ---------------------------------------------------
     #  Actions
     # ---------------------------------------------------
@@ -664,7 +688,7 @@ class Project(models.Model):
 
     def project_update_all_action(self):
         action = self.env['ir.actions.act_window']._for_xml_id('project.project_update_all_action')
-        action['display_name'] = _("%(name)s's Updates", name=self.name)
+        action['display_name'] = _("%(name)s Dashboard", name=self.name)
         return action
 
     def action_open_share_project_wizard(self):
@@ -738,8 +762,8 @@ class Project(models.Model):
             'name': _("%(name)s's Milestones", name=self.name),
             'domain': [('project_id', '=', self.id)],
             'res_model': 'project.milestone',
-            'views': [(self.env.ref('project.project_milestone_view_tree').id, 'tree')],
-            'view_mode': 'tree',
+            'views': [(self.env.ref('project.project_milestone_view_tree').id, 'list')],
+            'view_mode': 'list',
             'help': _("""
                 <p class="o_view_nocontent_smiling_face">
                     No milestones found. Let's create one!
@@ -820,7 +844,7 @@ class Project(models.Model):
         return self.env.user.has_group('analytic.group_analytic_accounting')
 
     def _get_profitability_aal_domain(self):
-        return [('account_id', 'in', self.analytic_account_id.ids)]
+        return [('account_id', 'in', self.account_id.ids)]
 
     def _get_profitability_items(self, with_action=True):
         return self._get_items_from_aal(with_action)
@@ -841,21 +865,21 @@ class Project(models.Model):
         self.ensure_one()
         closed_task_count = self.task_count - self.open_task_count
         if self.task_count:
-            number = _lt(
+            number = self.env._(
                 "%(closed_task_count)s / %(task_count)s (%(closed_rate)s%%)",
                 closed_task_count=closed_task_count,
                 task_count=self.task_count,
                 closed_rate=round(100 * closed_task_count / self.task_count),
             )
         else:
-            number = _lt(
+            number = self.env._(
                 "%(closed_task_count)s / %(task_count)s",
                 closed_task_count=closed_task_count,
                 task_count=self.task_count,
             )
         buttons = [{
             'icon': 'check',
-            'text': _lt('Tasks'),
+            'text': self.env._('Tasks'),
             'number': number,
             'action_type': 'object',
             'action': 'action_view_tasks',
@@ -871,7 +895,7 @@ class Project(models.Model):
                 icon = 'frown-o text-danger'
             buttons.append({
                 'icon': icon,
-                'text': _lt('Average Rating'),
+                'text': self.env._('Average Rating'),
                 'number': f'{int(self.rating_avg) if self.rating_avg.is_integer() else round(self.rating_avg, 1)} / 5',
                 'action_type': 'object',
                 'action': 'action_view_all_rating',
@@ -881,7 +905,7 @@ class Project(models.Model):
         if self.env.user.has_group('project.group_project_user'):
             buttons.append({
                 'icon': 'area-chart',
-                'text': _lt('Burndown Chart'),
+                'text': self.env._('Burndown Chart'),
                 'action_type': 'action',
                 'action': 'project.action_project_task_burndown_chart_report',
                 'additional_context': json.dumps({
@@ -906,29 +930,31 @@ class Project(models.Model):
         return False
 
     @api.model
-    def _get_values_analytic_account_batch(self, project_vals):
-        project_plan_id = int(self.env['ir.config_parameter'].sudo().get_param('analytic.analytic_plan_projects'))
-
-        if not project_plan_id:
-            project_plan, _other_plans = self.env['account.analytic.plan']._get_all_plans()
-            project_plan_id = project_plan.id
-        companies = self.env['res.company'].browse([val.get('company_id', False) for val in project_vals])
-
+    def _get_values_analytic_account_batch(self, project_vals_list):
+        project_plan, _other_plans = self.env['account.analytic.plan']._get_all_plans()
         return [{
-            'name': val.get('name', _('Unknown Analytic Account')),
-            'company_id': company.id,
-            'partner_id': val.get('partner_id'),
-            'plan_id': project_plan_id,
-        } for val, company in zip(project_vals, companies)]
+            'name': project_vals.get('name', self.env._('Unknown Analytic Account')),
+            'company_id': project_vals.get('company_id', False),
+            'partner_id': project_vals.get('partner_id', False),
+            'plan_id': project_plan.id,
+        } for project_vals in project_vals_list]
 
     def _create_analytic_account(self):
         analytic_accounts_values = self._get_values_analytic_account_batch(self._read_format(['name', 'company_id', 'partner_id'], None))
         analytic_accounts = self.env['account.analytic.account'].create(analytic_accounts_values)
         for project, analytic_account in zip(self, analytic_accounts):
-            project.analytic_account_id = analytic_account
+            project.account_id = analytic_account
 
     def _get_projects_to_make_billable_domain(self):
         return [('partner_id', '!=', False)]
+
+    @api.constrains(lambda self: self._get_plan_fnames())
+    def _check_account_id(self):
+        # Overriden from 'analytic.plan.fields.mixin'
+        pass
+
+    def _get_plan_domain(self, plan):
+        return AND([super()._get_plan_domain(plan), ['|', ('company_id', '=', False), ('company_id', '=?', unquote('company_id'))]])
 
     # ---------------------------------------------------
     # Rating business

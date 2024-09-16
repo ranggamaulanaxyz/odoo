@@ -1,12 +1,24 @@
 import { describe, expect, test } from "@odoo/hoot";
+import {
+    click,
+    fill,
+    getActiveElement,
+    press,
+    queryAllTexts,
+    queryFirst,
+    queryOne,
+    queryText,
+    select,
+    waitFor,
+    waitUntil,
+} from "@odoo/hoot-dom";
 import { animationFrame, tick } from "@odoo/hoot-mock";
-import { setContent, getContent, setSelection } from "../_helpers/selection";
-import { setupEditor } from "../_helpers/editor";
-import { waitUntil, waitFor, click, queryOne, press, select, queryText } from "@odoo/hoot-dom";
-import { insertText, splitBlock, insertLineBreak } from "../_helpers/user_actions";
-import { contains, onRpc } from "@web/../tests/web_test_helpers";
-import { cleanLinkArtifacts } from "../_helpers/format";
 import { markup } from "@odoo/owl";
+import { contains, onRpc } from "@web/../tests/web_test_helpers";
+import { setupEditor } from "../_helpers/editor";
+import { cleanLinkArtifacts } from "../_helpers/format";
+import { getContent, setContent, setSelection } from "../_helpers/selection";
+import { insertLineBreak, insertText, splitBlock, undo } from "../_helpers/user_actions";
 
 describe("should open a popover", () => {
     test("should open a popover when the selection is inside a link and close outside of a link", async () => {
@@ -18,7 +30,7 @@ describe("should open a popover", () => {
         expect(".o-we-linkpopover").toHaveCount(1);
         // selection outside a link
         setContent(el, "<p>this []is a <a>link</a></p>");
-        await waitUntil(() => !document.querySelector(".o-we-linkpopover"));
+        await waitUntil(() => !queryFirst(".o-we-linkpopover"));
         expect(".o-we-linkpopover").toHaveCount(0);
     });
     test("link popover should have input field for href when the link doesn't have href", async () => {
@@ -108,7 +120,7 @@ describe("popover should edit,copy,remove the link", () => {
         const { el } = await setupEditor('<p>this is a <a href="http://test.com/">li[]nk</a></p>');
         await waitFor(".o-we-linkpopover");
         click(".o_we_remove_link");
-        await waitUntil(() => !document.querySelector(".o-we-linkpopover"));
+        await waitUntil(() => !queryFirst(".o-we-linkpopover"));
         expect(getContent(el)).toBe("<p>this is a li[]nk</p>");
     });
     test("after edit the label, the text of the link should be updated", async () => {
@@ -138,8 +150,9 @@ describe("popover should edit,copy,remove the link", () => {
         await setupEditor('<p>this is a <a href="http://test.com/">li[]nk</a></p>');
         await waitFor(".o-we-linkpopover");
         click(".o_we_copy_link");
-        await waitFor(".o_notification_body");
-        expect(".o_notification_body").toHaveCount(1);
+        await waitFor(".o_notification_bar.bg-success");
+        const notifications = queryAllTexts(".o_notification_body");
+        expect(notifications).toInclude("Link copied to clipboard.");
         await animationFrame();
         expect(".o-we-linkpopover").toHaveCount(0);
         await expect(navigator.clipboard.readText()).resolves.toBe("http://test.com/");
@@ -155,7 +168,7 @@ describe("popover should edit,copy,remove the link", () => {
         await contains(".o-we-linkpopover input.o_we_href_input_link").clear();
         // ZWNBSPs make space at the end of the paragraph to be visible
         expect(getContent(el)).toBe("<p>this is a \ufeff[]\ufeff</p>");
-        editor.dispatch("CLEAN", { root: el });
+        editor.dispatch("CLEAN_FOR_SAVE", { root: el });
         expect(getContent(el)).toBe("<p>this is a&nbsp;[]</p>");
     });
 });
@@ -217,6 +230,9 @@ describe("Link creation", () => {
             expect(cleanLinkArtifacts(getContent(el))).toBe("<p>ab<a>[]</a></p>");
             await waitFor(".o-we-linkpopover");
             expect(".o-we-linkpopover").toHaveCount(1);
+            expect(getActiveElement()).toBe(queryOne(".o-we-linkpopover input.o_we_label_link"), {
+                message: "should focus label input by default, when we don't have a label",
+            });
         });
 
         test("when create a new link by powerbox and not input anything, the link should be removed", async () => {
@@ -226,7 +242,7 @@ describe("Link creation", () => {
             click(".o-we-command-name:first");
             await waitFor(".o-we-linkpopover");
             expect(".o-we-linkpopover").toHaveCount(1);
-            expect(cleanLinkArtifacts(getContent(el))).toBe("<p>ab<a>[]</a></p>");
+            expect(cleanLinkArtifacts(getContent(el))).toBe("<p>ab<a></a></p>");
 
             const pNode = queryOne("p");
             setSelection({
@@ -335,6 +351,21 @@ describe("Link creation", () => {
             await contains(".o-we-linkpopover input.o_we_href_input_link").edit("#");
             expect(cleanLinkArtifacts(getContent(el))).toBe('<p>H<a href="#">el[]</a>lo</p>');
         });
+        test("when you open link popover with a label, url input should be focus by default ", async () => {
+            const { el } = await setupEditor("<p>[Hello]</p>");
+            await waitFor(".o-we-toolbar");
+            click(".o-we-toolbar .fa-link");
+            await waitFor(".o-we-linkpopover");
+            expect(getActiveElement()).toBe(
+                queryOne(".o-we-linkpopover input.o_we_href_input_link")
+            );
+
+            fill("test.com");
+            click(".o_we_apply_link");
+            expect(cleanLinkArtifacts(getContent(el))).toBe(
+                '<p><a href="http://test.com">Hello[]</a></p>'
+            );
+        });
         test("should be correctly unlink/link", async () => {
             const { el } = await setupEditor('<p>aaaa[b<a href="http://test.com/">cd</a>e]f</p>');
             await waitFor(".o-we-toolbar");
@@ -414,6 +445,33 @@ describe("Link creation", () => {
             await waitFor(".o-we-linkpopover");
             expect(".o_we_label_link").toHaveValue("st m");
             expect(".o_we_href_input_link").toHaveValue("");
+        });
+        test("create a link and undo it", async () => {
+            const { el, editor } = await setupEditor("<p>[Hello]</p>");
+            await waitFor(".o-we-toolbar");
+            click(".o-we-toolbar .fa-link");
+            await contains(".o-we-linkpopover input.o_we_href_input_link").edit("#");
+            expect(cleanLinkArtifacts(getContent(el))).toBe('<p><a href="#">Hello[]</a></p>');
+
+            undo(editor);
+            expect(cleanLinkArtifacts(getContent(el))).toBe("<p>[]Hello</p>");
+        });
+        test("extend a link on selection and undo it", async () => {
+            const { el, editor } = await setupEditor(
+                `<p>[<a href="https://www.test.com">Hello</a> my friend]</p>`
+            );
+            await waitFor(".o-we-toolbar");
+            click(".o-we-toolbar .fa-link");
+            await waitFor(".o-we-linkpopover");
+            expect(queryFirst(".o-we-linkpopover a").href).toBe("https://www.test.com/");
+            expect(cleanLinkArtifacts(getContent(el))).toBe(
+                `<p><a href="https://www.test.com">Hello my friend[]</a></p>`
+            );
+
+            undo(editor);
+            expect(cleanLinkArtifacts(getContent(el))).toBe(
+                `<p><a href="https://www.test.com">Hello[]</a> my friend</p>`
+            );
         });
     });
 });
@@ -616,6 +674,123 @@ describe("link preview", () => {
         expect(".o_we_url_link").toHaveText("Open Source ERP and CRM | Odoo");
         expect(".o_we_description_link_preview").toHaveText(
             "From ERP to CRM, eCommerce and CMS. Download Odoo or use it in the cloud. Grow Your Business."
+        );
+    });
+    test("test internal metadata cached correctly", async () => {
+        onRpc("/html_editor/link_preview_internal", () => {
+            expect.step("/html_editor/link_preview_internal");
+            return {
+                description: markup("<p>Test description</p>"),
+                link_preview_name: "Task name | Project name",
+            };
+        });
+        onRpc("/odoo/cachetest/8", () => new Response("", { status: 200 }));
+        const { editor } = await setupEditor(`<p>abc[]</p>`);
+        insertText(editor, "/link");
+        await animationFrame();
+        click(".o-we-command-name:first");
+        await contains(".o-we-linkpopover input.o_we_href_input_link").fill(
+            window.location.origin + "/odoo/cachetest/8"
+        );
+        await animationFrame();
+        expect.verifySteps(["/html_editor/link_preview_internal"]);
+        expect(".o_we_url_link").toHaveText("Task name | Project name");
+
+        const pNode = queryOne("p");
+        setSelection({
+            anchorNode: pNode,
+            anchorOffset: 1,
+            focusNode: pNode,
+            focusOffset: 1,
+        });
+        await waitUntil(() => !queryFirst(".o-we-linkpopover"));
+
+        const linkNode = queryOne("a");
+        setSelection({
+            anchorNode: linkNode,
+            anchorOffset: 1,
+            focusNode: linkNode,
+            focusOffset: 1,
+        });
+        await waitFor(".o-we-linkpopover");
+        expect.verifySteps([]);
+    });
+    test("test external metadata cached correctly", async () => {
+        onRpc("/html_editor/link_preview_external", () => {
+            expect.step("/html_editor/link_preview_external");
+            return {
+                og_description:
+                    "From ERP to CRM, eCommerce and CMS. Download Odoo or use it in the cloud. Grow Your Business.",
+                og_image: "https://www.odoo.com/web/image/41207129-1abe7a15/homepage-seo.png",
+                og_title: "Open Source ERP and CRM | Odoo",
+                og_type: "website",
+                og_site_name: "Odoo",
+                source_url: "http://odoo.com/",
+            };
+        });
+        const { editor } = await setupEditor(`<p>[]</p>`);
+        insertText(editor, "/link");
+        await animationFrame();
+        click(".o-we-command-name:first");
+        await contains(".o-we-linkpopover input.o_we_href_input_link").fill("http://odoo.com/");
+        await animationFrame();
+        expect.verifySteps(["/html_editor/link_preview_external"]);
+        expect(".o_we_url_link").toHaveText("Open Source ERP and CRM | Odoo");
+
+        const pNode = queryOne("p");
+        setSelection({
+            anchorNode: pNode,
+            anchorOffset: 1,
+            focusNode: pNode,
+            focusOffset: 1,
+        });
+        await waitUntil(() => !queryFirst(".o-we-linkpopover"));
+
+        const linkNode = queryOne("a");
+        setSelection({
+            anchorNode: linkNode,
+            anchorOffset: 1,
+            focusNode: linkNode,
+            focusOffset: 1,
+        });
+        await waitFor(".o-we-linkpopover");
+        expect.verifySteps([]);
+    });
+});
+
+describe("link in templates", () => {
+    test("Should not remove a link with t-attf-href", async () => {
+        const { el } = await setupEditor('<p>test<a t-attf-href="/test/1">li[]nk</a></p>');
+
+        await waitFor(".o-we-linkpopover");
+        expect(".o-we-linkpopover").toHaveCount(1);
+        const pNode = queryOne("p");
+        setSelection({
+            anchorNode: pNode,
+            anchorOffset: 0,
+            focusNode: pNode,
+            focusOffset: 0,
+        });
+        await waitUntil(() => !queryFirst(".o-we-linkpopover"));
+        expect(cleanLinkArtifacts(getContent(el))).toBe(
+            '<p>[]test<a t-attf-href="/test/1">link</a></p>'
+        );
+    });
+    test("Should not remove a link with t-att-href", async () => {
+        const { el } = await setupEditor('<p>test<a t-att-href="/test/1">li[]nk</a></p>');
+
+        await waitFor(".o-we-linkpopover");
+        expect(".o-we-linkpopover").toHaveCount(1);
+        const pNode = queryOne("p");
+        setSelection({
+            anchorNode: pNode,
+            anchorOffset: 0,
+            focusNode: pNode,
+            focusOffset: 0,
+        });
+        await waitUntil(() => !queryFirst(".o-we-linkpopover"));
+        expect(cleanLinkArtifacts(getContent(el))).toBe(
+            '<p>[]test<a t-att-href="/test/1">link</a></p>'
         );
     });
 });

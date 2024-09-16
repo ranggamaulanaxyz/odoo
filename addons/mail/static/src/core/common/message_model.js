@@ -40,7 +40,7 @@ export class Message extends Record {
         }
     }
 
-    attachments = Record.many("Attachment", { inverse: "message" });
+    attachment_ids = Record.many("Attachment", { inverse: "message" });
     author = Record.one("Persona");
     body = Record.attr("", { html: true });
     composer = Record.one("Composer", { inverse: "message", onDelete: (r) => r.delete() });
@@ -181,6 +181,19 @@ export class Message extends Record {
         return this.store.self.isAdmin || this.isSelfAuthored;
     }
 
+    get bubbleColor() {
+        if (!this.isSelfAuthored && !this.is_note && !this.isHighlightedFromMention) {
+            return "blue";
+        }
+        if (this.isSelfAuthored && !this.is_note && !this.isHighlightedFromMention) {
+            return "green";
+        }
+        if (this.isHighlightedFromMention) {
+            return "orange";
+        }
+        return undefined;
+    }
+
     get editable() {
         if (!this.allowsEdition) {
             return false;
@@ -198,7 +211,7 @@ export class Message extends Record {
 
     get dateSimple() {
         return this.datetime.toLocaleString(DateTime.TIME_24_SIMPLE, {
-            locale: user.lang?.replace("_", "-"),
+            locale: user.lang,
         });
     }
 
@@ -225,9 +238,6 @@ export class Message extends Record {
             }
             return this.author.eq(this.store.self);
         },
-        // FIXME necessary to not trigger double-rendering of messages
-        // lazy-compute on-the-fly notifies the current reactive again
-        eager: true,
     });
 
     isPending = false;
@@ -251,7 +261,8 @@ export class Message extends Record {
     }
 
     get isSubjectDefault() {
-        const threadName = this.thread?.name?.trim().toLowerCase();
+        const name = this.thread?.name;
+        const threadName = name ? name.trim().toLowerCase() : "";
         const defaultSubject = this.default_subject ? this.default_subject.toLowerCase() : "";
         const candidates = new Set([defaultSubject, threadName]);
         return candidates.has(this.subject?.toLowerCase());
@@ -273,7 +284,7 @@ export class Message extends Record {
     }
 
     get hasTextContent() {
-        return /*(this.editDate && this.attachments.length) || */ !this.isBodyEmpty;
+        return /*(this.editDate && this.attachment_ids.length) || */ !this.isBodyEmpty;
     }
 
     isEmpty = Record.attr(false, {
@@ -281,7 +292,7 @@ export class Message extends Record {
         compute() {
             return (
                 this.isBodyEmpty &&
-                this.attachments.length === 0 &&
+                this.attachment_ids.length === 0 &&
                 this.trackingValues.length === 0 &&
                 !this.subtype_description
             );
@@ -344,7 +355,7 @@ export class Message extends Record {
 
     get scheduledDateSimple() {
         return this.scheduledDatetime.toLocaleString(DateTime.TIME_24_SIMPLE, {
-            locale: user.lang?.replace("_", "-"),
+            locale: user.lang,
         });
     }
 
@@ -391,10 +402,12 @@ export class Message extends Record {
             mentionedPartners,
         });
         const data = await rpc("/mail/message/update_content", {
-            attachment_ids: attachments.concat(this.attachments).map((attachment) => attachment.id),
+            attachment_ids: attachments
+                .concat(this.attachment_ids)
+                .map((attachment) => attachment.id),
             attachment_tokens: attachments
-                .concat(this.attachments)
-                .map((attachment) => attachment.accessToken),
+                .concat(this.attachment_ids)
+                .map((attachment) => attachment.access_token),
             body: await prettifyMessageContent(body, validMentions),
             message_id: this.id,
             partner_ids: validMentions?.partners?.map((partner) => partner.id),
@@ -406,14 +419,16 @@ export class Message extends Record {
     }
 
     async react(content) {
-        await rpc(
-            "/mail/message/reaction",
-            {
-                action: "add",
-                content,
-                message_id: this.id,
-            },
-            { silent: true }
+        this.store.insert(
+            await rpc(
+                "/mail/message/reaction",
+                {
+                    action: "add",
+                    content,
+                    message_id: this.id,
+                },
+                { silent: true }
+            )
         );
     }
 
@@ -425,7 +440,7 @@ export class Message extends Record {
             message_id: this.id,
         });
         this.body = "";
-        this.attachments = [];
+        this.attachment_ids = [];
     }
 
     async setDone() {

@@ -11,6 +11,7 @@ publicWidget.registry.websiteSaleAddress = publicWidget.Widget.extend({
         'change select[name="country_id"]': '_onChangeCountry',
         'change #use_same_as_delivery': '_onChangeUseSameAsDelivery',
         'click #save_address': '_onSaveAddress',
+        "change select[name='state_id']": "_onChangeState",
     },
 
     /**
@@ -53,6 +54,14 @@ publicWidget.registry.websiteSaleAddress = publicWidget.Widget.extend({
      */
     _onChangeCountry(ev) {
         return this._changeCountry();
+    },
+
+    /**
+     * @private
+     * @param {Event} ev
+     */
+    _onChangeState(ev) {
+        return Promise.resolve();
     },
 
     /**
@@ -182,7 +191,7 @@ publicWidget.registry.websiteSaleAddress = publicWidget.Widget.extend({
         }
 
         const submitButton = ev.currentTarget;
-        if (!ev.isDefaultPrevented() && !submitButton.disabled) {
+        if (!ev.defaultPrevented && !submitButton.disabled) {
             ev.preventDefault();
 
             submitButton.disabled = true;

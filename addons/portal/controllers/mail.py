@@ -63,6 +63,7 @@ class PortalChatter(http.Controller):
         model = request.env[res_model]
         field = model._fields['website_message_ids']
         domain = expression.AND([
+            self._setup_portal_message_fetch_extra_domain(kw),
             field.get_domain_list(model),
             [('res_id', '=', res_id), '|', ('body', '!=', ''), ('attachment_ids', '!=', False)]
         ])
@@ -81,6 +82,9 @@ class PortalChatter(http.Controller):
             'messages': Message.search(domain, limit=limit, offset=offset).portal_message_format(options=kw),
             'message_count': Message.search_count(domain)
         }
+
+    def _setup_portal_message_fetch_extra_domain(self, data):
+        return []
 
     @http.route(['/mail/update_is_internal'], type='json', auth="user", website=True)
     def portal_message_update_is_internal(self, message_id, is_internal):
@@ -114,8 +118,7 @@ class MailController(mail.MailController):
             uid = request.session.uid or request.env.ref('base.public_user').id
             record_sudo = request.env[model].sudo().browse(res_id).exists()
             try:
-                record_sudo.with_user(uid).check_access_rights('read')
-                record_sudo.with_user(uid).check_access_rule('read')
+                record_sudo.with_user(uid).check_access('read')
             except AccessError:
                 if record_sudo.access_token and access_token and consteq(record_sudo.access_token, access_token):
                     record_action = record_sudo._get_access_action(force_website=True)

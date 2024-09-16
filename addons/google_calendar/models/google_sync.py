@@ -9,7 +9,8 @@ import pytz
 from dateutil.parser import parse
 from markupsafe import Markup
 
-from odoo import api, fields, models, registry, _
+from odoo import api, fields, models, _
+from odoo.modules.registry import Registry
 from odoo.tools import ormcache_context, email_normalize
 from odoo.osv import expression
 
@@ -36,7 +37,7 @@ def after_commit(func):
 
         @self.env.cr.postcommit.add
         def called_after():
-            db_registry = registry(dbname)
+            db_registry = Registry(dbname)
             with db_registry.cursor() as cr:
                 env = api.Environment(cr, uid, context)
                 try:
@@ -84,6 +85,7 @@ class GoogleSync(models.AbstractModel):
             for vals in vals_list:
                 vals.update({'need_sync': False})
         records = super().create(vals_list)
+        self._handle_allday_recurrences_edge_case(records, vals_list)
 
         google_service = GoogleCalendarService(self.env['google.service'])
         if self.env.user._get_google_sync_status() != "sync_paused":
@@ -91,6 +93,18 @@ class GoogleSync(models.AbstractModel):
                 if record.need_sync and record.active:
                     record.with_user(record._get_event_user())._google_insert(google_service, record._google_values(), timeout=3)
         return records
+
+    def _handle_allday_recurrences_edge_case(self, records, vals_list):
+        """
+        When creating 'All Day' recurrent event, the first event is wrongly synchronized as
+        a single event and then its recurrence creates a duplicated event. We must manually
+        set the 'need_sync' attribute as False in order to avoid this unwanted behavior.
+        """
+        if vals_list and self._name == 'calendar.event':
+            forbid_sync = all(not vals.get('need_sync', True) for vals in vals_list)
+            records_to_skip = records.filtered(lambda r: r.need_sync and r.allday and r.recurrency and not r.recurrence_id)
+            if forbid_sync and records_to_skip:
+                records_to_skip.with_context(send_updates=False).need_sync = False
 
     def unlink(self):
         """We can't delete an event that is also in Google Calendar. Otherwise we would

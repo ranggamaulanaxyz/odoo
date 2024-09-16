@@ -1,9 +1,11 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import SUPERUSER_ID, _, _lt, api, fields, models, tools
-from odoo.exceptions import UserError
+from odoo import SUPERUSER_ID, api, fields, models, tools
 from odoo.http import request
 from odoo.osv import expression
+from odoo.tools.translate import _, LazyTranslate
+
+_lt = LazyTranslate(__name__)
 
 
 class Website(models.Model):
@@ -421,16 +423,6 @@ class Website(models.Model):
 
         partner_sudo = self.env.user.partner_id
 
-        if partner_sudo.company_id and not partner_sudo.filtered_domain(
-            self.env['res.partner']._check_company_domain(self.company_id)
-        ):
-            raise UserError(_(
-                "Your account is not allowed to pay in company %s."
-                " Please log out and create a new account for this website, or contact the website"
-                " administrator.",
-                self.company_id.name,
-            ))
-
         # cart creation was requested
         if not sale_order_sudo:
             so_data = self._prepare_sale_order_values(partner_sudo)
@@ -550,20 +542,14 @@ class Website(models.Model):
             '100_pc': (12, 12),
         }.get(self.product_page_image_width)
 
-    def _get_product_page_grid_image_classes(self):
+    def _get_product_page_grid_image_spacing_classes(self):
         spacing_map = {
-            'none': 'p-0',
-            'small': 'p-2',
-            'medium': 'p-3',
-            'big': 'p-4',
+            'none': 'm-0',
+            'small': 'm-1',
+            'medium': 'm-2',
+            'big': 'm-3',
         }
-        columns_map = {
-            1: 'col-12',
-            2: 'col-6',
-            3: 'col-4',
-        }
-        return spacing_map.get(self.product_page_image_spacing) + ' ' +\
-                columns_map.get(self.product_page_grid_columns)
+        return spacing_map.get(self.product_page_image_spacing)
 
     @api.model
     def _send_abandoned_cart_email(self):

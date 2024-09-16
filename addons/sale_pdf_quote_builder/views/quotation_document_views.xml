@@ -101,9 +101,20 @@
                                     </div>
                                     <div class="o_kanban_record_bottom flex-column" name="bottom">
                                         <div class="mt-2">
-                                            <span>Document type:</span>
+                                            <span class="pe-2">Document type:</span>
                                             <field
-                                                name="document_type" class="ms-2" widget="selection"
+                                                name="document_type" widget="selection"
+                                            />
+                                        </div>
+                                        <div
+                                            t-if="!!record.quotation_template_ids.raw_value.length"
+                                            class="mt-2"
+                                        >
+                                            <span class="pe-2">Templates:</span>
+                                            <field
+                                                name="quotation_template_ids"
+                                                class="d-inline-block"
+                                                widget="many2many_tags"
                                             />
                                         </div>
                                     </div>
@@ -120,12 +131,12 @@
         <field name="name">quotation.document.list</field>
         <field name="model">quotation.document</field>
         <field name="arch" type="xml">
-            <tree editable="top" multi_edit="true">
+            <list editable="top" multi_edit="true">
                 <field name="sequence" widget="handle"/>
                 <field name="name"/>
                 <field name="document_type"/>
                 <field name="company_id" groups="base.group_multi_company" optional="show"/>
-            </tree>
+            </list>
         </field>
     </record>
 
@@ -157,7 +168,7 @@
     <record id="quotation_document_action" model="ir.actions.act_window">
         <field name="name">Headers/Footers</field>
         <field name="res_model">quotation.document</field>
-        <field name="view_mode">kanban,tree,form</field>
+        <field name="view_mode">kanban,list,form</field>
         <field name="help" type="html">
             <p class="o_view_nocontent_smiling_face">
                 Upload quotation headers and footers

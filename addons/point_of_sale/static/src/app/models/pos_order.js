@@ -1,15 +1,9 @@
 import { registry } from "@web/core/registry";
 import { Base } from "./related_models";
 import { _t } from "@web/core/l10n/translation";
-import { formatDate, formatDateTime } from "@web/core/l10n/dates";
+import { formatDate, formatDateTime, serializeDateTime } from "@web/core/l10n/dates";
 import { omit } from "@web/core/utils/objects";
-import {
-    getUTCString,
-    parseUTCString,
-    qrCodeSrc,
-    random5Chars,
-    uuidv4,
-} from "@point_of_sale/utils";
+import { parseUTCString, qrCodeSrc, random5Chars, uuidv4 } from "@point_of_sale/utils";
 import { renderToElement } from "@web/core/utils/render";
 import { floatIsZero, roundPrecision } from "@web/core/utils/numbers";
 import { computeComboItems } from "./utils/compute_combo_items";
@@ -24,8 +18,12 @@ export class PosOrder extends Base {
     setup(vals) {
         super.setup(vals);
 
+        if (!this.session_id && !this.finalized) {
+            this.update({ session_id: this.session.id });
+        }
+
         // Data present in python model
-        this.date_order = vals.date_order || getUTCString(luxon.DateTime.now());
+        this.date_order = vals.date_order || serializeDateTime(luxon.DateTime.now());
         this.to_invoice = vals.to_invoice || false;
         this.shipping_date = vals.shipping_date || false;
         this.state = vals.state || "draft";
@@ -86,6 +84,10 @@ export class PosOrder extends Base {
         return this.state !== "draft";
     }
 
+    getOrderName() {
+        return this.getFloatingOrderName() || "";
+    }
+
     getEmailItems() {
         return [_t("the receipt")].concat(this.is_to_invoice() ? [_t("the invoice")] : []);
     }
@@ -95,7 +97,9 @@ export class PosOrder extends Base {
             .filter((p) => !p.is_change)
             .map((p) => p.export_for_printing());
         return {
-            orderlines: this.lines.map((l) => omit(l.getDisplayData(), "internalNote")),
+            orderlines: this.getSortedOrderlines().map((l) =>
+                omit(l.getDisplayData(), "internalNote")
+            ),
             paymentlines,
             amount_total: this.get_total_with_tax(),
             total_without_tax: this.get_total_without_tax(),
@@ -104,7 +108,7 @@ export class PosOrder extends Base {
             total_discount: this.get_total_discount(),
             rounding_applied: this.get_rounding_applied(),
             tax_details: this.get_tax_details(),
-            change: this.uiState.locked ? this.amount_return : this.get_change(),
+            change: this.amount_return,
             name: this.name,
             invoice_id: null, //TODO
             cashier: this.employee_id?.name || this.user_id?.name,
@@ -190,7 +194,7 @@ export class PosOrder extends Base {
     }
 
     get isBooked() {
-        return this.uiState.booked || !this.is_empty() || typeof this.id === "number";
+        return Boolean(this.uiState.booked || !this.is_empty() || typeof this.id === "number");
     }
 
     _getPrintingCategoriesChanges(categories, currentOrderChange) {
@@ -524,7 +528,7 @@ export class PosOrder extends Base {
             this.select_paymentline(undefined);
         }
 
-        line.delete();
+        line.delete({ backend: true });
     }
 
     clean_empty_paymentlines() {
@@ -1043,7 +1047,7 @@ export class PosOrder extends Base {
     }
     getCustomerDisplayData() {
         return {
-            lines: this.lines.map((l) => ({
+            lines: this.getSortedOrderlines().map((l) => ({
                 ...l.getDisplayData(),
                 isSelected: l.isSelected(),
                 imageSrc: `/web/image/product.product/${l.product_id.id}/image_128`,
@@ -1058,7 +1062,45 @@ export class PosOrder extends Base {
         };
     }
     getFloatingOrderName() {
-        return this.note || this.tracking_number;
+        return this.note || this.tracking_number.toString() || "";
+    }
+
+    sortBySequenceAndCategory(a, b) {
+        const seqA = a.product_id?.pos_categ_ids[0]?.sequence ?? 0;
+        const seqB = b.product_id?.pos_categ_ids[0]?.sequence ?? 0;
+        const pos_categ_id_A = a.product_id?.pos_categ_ids[0]?.id ?? 0;
+        const pos_categ_id_B = b.product_id?.pos_categ_ids[0]?.id ?? 0;
+
+        if (seqA !== seqB) {
+            return seqA - seqB;
+        }
+        return pos_categ_id_A - pos_categ_id_B;
+    }
+
+    // orderlines will be sorted on the basis of pos product category and sequence for group the orderlines in order cart
+    getSortedOrderlines() {
+        if (this.config.orderlines_sequence_in_cart_by_category && this.lines.length) {
+            const linesToSort = [...this.lines];
+            linesToSort.sort(this.sortBySequenceAndCategory);
+            const resultLines = [];
+            linesToSort.forEach((line) => {
+                if (line.combo_line_ids?.length > 0) {
+                    resultLines.push(line);
+                    const sortedChildLines = line.combo_line_ids.sort(
+                        this.sortBySequenceAndCategory
+                    );
+                    resultLines.push(...sortedChildLines);
+                } else if (!line.combo_parent_id) {
+                    resultLines.push(line);
+                }
+            });
+            return resultLines;
+        } else {
+            return this.lines;
+        }
+    }
+    getName() {
+        return this.getFloatingOrderName() || "";
     }
 }
 

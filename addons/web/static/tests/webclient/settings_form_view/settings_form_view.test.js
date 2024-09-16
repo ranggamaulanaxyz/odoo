@@ -445,9 +445,9 @@ test("settings views does not read existing id when coming back in breadcrumbs",
         </form>
     `;
     Task._views.list = /* xml */ `
-        <tree>
+        <list>
             <field name="display_name"/>
-        </tree>
+        </list>
     `;
     ResConfigSettings._views.search = /* xml */ `<search/>`;
     Task._views.search = /* xml */ `<search/>`;
@@ -748,9 +748,9 @@ test("settings views does not write the id on the url", async () => {
         </form>
     `;
     Task._views.list = /* xml */ `
-        <tree>
+        <list>
             <field name="display_name"/>
-        </tree>
+        </list>
     `;
     ResConfigSettings._views.search = /* xml */ `<search/>`;
     Task._views.search = /* xml */ `<search/>`;
@@ -802,9 +802,9 @@ test("settings views can search when coming back in breadcrumbs", async () => {
         </form>
     `;
     Task._views.list = /* xml */ `
-        <tree>
+        <list>
             <field name="display_name"/>
-        </tree>
+        </list>
     `;
     ResConfigSettings._views.search = /* xml */ `<search/>`;
     Task._views.search = /* xml */ `<search/>`;
@@ -851,9 +851,9 @@ test("search for default label when label has empty string", async () => {
         </form>
     `;
     Task._views.list = /* xml */ `
-        <tree>
+        <list>
             <field name="display_name"/>
-        </tree>
+        </list>
     `;
     ResConfigSettings._views.search = /* xml */ `<search/>`;
     Task._views.search = /* xml */ `<search/>`;
@@ -903,9 +903,9 @@ test("clicking on any button in setting should show discard warning if setting f
         </form>
     `;
     Task._views.list = /* xml */ `
-        <tree>
+        <list>
             <field name="display_name"/>
-        </tree>
+        </list>
     `;
     ResConfigSettings._views.search = /* xml */ `<search/>`;
     Task._views.search = /* xml */ `<search/>`;
@@ -992,7 +992,7 @@ test("header field don't dirty settings", async () => {
             </app>
         </form>
     `;
-    Task._views.list = /* xml */ `<tree><field name="display_name"/></tree>`;
+    Task._views.list = /* xml */ `<list><field name="display_name"/></list>`;
     ResConfigSettings._views.search = /* xml */ `<search/>`;
     Task._views.search = /* xml */ `<search/>`;
 
@@ -1093,12 +1093,71 @@ test("click on save button which throws an error", async () => {
 });
 
 test("clicking a button with dirty settings -- discard", async () => {
+    ResConfigSettings._fields.product_ids = fields.Many2many({
+        relation: "product",
+        onChange(record) {
+            record.product_ids = [
+                [
+                    4,
+                    37,
+                    {
+                        id: 37,
+                        display_name: "xphone",
+                    },
+                ],
+                [
+                    4,
+                    41,
+                    {
+                        id: 41,
+                        display_name: "xpad",
+                    },
+                ],
+                [
+                    1,
+                    41,
+                    {
+                        color: 3,
+                    },
+                ],
+            ];
+        },
+    });
+    ResConfigSettings._fields.bar = fields.Boolean({
+        onChange(record) {
+            record.bar = true;
+        },
+    });
+
+    class Product extends models.Model {
+        name = fields.Char();
+        color = fields.Integer();
+
+        _records = [
+            {
+                id: 37,
+                name: "xphone",
+                color: 1,
+            },
+            {
+                id: 41,
+                name: "xpad",
+                color: 2,
+            },
+        ];
+    }
+    defineModels([Product]);
+
     mockService("action", {
         doActionButton(params) {
             expect.step(`action executed ${JSON.stringify(params)}`);
         },
     });
-    onRpc(({ method }) => {
+    onRpc(({ method, args }) => {
+        if (method === "web_save") {
+            expect.step(method + " - " + JSON.stringify(args[1]));
+            return;
+        }
         expect.step(method);
     });
     await mountView({
@@ -1106,6 +1165,8 @@ test("clicking a button with dirty settings -- discard", async () => {
         arch: /* xml */ `
             <form js_class="base_settings">
                 <app string="CRM" name="crm">
+                    <field name="product_ids" widget="many2many_tags" options="{ 'color_field': 'color' }"/>
+                    <field name="bar" />
                     <field name="foo" />
                     <button type="object" name="mymethod" class="myBtn"/>
                 </app>
@@ -1114,16 +1175,31 @@ test("clicking a button with dirty settings -- discard", async () => {
         resModel: "res.config.settings",
     });
     expect.verifySteps(["get_views", "onchange"]);
-    click(".o_field_boolean input[type='checkbox']");
+
+    // Initial State:
+    // The first checkbox "bar" is checked.
+    // Two tags on the many2many : xphone and xpad.
+    // The colors are 1 and 3 (the onchange is correctly apply)
+    expect(".o_field_boolean[name='bar'] input").toBeChecked();
+    expect(queryAllTexts`.o_field_tags .o_tag`).toEqual(["xphone", "xpad"]);
+    expect(".o_tag_color_1").toHaveCount(1);
+    expect(".o_tag_color_3").toHaveCount(1);
+    click(".o_field_boolean[name='foo'] input[type='checkbox']");
     await animationFrame();
     click(".myBtn");
     await animationFrame();
     click(".modal .btn-secondary:eq(1)");
     await animationFrame();
     expect.verifySteps([
-        "web_save",
+        'web_save - {"product_ids":[[4,37],[4,41],[1,41,{"color":3}]],"bar":true,"foo":false}',
         'action executed {"context":{"lang":"en","tz":"taht","uid":7,"allowed_company_ids":[1]},"type":"object","name":"mymethod","resModel":"res.config.settings","resId":1,"resIds":[1],"buttonContext":{}}',
     ]);
+    // We came back to the same initial state.
+    expect(".o_field_boolean[name='bar'] input").toBeChecked();
+    expect(queryAllTexts`.o_field_tags .o_tag`).toEqual(["xphone", "xpad"]);
+    expect(".o_tag_color_1").toHaveCount(1);
+    expect(".o_tag_color_3").toHaveCount(1);
+    click(".o_field_boolean[name='foo'] input[type='checkbox']");
 });
 
 test("clicking on a button with noSaveDialog will not show discard warning", async () => {
@@ -1159,7 +1235,7 @@ test("clicking on a button with noSaveDialog will not show discard warning", asy
             </app>
         </form>
     `;
-    Task._views.list = /* xml */ `<tree><field name="display_name"/></tree>`;
+    Task._views.list = /* xml */ `<list><field name="display_name"/></list>`;
     ResConfigSettings._views.search = /* xml */ `<search/>`;
     Task._views.search = /* xml */ `<search/>`;
 
@@ -1301,7 +1377,7 @@ test("execute action from settings view with several actions in the breadcrumb",
         },
     ]);
 
-    Task._views[["list", 1]] = /* xml */ `<tree><field name="display_name"/></tree>`;
+    Task._views[["list", 1]] = /* xml */ `<list><field name="display_name"/></list>`;
     ResConfigSettings._views[["form", 2]] = /* xml */ `
         <form string="Settings" js_class="base_settings">
             <app string="CRM" name="crm">
@@ -1313,7 +1389,7 @@ test("execute action from settings view with several actions in the breadcrumb",
             </app>
         </form>
     `;
-    Task._views[["list", 3]] = /* xml */ `<tree><field name="display_name"/></tree>`;
+    Task._views[["list", 3]] = /* xml */ `<list><field name="display_name"/></list>`;
     ResConfigSettings._views.search = /* xml */ `<search/>`;
     Task._views.search = /* xml */ `<search/>`;
 
@@ -1349,7 +1425,7 @@ test("settings can contain one2many fields", async () => {
                 <app string="Base Setting" name="base-setting">
                     <setting>
                         <field name="tasks">
-                            <tree><field name="name"/></tree>
+                            <list><field name="name"/></list>
                             <form><field name="name"/></form>
                         </field>
                     </setting>
@@ -1404,7 +1480,7 @@ test('call "call_button/execute" when clicking on a button in dirty settings', a
         </form>
     `;
     ResConfigSettings._views.search = /* xml */ `<search/>`;
-    Task._views.list = /* xml */ `<tree/>`;
+    Task._views.list = /* xml */ `<list/>`;
     Task._views.search = /* xml */ `<search/>`;
 
     onRpc("/web/dataset/call_button", async (request) => {
@@ -1465,7 +1541,7 @@ test("Discard button clean the settings view", async () => {
         </form>
     `;
     ResConfigSettings._views.search = /* xml */ `<search/>`;
-    Task._views.list = /* xml */ `<tree/>`;
+    Task._views.list = /* xml */ `<list/>`;
     Task._views.search = /* xml */ `<search/>`;
 
     stepAllNetworkCalls();
@@ -1805,8 +1881,8 @@ test("server actions are called with the correct context", async () => {
 });
 
 test("BinaryField is correctly rendered in Settings form view", async () => {
-    onRpc("/web/content", (request) => {
-        const body = request.text();
+    onRpc("/web/content", async (request) => {
+        const body = await request.text();
         expect(body).toBeInstanceOf(FormData);
         expect(body.get("field")).toBe("file", {
             message: "we should download the field document",

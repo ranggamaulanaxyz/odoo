@@ -2,6 +2,7 @@
 
     import {ReCaptcha} from "@google_recaptcha/js/recaptcha";
     import { session } from "@web/session";
+    import { user } from "@web/core/user";
     import publicWidget from "@web/legacy/js/public/public_widget";
     import { delay } from "@web/core/utils/concurrency";
     import { debounce } from "@web/core/utils/timing";
@@ -18,7 +19,7 @@ import {
     serializeDateTime,
 } from "@web/core/l10n/dates";
 import { addLoadingEffect } from "@web/core/utils/ui";
-import { scrollTo } from "@web/core/utils/scrolling";
+import { scrollTo } from "@web_editor/js/common/scrolling";
 const DEBOUNCE = 400;
 const { DateTime } = luxon;
 import wUtils from '@website/js/utils';
@@ -77,10 +78,10 @@ import wUtils from '@website/js/utils';
             }
             // fetch user data (required by fill-with behavior)
             this.preFillValues = {};
-            if (session.user_id) {
+            if (user.userId) {
                 this.preFillValues = (await this.orm.read(
                     "res.users",
-                    [session.user_id],
+                    [user.userId],
                     this._getUserPreFillFields()
                 ))[0] || {};
             }
@@ -426,8 +427,8 @@ import wUtils from '@website/js/utils';
                                         window.location.href = successPage;
                                     } else {
                                         await scrollTo(successAnchorEl, {
-                                            behavior: "smooth",
-                                            offset: 0,
+                                            duration: 500,
+                                            extraOffset: 0,
                                         });
                                     }
                                 }

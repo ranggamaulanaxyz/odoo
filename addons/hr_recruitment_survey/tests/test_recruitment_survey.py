@@ -46,11 +46,11 @@ class TestRecruitmentSurvey(common.TransactionCase):
             'description': None,
         })
         cls.job_applicant = cls.env['hr.applicant'].create({
-            'name': 'Technical worker',
-            'partner_name': 'Jane Doe',
-            'email_from': 'customer@example.com',
+            'candidate_id': cls.env['hr.candidate'].create({
+                'partner_name': 'Jane Doe',
+                'email_from': 'customer@example.com',
+            }).id,
             'department_id': cls.department_admins.id,
-            'description': 'A nice Sys Admin job offer!',
             'job_id': cls.job.id,
         })
 
@@ -110,9 +110,5 @@ class TestRecruitmentSurvey(common.TransactionCase):
         self.job_applicant.with_user(self.hr_recruitment_user).action_print_survey()
 
     def _prepare_invite(self, survey, applicant):
-        survey.write({
-            'access_mode': 'public',
-            'users_login_required': False})
-        action = applicant.action_send_survey()
-        invite_form = Form(self.env[action['res_model']].with_context(action['context']))
-        return invite_form.save()
+        survey.write({'access_mode': 'public', 'users_login_required': False})
+        return Form.from_action(self.env, applicant.action_send_survey()).save()

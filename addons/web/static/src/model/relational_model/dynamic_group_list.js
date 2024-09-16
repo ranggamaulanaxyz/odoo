@@ -14,6 +14,7 @@ export class DynamicGroupList extends DynamicList {
     setup(config, data) {
         super.setup(...arguments);
         this.isGrouped = true;
+        this._nbRecordsMatchingDomain = null;
         this._setData(data);
     }
 
@@ -21,6 +22,7 @@ export class DynamicGroupList extends DynamicList {
         /** @type {import("./group").Group[]} */
         this.groups = data.groups.map((g) => this._createGroupDatapoint(g));
         this.count = data.length;
+        this._selectDomain(this.isDomainSelected);
     }
 
     // -------------------------------------------------------------------------
@@ -39,6 +41,10 @@ export class DynamicGroupList extends DynamicList {
         return this.groups.some((group) => group.hasData);
     }
 
+    get isRecordCountTrustable() {
+        return this.count <= this.limit || this._nbRecordsMatchingDomain !== null;
+    }
+
     /**
      * List of loaded records inside groups.
      * @returns {import("./record").Record[]}
@@ -54,6 +60,9 @@ export class DynamicGroupList extends DynamicList {
      * @returns {number}
      */
     get recordCount() {
+        if (this._nbRecordsMatchingDomain !== null) {
+            return this._nbRecordsMatchingDomain;
+        }
         return this.groups.reduce((acc, group) => acc + group.count, 0);
     }
 
@@ -157,6 +166,13 @@ export class DynamicGroupList extends DynamicList {
                 movedGroupId,
                 targetGroupId
             );
+        });
+    }
+
+    async selectDomain(value) {
+        return this.model.mutex.exec(async () => {
+            await this._ensureCorrectRecordCount();
+            this._selectDomain(value);
         });
     }
 
@@ -275,6 +291,16 @@ export class DynamicGroupList extends DynamicList {
         }
     }
 
+    async _ensureCorrectRecordCount() {
+        if (!this.isRecordCountTrustable) {
+            this._nbRecordsMatchingDomain = await this.model.orm.searchCount(
+                this.resModel,
+                this.domain,
+                { limit: this.model.initialCountLimit }
+            );
+        }
+    }
+
     _getDPresId(group) {
         return group.value;
     }
@@ -289,6 +315,9 @@ export class DynamicGroupList extends DynamicList {
             { offset, limit, orderBy, domain },
             { commit: this._setData.bind(this) }
         );
+        if (this.isDomainSelected) {
+            await this._ensureCorrectRecordCount();
+        }
     }
 
     _removeGroup(group) {
@@ -303,6 +332,27 @@ export class DynamicGroupList extends DynamicList {
             proms.push(group._removeRecords(recordIds));
         }
         return Promise.all(proms);
+    }
+
+    _selectDomain(value) {
+        for (const group of this.groups) {
+            group.list._selectDomain(value);
+        }
+        super._selectDomain(value);
+    }
+
+    async _toggleSelection() {
+        if (!this.records.length) {
+            // all groups are folded, so there's no visible records => select all domain
+            if (!this.isDomainSelected) {
+                await this._ensureCorrectRecordCount();
+                this._selectDomain(true);
+            } else {
+                this._selectDomain(false);
+            }
+        } else {
+            super._toggleSelection();
+        }
     }
 
     _unlinkGroups(groups) {

@@ -30,7 +30,7 @@ export class ProjectTaskFormController extends FormController {
             openHistoryDialog: {
                 sequence: 50,
                 icon: "fa fa-history",
-                description: _t("Restore History"),
+                description: _t("Version History"),
                 callback: () => this.openHistoryDialog(),
             },
         };
@@ -71,7 +71,7 @@ export class ProjectTaskFormController extends FormController {
                         )
                     )}</span>`
                 ),
-                recordId: this.props.resId,
+                recordId: record.resId,
                 recordModel: this.props.resModel,
                 versionedFieldName,
                 historyMetadata,

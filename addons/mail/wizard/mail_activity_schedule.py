@@ -20,7 +20,7 @@ class MailActivitySchedule(models.TransientModel):
     def default_get(self, fields_list):
         res = super().default_get(fields_list)
         context = self.env.context
-        active_res_ids = parse_res_ids(context.get('active_ids'))
+        active_res_ids = parse_res_ids(context.get('active_ids'), self.env)
         if 'res_ids' in fields_list:
             if active_res_ids and len(active_res_ids) <= self._batch_size:
                 res['res_ids'] = f"{context['active_ids']}"
@@ -88,7 +88,7 @@ class MailActivitySchedule(models.TransientModel):
     def _compute_res_ids(self):
         context = self.env.context
         for scheduler in self.filtered(lambda scheduler: not scheduler.res_ids):
-            active_res_ids = parse_res_ids(context.get('active_ids'))
+            active_res_ids = parse_res_ids(context.get('active_ids'), self.env)
             if active_res_ids and len(active_res_ids) <= self._batch_size:
                 scheduler.res_ids = f"{context['active_ids']}"
             elif not active_res_ids and context.get('active_id'):
@@ -255,7 +255,7 @@ class MailActivitySchedule(models.TransientModel):
             'type': 'ir.actions.act_window',
             'res_model': self.res_model,
             'name': _('Launch Plans'),
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'target': 'current',
             'domain': [('id', 'in', applied_on.ids)],
         }
@@ -322,7 +322,7 @@ class MailActivitySchedule(models.TransientModel):
 
         :return: a list of IDs (empty list in case of falsy strings)"""
         self.ensure_one()
-        return parse_res_ids(self.res_ids) or []
+        return parse_res_ids(self.res_ids, self.env) or []
 
     def _get_applied_on_records(self):
         return self.env[self.res_model].browse(self._evaluate_res_ids())

@@ -14,9 +14,9 @@ import { TourStep } from "./tour_step";
 
 export class TourInteractive {
     mode = "manual";
-    anchorEl;
     currentAction;
     currentActionIndex;
+    anchorEls = [];
     removeListeners = () => {};
 
     /**
@@ -36,23 +36,22 @@ export class TourInteractive {
         this.pointer = pointer;
         this.debouncedToggleOpen = debounce(this.pointer.showContent, 50, true);
         this.onTourEnd = onTourEnd;
-        this.pointer.start();
         this.observerDisconnect = hoot.observe(document.body, () => this._onMutation());
-        this.currentActionIndex = tourState.get(this.name, "currentIndex") || 0;
+        this.currentActionIndex = tourState.getCurrentIndex();
         this.play();
     }
 
     backward() {
         let tempIndex = this.currentActionIndex;
-        let tempAction, tempAnchor;
-
-        while (!tempAnchor && tempIndex >= 0) {
+        let tempAction,
+            tempAnchors = [];
+        while (!tempAnchors.length && tempIndex >= 0) {
             tempIndex--;
             tempAction = this.actions.at(tempIndex);
             if (!tempAction.step.active) {
                 continue;
             }
-            tempAnchor = tempAction && hoot.queryFirst(tempAction.anchor);
+            tempAnchors = tempAction && this.findTriggers(tempAction.anchor);
         }
 
         if (tempIndex >= 0) {
@@ -64,12 +63,16 @@ export class TourInteractive {
     /**
      * @returns {HTMLElement[]}
      */
-    findTriggers() {
-        return this.currentAction.anchor
+    findTriggers(anchor) {
+        if (!anchor) {
+            anchor = this.currentAction.anchor;
+        }
+        return anchor
             .split(/,\s*(?![^(]*\))/)
             .map((part) => hoot.queryFirst(part, { visible: true }))
             .filter((el) => !!el)
-            .map((el) => this.getAnchorEl(el, this.currentAction.event));
+            .map((el) => this.getAnchorEl(el, this.currentAction.event))
+            .filter((el) => !!el);
     }
 
     play() {
@@ -82,13 +85,10 @@ export class TourInteractive {
 
         this.currentAction = this.actions.at(this.currentActionIndex);
 
-        if (this.currentAction.event === "warn") {
-            console.warn(`Step '${this.currentAction.anchor}' ignored because no 'run'`);
-            this.currentActionIndex++;
-            this.play();
-        }
-
-        if (!this.currentAction.step.active) {
+        if (!this.currentAction.step.active || this.currentAction.event === "warn") {
+            if (this.currentAction.event === "warn") {
+                console.warn(`Step '${this.currentAction.anchor}' ignored.`);
+            }
             this.currentActionIndex++;
             this.play();
             return;
@@ -96,30 +96,28 @@ export class TourInteractive {
 
         console.log(this.currentAction.event, this.currentAction.anchor);
 
-        tourState.set(this.name, "currentIndex", this.currentActionIndex);
-        const anchorEls = this.findTriggers();
-        this.setActionListeners(anchorEls);
+        tourState.setCurrentIndex(this.currentActionIndex);
+        this.anchorEls = this.findTriggers();
+        this.setActionListeners();
         this.updatePointer();
     }
 
     updatePointer() {
-        this.pointer.pointTo(
-            this.anchorEl,
-            this.currentAction.pointerInfo,
-            this.currentAction.event === "drop"
-        );
-        this.pointer.setState({
-            onMouseEnter: () => this.debouncedToggleOpen(true),
-            onMouseLeave: () => this.debouncedToggleOpen(false),
-        });
+        if (this.anchorEls.length) {
+            this.pointer.pointTo(
+                this.anchorEls[0],
+                this.currentAction.pointerInfo,
+                this.currentAction.event === "drop"
+            );
+            this.pointer.setState({
+                onMouseEnter: () => this.debouncedToggleOpen(true),
+                onMouseLeave: () => this.debouncedToggleOpen(false),
+            });
+        }
     }
 
-    /**
-     * Set listeners for each anchor element.
-     * @param {HTMLElement[]} anchorEls
-     */
-    setActionListeners(anchorEls) {
-        const cleanups = anchorEls.flatMap((anchorEl, index) => {
+    setActionListeners() {
+        const cleanups = this.anchorEls.flatMap((anchorEl, index) => {
             const toListen = {
                 anchorEl,
                 consumeEvents: this.getConsumeEventType(anchorEl, this.currentAction.event),
@@ -137,7 +135,6 @@ export class TourInteractive {
                 },
             };
             if (index === 0) {
-                this.anchorEl = anchorEl;
                 return this.setupListeners({
                     ...toListen,
                     onMouseEnter: () => this.pointer.showContent(true),
@@ -145,11 +142,14 @@ export class TourInteractive {
                     onScroll: () => this.updatePointer(),
                 });
             } else {
-                return this.setupListeners(toListen);
+                return this.setupListeners({
+                    ...toListen,
+                    onScroll: () => {},
+                });
             }
         });
         this.removeListeners = () => {
-            delete this.anchorEl;
+            this.anchorEls = [];
             while (cleanups.length) {
                 cleanups.pop()();
             }
@@ -389,14 +389,20 @@ export class TourInteractive {
     _onMutation() {
         if (this.currentAction) {
             const tempAnchors = this.findTriggers();
-            if (tempAnchors.length && (!this.anchorEl || !tempAnchors.includes(this.anchorEl))) {
+            if (
+                tempAnchors.length &&
+                (tempAnchors.some((a) => !this.anchorEls.includes(a)) ||
+                    this.anchorEls.some((a) => !tempAnchors.includes(a)))
+            ) {
                 this.removeListeners();
-                this.setActionListeners(tempAnchors);
-            } else if (!tempAnchors.length && this.anchorEl) {
+                this.anchorEls = tempAnchors;
+                this.setActionListeners();
+            } else if (!tempAnchors.length && this.anchorEls.length) {
                 this.pointer.hide();
                 if (!hoot.queryFirst(".o_home_menu", { visible: true })) {
                     this.backward();
                 }
+                return;
             }
             this.updatePointer();
         }

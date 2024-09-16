@@ -30,6 +30,7 @@ import { downloadReport, getReportUrl } from "./reports/utils";
 import { omit, pick, shallowEqual } from "@web/core/utils/objects";
 import { zip } from "@web/core/utils/arrays";
 import { session } from "@web/session";
+import { exprToBoolean } from "@web/core/utils/strings";
 
 class BlankComponent extends Component {
     static props = ["onMounted", "withControlPanel", "*"];
@@ -68,6 +69,8 @@ const actionRegistry = registry.category("actions");
  * @property {CallableFunction} [onClose]
  * @property {Object} [props]
  * @property {ViewType} [viewType]
+ * @property {"replaceCurrentAction" | "replacePreviousAction"} [stackPosition]
+ * @property {number} [index]
  */
 
 export async function clearUncommittedChanges(env) {
@@ -400,7 +403,7 @@ export function makeActionManager(env, router = _router) {
             action.target = action.target || "current";
         }
         if (action.type === "ir.actions.act_window") {
-            action.views = [...action.views.map((v) => [v[0], v[1] === "tree" ? "list" : v[1]])]; // manipulate a copy to keep cached action unmodified
+            action.views = [...action.views.map((v) => [v[0], v[1]])]; // manipulate a copy to keep cached action unmodified
             action.controllers = {};
             const target = action.target;
             if (target !== "inline" && !(target === "new" && action.views[0][1] === "form")) {
@@ -744,10 +747,7 @@ export function makeActionManager(env, router = _router) {
 
     /**
      * Computes the position of the controller in the nextStack according to options
-     * @param {Object} options
-     * @param {boolean} [options.clearBreadcrumbs=false]
-     * @param {'replaceLast' | 'replaceLastAction'} [options.stackPosition]
-     * @param {number} [options.index]
+     * @param {ActionOptions} options
      */
     function _computeStackIndex(options) {
         if (options.clearBreadcrumbs) {
@@ -894,6 +894,10 @@ export function makeActionManager(env, router = _router) {
                     // so go back to the previous controller, of the current faulty one.
                     // This occurs when clicking on a breadcrumbs.
                     return restore(controllerStack[index - 1].jsId);
+                }
+                if (index === 0) {
+                    // No previous controller to restore, so do nothing but display the error
+                    return;
                 }
                 const lastController = controllerStack.at(-1);
                 if (lastController) {
@@ -1385,6 +1389,10 @@ export function makeActionManager(env, router = _router) {
         // determine the action to execute according to the params
         let action;
         const context = makeContext([params.context, params.buttonContext]);
+        const blockUi = exprToBoolean(params["block-ui"]);
+        if (blockUi) {
+            env.services.ui.block();
+        }
         if (params.special) {
             action = { type: "ir.actions.act_window_close", infos: { special: true } };
         } else if (params.type === "object") {
@@ -1422,6 +1430,9 @@ export function makeActionManager(env, router = _router) {
             context.active_model = params.resModel;
             action = await keepLast.add(_loadAction(params.name, context));
         } else {
+            if (blockUi) {
+                env.services.ui.unblock();
+            }
             throw new InvalidButtonParamsError("Missing type for doActionButton request");
         }
         // filter out context keys that are specific to the current action, because:
@@ -1447,6 +1458,9 @@ export function makeActionManager(env, router = _router) {
         await doAction(action, options);
         if (params.close) {
             await _executeCloseAction();
+        }
+        if (blockUi) {
+            env.services.ui.unblock();
         }
         if (effect) {
             env.services.effect.add(effect);

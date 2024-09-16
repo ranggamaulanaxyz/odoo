@@ -1,6 +1,6 @@
 import { AttachmentList } from "@mail/core/common/attachment_list";
 import { useAttachmentUploader } from "@mail/core/common/attachment_uploader_hook";
-import { useDropzone } from "@mail/core/common/dropzone_hook";
+import { useDropzone } from "@web/core/dropzone/dropzone_hook";
 import { Picker, usePicker } from "@mail/core/common/picker";
 import { MessageConfirmDialog } from "@mail/core/common/message_confirm_dialog";
 import { NavigableList } from "@mail/core/common/navigable_list";
@@ -118,7 +118,7 @@ export class Composer extends Component {
                 );
             },
         });
-        this.suggestion = this.store.self.type === "partner" ? useSuggestion() : undefined;
+        this.suggestion = useSuggestion();
         this.markEventHandled = markEventHandled;
         this.onDropFile = this.onDropFile.bind(this);
         this.saveContentDebounced = useDebounced(this.saveContent, 5000, {
@@ -192,7 +192,13 @@ export class Composer extends Component {
                 }
             },
             pickers: { emoji: (emoji) => this.addEmoji(emoji) },
-            position: this.props.mode === "extended" ? "bottom-start" : "top-end",
+            position:
+                this.props.mode === "extended"
+                    ? "bottom-start"
+                    : this.props.composer.message
+                    ? "bottom-start"
+                    : "top-end",
+            fixed: !this.props.composer.message,
         };
     }
 
@@ -299,6 +305,10 @@ export class Composer extends Component {
         );
     }
 
+    get hasSendButtonNonEditing() {
+        return !this.extended;
+    }
+
     get hasSuggestions() {
         return Boolean(this.suggestion?.state.items);
     }
@@ -307,11 +317,11 @@ export class Composer extends Component {
         const props = {
             anchorRef: this.ref.el,
             position: this.env.inChatter ? "bottom-fit" : "top-fit",
-            placeholder: _t("Loading"),
             onSelect: (ev, option) => {
                 this.suggestion.insert(option);
                 markEventHandled(ev, "composer.selectSuggestion");
             },
+            isLoading: !!this.suggestion.search.term && this.suggestion.state.isFetching,
             options: [],
         };
         if (!this.hasSuggestions) {
@@ -487,13 +497,10 @@ export class Composer extends Component {
         }
         const attachmentIds = this.props.composer.attachments.map((attachment) => attachment.id);
         const body = this.props.composer.text;
-        const validMentions =
-            this.store.self.type === "partner"
-                ? this.store.getMentionsFromText(body, {
-                      mentionedChannels: this.props.composer.mentionedChannels,
-                      mentionedPartners: this.props.composer.mentionedPartners,
-                  })
-                : undefined;
+        const validMentions = this.store.getMentionsFromText(body, {
+            mentionedChannels: this.props.composer.mentionedChannels,
+            mentionedPartners: this.props.composer.mentionedPartners,
+        });
         const context = {
             default_attachment_ids: attachmentIds,
             default_body: await prettifyMessageContent(body, validMentions),
@@ -574,7 +581,7 @@ export class Composer extends Component {
         } else if (
             this.props.composer.text.trim() ||
             attachments.length > 0 ||
-            (this.message && this.message.attachments.length > 0)
+            (this.message && this.message.attachment_ids.length > 0)
         ) {
             if (!this.state.active) {
                 return;
@@ -642,7 +649,7 @@ export class Composer extends Component {
 
     async editMessage() {
         const composer = toRaw(this.props.composer);
-        if (composer.text || composer.message.attachments.length > 0) {
+        if (composer.text || composer.message.attachment_ids.length > 0) {
             await this.processMessage(async (value) =>
                 composer.message.edit(value, composer.attachments, {
                     mentionedChannels: composer.mentionedChannels,

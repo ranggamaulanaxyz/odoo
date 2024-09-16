@@ -169,7 +169,7 @@ options.registry.WebsiteSaleProductsItem = options.Class.extend({
     async createRibbon(previewMode, widgetValue, params) {
         await this._setRibbon(false);
         this.$ribbon.text(_t('Ribbon Name'));
-        this.$ribbon.addClass('bg-primary o_ribbon_left');
+        this.$ribbon.addClass('o_ribbon_left');
         this.ribbonEditMode = true;
         await this._saveRibbon(true);
     },
@@ -353,8 +353,7 @@ options.registry.WebsiteSaleProductsItem = options.Class.extend({
         $ribbons.removeClass(htmlClasses);
 
         $ribbons.addClass(this.ribbonPositionClasses[ribbon.position]);
-        $ribbons.attr('style',
-            `background-color: ${ribbon.bg_color ? `${ribbon.bg_color} !important` : 'inherit'}`);
+        $ribbons.css('background-color', ribbon.bg_color || '');
         $ribbons.css('color', ribbon.text_color || '');
 
         if (!this.ribbons[ribbonId]) {
@@ -458,12 +457,33 @@ options.registry.WebsiteSaleProductPage = options.Class.extend({
         if (this.productProductID) {
             this.mode = "product.product"
         }
-
         // Different targets
         this.productDetailMain = this.$target[0].querySelector('#product_detail_main');
         this.productPageCarousel = this.$target[0].querySelector("#o-carousel-product");
         this.productPageGrid = this.$target[0].querySelector("#o-grid-product");
         return this._super(...arguments);
+    },
+
+    /**
+     * If an accordion is displayed in the product details, remove the classes that Bootstrap adds
+     * when editing an accordion-item to avoid saving the template with the accordion opened.
+     *
+     * @override
+     */
+    async cleanForSave() {
+        const accordionEl = this.productDetailMain.querySelector('#product_accordion');
+        if (!accordionEl) return;
+
+        const accordionItemsEls = accordionEl.querySelectorAll('.accordion-item');
+        accordionItemsEls.forEach((item, key) => {
+            const accordionButtonEl = item.querySelector('.accordion-button');
+            const accordionCollapseEl = item.querySelector('.accordion-collapse');
+            if (key !== 0 && accordionCollapseEl.classList.contains('show')) {
+                accordionButtonEl.classList.add('collapsed');
+                accordionButtonEl.setAttribute('aria-expanded', 'false');
+                accordionCollapseEl.classList.remove('show');
+            }
+        });
     },
 
     _getZoomOptionData() {
@@ -681,13 +701,21 @@ options.registry.WebsiteSaleProductPage = options.Class.extend({
     async _computeWidgetVisibility(widgetName, params) {
         const hasImages = this.productDetailMain.dataset.image_width != 'none';
         const isFullImage = this.productDetailMain.dataset.image_width == '100_pc';
+        const multipleImages = hasImages && this.productDetailMain.querySelector(
+            '.o_wsale_product_images'
+        ).dataset.imageAmount > 1;
+        const isGrid = !!this.productDetailMain.querySelector('#o-grid-product');
         switch (widgetName) {
             case 'o_wsale_thumbnail_pos':
                 return Boolean(this.productPageCarousel) && hasImages;
             case 'o_wsale_grid_spacing':
+                return isGrid && multipleImages;
             case 'o_wsale_grid_columns':
-                return Boolean(this.productPageGrid) && hasImages;
+                return Boolean(this.productPageGrid) && hasImages && isGrid && multipleImages;
             case 'o_wsale_image_layout':
+                return multipleImages;
+            case "o_wsale_image_ratio":
+                return !isGrid && multipleImages;
             case 'o_wsale_zoom_click':
             case 'o_wsale_zoom_none':
             case 'o_wsale_replace_main_image':

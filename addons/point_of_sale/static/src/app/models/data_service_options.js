@@ -2,33 +2,28 @@
 // We are now able to override options from others modules
 export class DataServiceOptions {
     get databaseTable() {
-        return [
-            {
-                name: "pos.order",
+        return {
+            "pos.order": {
                 key: "uuid",
                 condition: (record) => record.finalized && typeof record.id === "number",
             },
-            {
-                name: "pos.order.line",
+            "pos.order.line": {
                 key: "uuid",
                 condition: (record) =>
                     record.order_id?.finalized && typeof record.order_id.id === "number",
             },
-            {
-                name: "pos.payment",
+            "pos.payment": {
                 key: "uuid",
                 condition: (record) =>
                     record.pos_order_id?.finalized && typeof record.pos_order_id.id === "number",
             },
-            {
-                name: "pos.pack.operation.lot",
+            "pos.pack.operation.lot": {
                 key: "id",
                 condition: (record) =>
                     record.pos_order_line_id?.order_id?.finalized &&
                     typeof record.pos_order_line_id.order_id.id === "number",
             },
-            {
-                name: "product.product",
+            "product.product": {
                 key: "id",
                 condition: (record) => {
                     return record.models["pos.order.line"].find(
@@ -36,8 +31,7 @@ export class DataServiceOptions {
                     );
                 },
             },
-            {
-                name: "product.attribute.custom.value",
+            "product.attribute.custom.value": {
                 key: "id",
                 condition: (record) => {
                     return record.models["pos.order.line"].find((l) => {
@@ -46,11 +40,12 @@ export class DataServiceOptions {
                     });
                 },
             },
-        ];
+        };
     }
 
     get databaseIndex() {
-        return {
+        const databaseTable = this.databaseTable;
+        const indexes = {
             "pos.order": ["uuid"],
             "pos.order.line": ["uuid"],
             "product.product": ["barcode", "pos_categ_ids", "write_date"],
@@ -60,6 +55,16 @@ export class DataServiceOptions {
             "calendar.event": ["appointment_resource_ids"],
             "res.partner": ["barcode"],
         };
+
+        for (const model in databaseTable) {
+            if (!indexes[model]) {
+                indexes[model] = [databaseTable[model].key];
+            } else if (!indexes[model].includes(databaseTable[model].key)) {
+                indexes[model].push(databaseTable[model].key);
+            }
+        }
+
+        return indexes;
     }
 
     get autoLoadedOrmMethods() {

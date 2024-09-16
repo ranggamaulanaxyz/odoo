@@ -74,7 +74,7 @@ class MrpRoutingWorkcenter(models.Model):
             operation.time_cycle = operation.time_cycle_manual
         for operation in self - manual_ops:
             data = self.env['mrp.workorder'].search([
-                ('operation_id', '=', operation.id),
+                ('operation_id', 'in', operation.ids),
                 ('qty_produced', '>', 0),
                 ('state', '=', 'done')],
                 limit=operation.time_mode_batch,
@@ -153,11 +153,11 @@ class MrpRoutingWorkcenter(models.Model):
             'type': 'ir.actions.act_window',
             'name': _('Select Operations to Copy'),
             'res_model': 'mrp.routing.workcenter',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'domain': ['|', ('bom_id', '=', False), ('bom_id.active', '=', True)],
             'context' : {
                 'bom_id': self.env.context["bom_id"],
-                'tree_view_ref': 'mrp.mrp_routing_workcenter_copy_to_bom_tree_view',
+                'list_view_ref': 'mrp.mrp_routing_workcenter_copy_to_bom_tree_view',
             }
         }
 

@@ -1287,7 +1287,7 @@ class TestMessageToStorePerformance(BaseMailPerformance):
 
         self.assertEqual(len(res["mail.message"]), 2 * 2)
         for message in res["mail.message"]:
-            self.assertEqual(len(message['attachments']), 2)
+            self.assertEqual(len(message["attachment_ids"]), 2)
 
     @mute_logger('odoo.tests', 'odoo.addons.mail.models.mail_mail', 'odoo.models.unlink')
     @users('employee')
@@ -1295,11 +1295,11 @@ class TestMessageToStorePerformance(BaseMailPerformance):
     def test_message_to_store_single(self):
         message = self.messages_all[0].with_env(self.env)
 
-        with self.assertQueryCount(employee=24):
+        with self.assertQueryCount(employee=27):
             res = Store(message, for_current_user=True).get_result()
 
         self.assertEqual(len(res["mail.message"]), 1)
-        self.assertEqual(len(res["mail.message"][0]["attachments"]), 2)
+        self.assertEqual(len(res["mail.message"][0]["attachment_ids"]), 2)
 
     @mute_logger('odoo.tests', 'odoo.addons.mail.models.mail_mail', 'odoo.models.unlink')
     @users('employee')
@@ -1369,7 +1369,7 @@ class TestMessageToStorePerformance(BaseMailPerformance):
                             ],
                             "mail.message": self._filter_messages_fields(
                                 {
-                                    "attachments": [],
+                                    "attachment_ids": [],
                                     "author": {
                                         "id": self.env.user.partner_id.id,
                                         "type": "partner",
@@ -1472,7 +1472,7 @@ class TestMessageToStorePerformance(BaseMailPerformance):
                             ],
                             "mail.message": self._filter_messages_fields(
                                 {
-                                    "attachments": [],
+                                    "attachment_ids": [],
                                     "author": {
                                         "id": self.env.user.partner_id.id,
                                         "type": "partner",

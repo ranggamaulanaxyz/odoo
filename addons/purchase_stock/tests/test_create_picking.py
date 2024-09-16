@@ -99,6 +99,7 @@ class TestCreatePicking(common.TestProductCommon):
         stock_location = self.env.ref('stock.stock_location_stock')
         customer_location = self.env.ref('stock.stock_location_customers')
         picking_type_out = self.env.ref('stock.picking_type_out')
+        picking_type_out.reservation_method = 'at_confirm'
         # route buy should be there by default
         partner = self.env['res.partner'].create({
             'name': 'Jhon'
@@ -494,9 +495,7 @@ class TestCreatePicking(common.TestProductCommon):
         first_picking.move_ids.quantity = 5
         first_picking.move_ids.picked = True
         # create the backorder
-        backorder_wizard_dict = first_picking.button_validate()
-        backorder_wizard = Form(self.env[backorder_wizard_dict['res_model']].with_context(backorder_wizard_dict['context'])).save()
-        backorder_wizard.process()
+        Form.from_action(self.env, first_picking.button_validate()).save().process()
 
         self.assertEqual(len(po.picking_ids), 2)
 
@@ -554,6 +553,7 @@ class TestCreatePicking(common.TestProductCommon):
         })
         # This needs to be tried with MTO route activated
         self.env['stock.route'].browse(self.ref('stock.route_warehouse0_mto')).action_unarchive()
+        self.env['stock.route'].browse(self.ref('stock.route_warehouse0_mto')).rule_ids.procure_method = "make_to_order"
         product = self.env['product.product'].create({
             'name': 'product',
             'is_storable': True,

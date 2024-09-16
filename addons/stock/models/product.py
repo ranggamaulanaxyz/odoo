@@ -177,8 +177,15 @@ class Product(models.Model):
             # Calculate the moves that were done before now to calculate back in time (as most questions will be recent ones)
             domain_move_in_done = [('state', '=', 'done'), ('date', '>', to_date)] + domain_move_in_done
             domain_move_out_done = [('state', '=', 'done'), ('date', '>', to_date)] + domain_move_out_done
-            moves_in_res_past = {product.id: product_qty for product, product_qty in Move._read_group(domain_move_in_done, ['product_id'], ['quantity:sum'])}
-            moves_out_res_past = {product.id: product_qty for product, product_qty in Move._read_group(domain_move_out_done, ['product_id'], ['quantity:sum'])}
+
+            groupby = ['product_id', 'product_uom']
+            moves_in_res_past = defaultdict(float)
+            for product, uom, quantity in Move._read_group(domain_move_in_done, groupby, ['quantity:sum']):
+                moves_in_res_past[product.id] += uom._compute_quantity(quantity, product.uom_id)
+
+            moves_out_res_past = defaultdict(float)
+            for product, uom, quantity in Move._read_group(domain_move_out_done, groupby, ['quantity:sum']):
+                moves_out_res_past[product.id] += uom._compute_quantity(quantity, product.uom_id)
 
         res = dict()
         for product in self.with_context(prefetch_fields=False):
@@ -1033,6 +1040,8 @@ class ProductCategory(models.Model):
              "Least Packages: FIFO but with the least number of packages possible when there are several packages containing the same product.",
         tracking=True,
     )
+    parent_route_ids = fields.Many2many(
+        'stock.route', string='Parent Routes', compute='_compute_parent_route_ids')
     total_route_ids = fields.Many2many(
         'stock.route', string='Total routes', compute='_compute_total_route_ids',
         readonly=True)
@@ -1044,14 +1053,20 @@ class ProductCategory(models.Model):
              "Reserve Partial Packagings: allow reserving partial packagings. If customer orders 2 pallets of 1000 units each and you only have 1600 in stock, then 1600 will be reserved")
     filter_for_stock_putaway_rule = fields.Boolean('stock.putaway.rule', store=False, search='_search_filter_for_stock_putaway_rule')
 
-    def _compute_total_route_ids(self):
+    @api.depends('parent_id')
+    def _compute_parent_route_ids(self):
         for category in self:
             base_cat = category
-            routes = category.route_ids
+            routes = self.env['stock.route']
             while base_cat.parent_id:
                 base_cat = base_cat.parent_id
                 routes |= base_cat.route_ids
-            category.total_route_ids = routes
+            category.parent_route_ids = routes - category.route_ids
+
+    @api.depends('route_ids', 'parent_route_ids')
+    def _compute_total_route_ids(self):
+        for category in self:
+            category.total_route_ids = category.route_ids | category.parent_route_ids
 
     def _search_filter_for_stock_putaway_rule(self, operator, value):
         assert operator == '='

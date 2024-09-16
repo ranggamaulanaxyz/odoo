@@ -17,9 +17,7 @@ import { initElementForEdition } from "./utils/sanitize";
  * @property { String } collaboration.collaborationChannel.collaborationFieldName
  * @property { Number } collaboration.collaborationChannel.collaborationResId
  * @property { 'start' | 'focus' } [collaboration.collaborativeTrigger]
-/**
 
-/**
  * @typedef { Object } EditorConfig
  * @property { string } [content]
  * @property { boolean } [allowInlineAtRoot]
@@ -215,8 +213,6 @@ export class Editor {
 
     getElContent() {
         const el = this.editable.cloneNode(true);
-        this.dispatch("CLEAN", { root: el });
-        this.dispatch("MERGE_ADJACENT_NODE", { node: el });
         this.dispatch("CLEAN_FOR_SAVE", { root: el });
         return el;
     }

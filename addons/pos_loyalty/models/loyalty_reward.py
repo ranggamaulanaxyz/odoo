@@ -54,7 +54,7 @@ class LoyaltyReward(models.Model):
         if domain_str == "null":
             return domain_str
 
-        domain = ast.literal_eval(domain_str)
+        domain = json.loads(domain_str)
 
         for index, condition in self._parse_domain(domain).items():
             field_name, operator, value = condition
@@ -62,7 +62,7 @@ class LoyaltyReward(models.Model):
 
             if field and field.type == 'many2one' and operator in ('ilike', 'not ilike'):
                 comodel = self.env[field.comodel_name]
-                matching_ids = list(comodel._name_search(value, [], operator, limit=None))
+                matching_ids = list(comodel._search([('display_name', operator, value)]))
 
                 new_operator = 'in' if operator == 'ilike' else 'not in'
                 domain[index] = [field_name, new_operator, matching_ids]

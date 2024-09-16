@@ -5,16 +5,19 @@ import { useVisible } from "@mail/utils/common/hooks";
 
 import {
     Component,
+    markRaw,
     onMounted,
     onWillDestroy,
     onWillPatch,
     onWillUpdateProps,
+    reactive,
     toRaw,
     useChildSubEnv,
     useEffect,
     useRef,
     useState,
 } from "@odoo/owl";
+import { browser } from "@web/core/browser/browser";
 
 import { _t } from "@web/core/l10n/translation";
 import { Transition } from "@web/core/transition";
@@ -65,7 +68,6 @@ export class Thread extends Component {
     setup() {
         super.setup();
         this.escape = escape;
-        this.refByMessageId = new Map();
         this.registerMessageRef = this.registerMessageRef.bind(this);
         this.store = useState(useService("mail.store"));
         this.state = useState({
@@ -79,13 +81,21 @@ export class Thread extends Component {
         this.messageHighlight = this.env.messageHighlight
             ? useState(this.env.messageHighlight)
             : null;
+        this.scrollingToHighlight = false;
+        this.refByMessageId = reactive(new Map(), () => this.scrollToHighlighted());
+        useEffect(
+            () => this.scrollToHighlighted(),
+            () => [this.messageHighlight?.highlightedMessageId]
+        );
         this.present = useRef("load-newer");
+        this.jumpPresentRef = useRef("jump-present");
+        this.root = useRef("messages");
         /**
          * This is the reference element with the scrollbar. The reference can
          * either be the chatter scrollable (if chatter) or the thread
          * scrollable (in other cases).
          */
-        this.scrollableRef = this.props.scrollRef ?? useRef("messages");
+        this.scrollableRef = this.props.scrollRef ?? this.root;
         this.loadOlderState = useVisible(
             "load-older",
             async () => {
@@ -110,6 +120,28 @@ export class Thread extends Component {
             this.updateShowJumpPresent()
         );
         this.setupScroll();
+        useEffect(
+            () => {
+                if (!this.viewportEl || !this.jumpPresentRef.el) {
+                    return;
+                }
+                const width = this.viewportEl.clientWidth;
+                const height = this.viewportEl.clientHeight;
+                const computedStyle = window.getComputedStyle(this.viewportEl);
+                const ps = parseInt(computedStyle.getPropertyValue("padding-left"));
+                const pe = parseInt(computedStyle.getPropertyValue("padding-right"));
+                const pt = parseInt(computedStyle.getPropertyValue("padding-top"));
+                const pb = parseInt(computedStyle.getPropertyValue("padding-bottom"));
+                this.jumpPresentRef.el.style.transform = `translate(${
+                    this.env.inChatter ? 22 : width - ps - pe - 22
+                }px, ${
+                    this.env.inChatter && !this.env.inChatter.aside
+                        ? 0
+                        : height - pt - pb - (this.env.inChatter?.aside ? 75 : 0)
+                }px)`;
+            },
+            () => [this.jumpPresentRef.el, this.viewportEl]
+        );
         useEffect(
             () => this.updateShowJumpPresent(),
             () => [this.props.thread.loadNewer]
@@ -152,20 +184,9 @@ export class Thread extends Component {
                 if (!this.state.mountedAndLoaded) {
                     return;
                 }
-                if (!this.env.inChatter) {
-                    this.updateShowJumpPresent();
-                }
+                this.updateShowJumpPresent();
             },
             () => [this.state.mountedAndLoaded]
-        );
-        useEffect(
-            () => {
-                const el = this.refByMessageId.get(this.messageHighlight?.highlightedMessageId)?.el;
-                if (el) {
-                    this.messageHighlight.scrollTo(el);
-                }
-            },
-            () => [this.state.mountedAndLoaded, this.messageHighlight?.highlightedMessageId]
         );
         onMounted(() => {
             if (!this.env.chatter || this.env.chatter?.fetchMessages) {
@@ -405,7 +426,9 @@ export class Thread extends Component {
             };
         });
         useEffect(applyScroll);
-        useChildSubEnv({ onImageLoaded: applyScroll });
+        useChildSubEnv({
+            onImageLoaded: applyScroll,
+        });
         const observer = new ResizeObserver(applyScroll);
         useEffect(
             (el, mountedAndLoaded) => {
@@ -422,9 +445,18 @@ export class Thread extends Component {
         );
     }
 
+    get viewportEl() {
+        let viewportEl = this.scrollableRef.el;
+        if (viewportEl && viewportEl.clientHeight > browser.innerHeight) {
+            while (viewportEl && viewportEl.clientHeight > browser.innerHeight) {
+                viewportEl = viewportEl.parentElement;
+            }
+        }
+        return viewportEl;
+    }
+
     get PRESENT_THRESHOLD() {
-        const viewportHeight =
-            (this.scrollableRef.el?.clientHeight ?? 0) * PRESENT_VIEWPORT_THRESHOLD;
+        const viewportHeight = (this.getViewportEl?.clientHeight ?? 0) * PRESENT_VIEWPORT_THRESHOLD;
         const messagesHeight = [...this.props.thread.nonEmptyMessages]
             .reverse()
             .slice(0, PRESENT_MESSAGE_THRESHOLD)
@@ -465,7 +497,7 @@ export class Thread extends Component {
     }
 
     getMessageClassName(message) {
-        return this.messageHighlight?.highlightedMessageId === message.id
+        return !message.isNotification && this.messageHighlight?.highlightedMessageId === message.id
             ? "o-highlighted bg-view shadow-lg pb-1"
             : "";
     }
@@ -478,26 +510,9 @@ export class Thread extends Component {
         this.state.showJumpPresent = false;
     }
 
-    /**
-     * @param {MouseEvent} ev
-     */
-    async onClickNotification(ev) {
-        const { oeType, oeId } = ev.target.dataset;
-        if (oeType === "highlight") {
-            await this.env.messageHighlight?.highlightMessage(
-                this.store.Message.insert({
-                    id: Number(oeId),
-                    res_id: this.props.thread.id,
-                    model: this.props.thread.model,
-                }),
-                this.props.thread
-            );
-        }
-    }
-
     async onClickUnreadMessagesBanner() {
         await this.props.thread.loadAround(this.props.thread.selfMember.localNewMessageSeparator);
-        this.messageHighlight.highlightMessage(
+        this.messageHighlight?.highlightMessage(
             this.props.thread.firstUnreadMessage,
             this.props.thread
         );
@@ -506,8 +521,9 @@ export class Thread extends Component {
     registerMessageRef(message, ref) {
         if (!ref) {
             this.refByMessageId.delete(message.id);
+            return;
         }
-        this.refByMessageId.set(message.id, ref);
+        this.refByMessageId.set(message.id, markRaw(ref));
     }
 
     isSquashed(msg, prevMsg) {
@@ -529,9 +545,17 @@ export class Thread extends Component {
         if (!msg.thread?.eq(prevMsg.thread)) {
             return false;
         }
-        if (msg.parentMessage) {
-            return false;
+        return msg.datetime.ts - prevMsg.datetime.ts < 5 * 60 * 1000;
+    }
+
+    scrollToHighlighted() {
+        if (!this.messageHighlight?.highlightedMessageId || this.scrollingToHighlight) {
+            return;
         }
-        return msg.datetime.ts - prevMsg.datetime.ts < 60 * 1000;
+        const el = this.refByMessageId.get(this.messageHighlight.highlightedMessageId)?.el;
+        if (el) {
+            this.scrollingToHighlight = true;
+            this.messageHighlight.scrollTo(el).then(() => (this.scrollingToHighlight = false));
+        }
     }
 }

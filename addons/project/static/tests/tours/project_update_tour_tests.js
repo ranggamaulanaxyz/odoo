@@ -102,7 +102,7 @@ registry.category("web_tour.tours").add('project_update_tour', {
     trigger: '.o_kanban_project_tasks',
 },
 {
-    trigger: ".o_kanban_record .oe_kanban_content",
+    trigger: ".o_kanban_record",
     run: "drag_and_drop(.o_kanban_group:eq(1))",
 }, {
     trigger: ".o_control_panel_navigation button i.fa-sliders",
@@ -113,12 +113,12 @@ registry.category("web_tour.tours").add('project_update_tour', {
     content: "Open embedded actions dropdown",
     run: "click",
 }, {
-    trigger: ".o-dropdown-item div span:contains('Project Updates')",
-    content: "Put Project Updates in the embedded actions",
+    trigger: ".o-dropdown-item div span:contains('Dashboard')",
+    content: "Put Dashboard in the embedded actions",
     run: "click",
 }, {
-    trigger: ".o_embedded_actions button span:contains('Project Updates')",
-    content: "Open Project Updates",
+    trigger: ".o_embedded_actions button span:contains('Dashboard')",
+    content: "Open Dashboard",
     run: "click",
 }, {
     trigger: ".o_add_milestone a",
@@ -188,7 +188,7 @@ registry.category("web_tour.tours").add('project_update_tour', {
     run: "click",
 }, {
     trigger: '.o_switch_view.o_list',
-    content: 'Open List View of Project Updates',
+    content: 'Open List View of Dashboard',
     run: "click",
 }, 
 {

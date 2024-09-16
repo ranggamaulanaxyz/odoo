@@ -320,7 +320,7 @@
             }
         }
 
-        > .o_field_widget {
+        .o_field_widget {
             --fieldWidget-margin-bottom: 0;
 
             align-self: flex-start;
@@ -427,6 +427,10 @@
         --columns: 1;
         gap: map-get($spacers, 2) $o-horizontal-padding;
         margin-bottom: map-get($spacers, 2);
+
+        .o_cell:first-child:last-child {
+            grid-column: span 2;
+        }
 
         span, .o_field_boolean, .oe_avatar, .o_form_uri {
             &.o_field_widget {
@@ -633,7 +637,15 @@
     }
 
     div {
-        div:focus-within > span.o_field_translate, div:hover > span.o_field_translate {
+        div:focus-within > div.o_field_char_buttons > span.o_field_translate,
+        div:hover > div.o_field_char_buttons > span.o_field_translate {
+            visibility: visible !important;
+        }
+    }
+
+    div {
+        div:focus-within > span.o_field_translate,
+        div:hover > span.o_field_translate {
             visibility: visible !important;
         }
     }

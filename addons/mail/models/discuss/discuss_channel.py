@@ -105,15 +105,8 @@ class Channel(models.Model):
     @api.depends("channel_type", "is_member", "group_public_id")
     @api.depends_context("uid")
     def _compute_is_editable(self):
-        if not self.check_access_rights("write", raise_exception=False):
-            self.is_editable = False
-            return
         for channel in self:
-            try:
-                channel.check_access_rule("write")
-                channel.is_editable = True
-            except AccessError:
-                channel.is_editable = False
+            channel.is_editable = channel.has_access("write")
 
     @api.depends('channel_type', 'image_128', 'uuid')
     def _compute_avatar_128(self):
@@ -469,8 +462,8 @@ class Channel(models.Model):
         message_type = msg_vals.get('message_type', 'comment') if msg_vals else message.message_type
         pids = msg_vals.get('partner_ids', []) if msg_vals else message.partner_ids.ids
 
-        # notify only user input (comment or incoming / outgoing emails)
-        if message_type not in ('comment', 'email', 'email_outgoing'):
+        # notify only user input (comment, whatsapp messages or incoming / outgoing emails)
+        if message_type not in ('comment', 'email', 'email_outgoing', 'whatsapp_message'):
             return []
 
         recipients_data = []
@@ -1073,6 +1066,7 @@ class Channel(models.Model):
         channel._broadcast(channel.channel_member_ids.partner_id.ids)
         return channel
 
+    @api.readonly
     @api.model
     def get_mention_suggestions(self, search, limit=8):
         """ Return 'limit'-first channels' id, name, channel_type and authorizedGroupFullName fields such that the
@@ -1163,7 +1157,8 @@ class Channel(models.Model):
             "%(new_line)s"
             "%(new_line)sType %(bold_start)s@username%(bold_end)s to mention someone, and grab their attention."
             "%(new_line)sType %(bold_start)s#channel%(bold_end)s to mention a channel."
-            "%(new_line)sType %(bold_start)s/command%(bold_end)s to execute a command.",
+            "%(new_line)sType %(bold_start)s/command%(bold_end)s to execute a command."
+            "%(new_line)sType %(bold_start)s:shortcut%(bold_end)s to insert a canned response in your message.",
             bold_start=Markup("<b>"),
             bold_end=Markup("</b>"),
             new_line=Markup("<br>"),

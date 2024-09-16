@@ -73,7 +73,11 @@ class SaleOrder(models.Model):
         readonly=True, copy=False, index=True,
         tracking=3,
         default='draft')
-    locked = fields.Boolean(default=False, copy=False, help="Locked orders cannot be modified.")
+    locked = fields.Boolean(
+        help="Locked orders cannot be modified.",
+        default=False,
+        copy=False,
+        tracking=True)
     has_archived_products = fields.Boolean(compute="_compute_has_archived_products")
 
     client_order_ref = fields.Char(string="Customer Reference", copy=False)
@@ -216,7 +220,7 @@ class SaleOrder(models.Model):
     amount_untaxed = fields.Monetary(string="Untaxed Amount", store=True, compute='_compute_amounts', tracking=5)
     amount_tax = fields.Monetary(string="Taxes", store=True, compute='_compute_amounts')
     amount_total = fields.Monetary(string="Total", store=True, compute='_compute_amounts', tracking=4)
-    amount_to_invoice = fields.Monetary(string="Amount to invoice", store=True, compute='_compute_amount_to_invoice')
+    amount_to_invoice = fields.Monetary(string="Un-invoiced Balance", compute='_compute_amount_to_invoice')
     amount_invoiced = fields.Monetary(string="Already invoiced", compute='_compute_amount_invoiced')
 
     invoice_count = fields.Integer(string="Invoice Count", compute='_get_invoiced')
@@ -258,11 +262,6 @@ class SaleOrder(models.Model):
     source_id = fields.Many2one(ondelete='set null')
 
     # Followup ?
-    analytic_account_id = fields.Many2one(
-        comodel_name='account.analytic.account',
-        string="Analytic Account",
-        copy=False, check_company=True,  # Unrequired company
-        domain="['|', ('company_id', '=', False), ('company_id', '=', company_id)]")
     tag_ids = fields.Many2many(
         comodel_name='crm.tag',
         relation='sale_order_tag_rel', column1='order_id', column2='tag_id',
@@ -651,24 +650,15 @@ class SaleOrder(models.Model):
             else:
                 record.tax_country_id = record.company_id.account_fiscal_country_id
 
-    @api.depends('invoice_ids.state', 'currency_id', 'amount_total')
+    @api.depends('order_line.amount_to_invoice')
     def _compute_amount_to_invoice(self):
         for order in self:
-            # If the invoice status is 'Fully Invoiced' force the amount to invoice to equal zero and return early.
-            if order.invoice_status == 'invoiced':
-                order.amount_to_invoice = 0.0
-                continue
+            order.amount_to_invoice = sum(order.order_line.mapped('amount_to_invoice'))
 
-            invoices = order.invoice_ids.filtered(lambda x: x.state == 'posted')
-            # Note: A negative amount can happen, since we can invoice more than the sales order amount.
-            # Care has to be taken when summing amount_to_invoice of multiple orders.
-            # E.g. consider one invoiced order with -100 and one uninvoiced order of 100: 100 + -100 = 0
-            order.amount_to_invoice = order.amount_total - invoices._get_sale_order_invoiced_amount(order)
-
-    @api.depends('amount_total', 'amount_to_invoice')
+    @api.depends('order_line.amount_invoiced')
     def _compute_amount_invoiced(self):
         for order in self:
-            order.amount_invoiced = order.amount_total - order.amount_to_invoice
+            order.amount_invoiced = sum(order.order_line.mapped('amount_invoiced'))
 
     @api.depends('company_id', 'partner_id', 'amount_total')
     def _compute_partner_credit_warning(self):
@@ -816,13 +806,11 @@ class SaleOrder(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
-            if 'company_id' in vals:
-                self = self.with_company(vals['company_id'])
             if vals.get('name', _("New")) == _("New"):
                 seq_date = fields.Datetime.context_timestamp(
                     self, fields.Datetime.to_datetime(vals['date_order'])
                 ) if 'date_order' in vals else None
-                vals['name'] = self.env['ir.sequence'].next_by_code(
+                vals['name'] = self.env['ir.sequence'].with_company(vals.get('company_id')).next_by_code(
                     'sale.order', sequence_date=seq_date) or _("New")
 
         return super().create(vals_list)
@@ -1038,16 +1026,7 @@ class SaleOrder(models.Model):
             This method should be extended when the confirmation should generated
             other documents. In this method, the SO are in 'sale' state (not yet 'done').
         """
-        self._generate_analytic_account()
-
-    def _generate_analytic_account(self):
-        """ Generate an analytic account for the SO confirmed if at least an expense product """
-        for order in self:
-            if (
-                not order.analytic_account_id
-                and any(expense_policy not in [False, 'no'] for expense_policy in order.order_line.product_id.mapped('expense_policy'))
-            ):
-                order._create_analytic_account()
+        pass
 
     def _send_order_confirmation_mail(self):
         """ Send a mail to the SO customer to inform them that their order has been confirmed.
@@ -1189,6 +1168,7 @@ class SaleOrder(models.Model):
     def _recompute_prices(self):
         lines_to_recompute = self._get_update_prices_lines()
         lines_to_recompute.invalidate_recordset(['pricelist_item_id'])
+        lines_to_recompute.technical_price_unit = 0.0
         lines_to_recompute._compute_price_unit()
         # Special case: we want to overwrite the existing discount on _recompute_prices call
         # i.e. to make sure the discount is correctly reset
@@ -1339,10 +1319,9 @@ class SaleOrder(models.Model):
         :rtype: `account.move` recordset
         :raises: UserError if one of the orders has no invoiceable lines.
         """
-        if not self.env['account.move'].check_access_rights('create', False):
+        if not self.env['account.move'].has_access('create'):
             try:
-                self.check_access_rights('write')
-                self.check_access_rule('write')
+                self.check_access('write')
             except AccessError:
                 return self.env['account.move']
 
@@ -1810,41 +1789,6 @@ class SaleOrder(models.Model):
                 'sale.mail_act_sale_upsell',
                 user_id=order.user_id.id or order.partner_id.user_id.id,
                 note=_("Upsell %(order)s for customer %(customer)s", order=order_ref, customer=customer_ref))
-
-    def _prepare_analytic_account_data(self, prefix=None):
-        """ Prepare SO analytic account creation values.
-
-        :param str prefix: The prefix of the to-be-created analytic account name
-        :return: `account.analytic.account` creation values
-        :rtype: dict
-        """
-        self.ensure_one()
-        name = self.name
-        if prefix:
-            name = prefix + ": " + self.name
-        plan = self.env['account.analytic.plan'].sudo().search([], limit=1)
-        if not plan:
-            plan = self.env['account.analytic.plan'].sudo().create({
-                'name': 'Default',
-            })
-        return {
-            'name': name,
-            'code': self.client_order_ref,
-            'company_id': self.company_id.id,
-            'plan_id': plan.id,
-            'partner_id': self.partner_id.id,
-        }
-
-    def _create_analytic_account(self, prefix=None):
-        """ Create a new analytic account for the given orders.
-
-        :param str prefix: if specified, the account name will be '<prefix>: <so_reference>'.
-            If not, the account name will be the Sales Order reference.
-        :return: None
-        """
-        for order in self:
-            analytic = self.env['account.analytic.account'].create(order._prepare_analytic_account_data(prefix))
-            order.analytic_account_id = analytic
 
     def _prepare_down_payment_section_line(self, **optional_values):
         """ Prepare the values to create a new down payment section.

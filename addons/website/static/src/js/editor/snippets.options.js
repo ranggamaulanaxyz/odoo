@@ -20,6 +20,7 @@ import {
 import "@website/snippets/s_popup/options";
 import { range } from "@web/core/utils/numbers";
 import { _t } from "@web/core/l10n/translation";
+import { pyToJsLocale } from "@web/core/l10n/utils";
 import {Domain} from "@web/core/domain";
 import {
     isCSSColor,
@@ -2073,7 +2074,7 @@ options.registry.Carousel = options.registry.CarouselHandler.extend({
     cleanForSave: function () {
         const $items = this.$target.find('.carousel-item');
         $items.removeClass('next prev left right active').first().addClass('active');
-        this.$indicators.find('li').removeClass('active').empty().first().addClass('active');
+        this.$indicators.find('button').removeClass('active').empty().first().addClass('active');
     },
     /**
      * @override
@@ -2128,7 +2129,7 @@ options.registry.Carousel = options.registry.CarouselHandler.extend({
         const $items = this.$target.find('.carousel-item');
         this.$controls.removeClass('d-none');
         const $active = $items.filter('.active');
-        this.$indicators.append($('<li>', {
+        this.$indicators.append($('<button>', {
             'data-bs-target': '#' + this.$target.attr('id'),
             'data-bs-slide-to': $items.length,
         }));
@@ -2234,7 +2235,7 @@ options.registry.CarouselItem = options.Class.extend({
                 $toDelete.remove();
                 // To ensure the proper functioning of the indicators, their
                 // attributes must reflect the position of the slides.
-                const indicatorsEls = this.$indicators[0].querySelectorAll('li');
+                const indicatorsEls = this.$indicators[0].querySelectorAll('button');
                 for (let i = 0; i < indicatorsEls.length; i++) {
                     indicatorsEls[i].setAttribute('data-bs-slide-to', i);
                 }
@@ -3601,7 +3602,7 @@ options.registry.ConditionalVisibility = options.registry.DeviceVisibility.exten
                 });
                 if (attribute.saveAttribute === 'visibilityValueLang') {
                     records = records.map(lang => {
-                        lang.value = lang.value.replace(/_/g, '-');
+                        lang.value = pyToJsLocale(lang.value);
                         return lang;
                     });
                 }

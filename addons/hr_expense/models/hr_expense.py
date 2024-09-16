@@ -541,7 +541,7 @@ class HrExpense(models.Model):
         """
             Create the expenses from files.
 
-            :return: An action redirecting to hr.expense tree view.
+            :return: An action redirecting to hr.expense list view.
         """
         if not attachment_ids:
             raise UserError(_("No attachment was provided"))
@@ -593,7 +593,7 @@ class HrExpense(models.Model):
         expense_to_previous_sheet = {}
         if 'sheet_id' in vals:
             # Check access rights on the sheet
-            self.env['hr.expense.sheet'].browse(vals['sheet_id']).check_access_rule('write')
+            self.env['hr.expense.sheet'].browse(vals['sheet_id']).check_access('write')
 
             # Store the previous sheet of the expenses to unlink the attachments later if needed
             for expense in self:
@@ -857,9 +857,14 @@ class HrExpense(models.Model):
     # Business
     # ----------------------------------------
 
+    def _get_move_line_name(self):
+        """ Helper to get the name of the account move lines related to an expense """
+        self.ensure_one()
+        expense_name = self.name.split("\n")[0][:64]
+        return _('%(employee_name)s: %(expense_name)s', employee_name=self.employee_id.name, expense_name=expense_name)
+
     def _prepare_payments_vals(self):
         self.ensure_one()
-        self_ctx = self.with_context(caba_no_transition_account=self.payment_mode == 'company_account')
 
         journal = self.sheet_id.journal_id
         payment_method_line = self.sheet_id.payment_method_line_id
@@ -867,15 +872,15 @@ class HrExpense(models.Model):
             raise UserError(_("You need to add a manual payment method on the journal (%s)", journal.name))
         move_lines = []
         tax_data = self.env['account.tax']._compute_taxes(
-            [self_ctx._convert_to_tax_base_line_dict(price_unit=self.total_amount_currency, currency=self.currency_id, account=self._get_base_account())],
+            [self._convert_to_tax_base_line_dict(price_unit=self.total_amount_currency, currency=self.currency_id, account=self._get_base_account())],
             self.company_id,
+            include_caba_tags=(self.payment_mode == 'company_account')
         )
         rate = abs(self.total_amount_currency / self.total_amount) if self.total_amount else 1.0
         base_line_data, to_update = tax_data['base_lines_to_update'][0]  # Add base line
         amount_currency = to_update['price_subtotal']
-        expense_name = self.name.split("\n")[0][:64]
         base_move_line = {
-            'name': f'{self.employee_id.name}: {expense_name}',
+            'name': self._get_move_line_name(),
             'account_id': base_line_data['account'].id,
             'product_id': base_line_data['product'].id,
             'analytic_distribution': base_line_data['analytic_distribution'],
@@ -906,9 +911,8 @@ class HrExpense(models.Model):
             }
             move_lines.append(tax_line)
         base_move_line['balance'] = self.total_amount - total_tax_line_balance
-        expense_name = self.name.split("\n")[0][:64]
         move_lines.append({  # Add outstanding payment line
-            'name': f'{self.employee_id.name}: {expense_name}',
+            'name': self._get_move_line_name(),
             'account_id': self.sheet_id._get_expense_account_destination(),
             'balance': -self.total_amount,
             'amount_currency': self.currency_id.round(-self.total_amount_currency),
@@ -970,9 +974,8 @@ class HrExpense(models.Model):
         self.ensure_one()
         account = self._get_base_account()
 
-        expense_name = self.name.split('\n')[0][:64]
         return {
-            'name': f'{self.employee_id.name}: {expense_name}',
+            'name': self._get_move_line_name(),
             'account_id': account.id,
             'quantity': self.quantity or 1,
             'price_unit': self.price_unit,

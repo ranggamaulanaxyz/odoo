@@ -12,14 +12,15 @@ import {
 } from "@web/../tests/web_test_helpers";
 import { afterEach, beforeEach, describe, expect, test } from "@odoo/hoot";
 import { Component, useState, xml } from "@odoo/owl";
-import { advanceTime, animationFrame } from "@odoo/hoot-mock";
+import { advanceTime, animationFrame, runAllTimers } from "@odoo/hoot-mock";
 import { click, queryFirst, waitFor } from "@odoo/hoot-dom";
 import { browser } from "@web/core/browser/browser";
 import { Dialog } from "@web/core/dialog/dialog";
 import { session } from "@web/session";
 import { MacroEngine } from "@web/core/macro";
+import { tourState } from "@web_tour/tour_service/tour_state";
 
-describe.current.tags("headless");
+describe.current.tags("desktop");
 
 class Counter extends Component {
     static props = ["*"];
@@ -44,6 +45,7 @@ class Counter extends Component {
 
 const tourRegistry = registry.category("web_tour.tours");
 let macroEngines = [];
+const tourConsumed = [];
 
 beforeEach(() => {
     patchWithCleanup(MacroEngine.prototype, {
@@ -52,46 +54,30 @@ beforeEach(() => {
             macroEngines.push(this);
         },
     });
+    patchWithCleanup(console, {
+        error: () => {},
+        warn: () => {},
+        log: () => {},
+        dir: () => {},
+    });
     macroEngines.forEach((e) => e.stop());
     macroEngines = [];
-    onRpc("/web/dataset/call_kw/web_tour.tour/consume", async () => {
-        return Promise.resolve(true);
+    onRpc("/web/dataset/call_kw/web_tour.tour/consume", async (request) => {
+        const { params } = await request.json();
+        tourConsumed.push(params.args[0]);
+        const nextTour = tourRegistry
+            .getEntries()
+            .filter(([tourName]) => !tourConsumed.includes(tourName))
+            .at(0);
+        return (nextTour && { name: nextTour.at(0) }) || false;
+    });
+    onRpc("/web/dataset/call_kw/res.users/switch_tour_enabled", async () => {
+        return true;
     });
 });
 
 afterEach(() => {
     clearRegistry(tourRegistry);
-});
-
-test("Tours sequence", async () => {
-    tourRegistry
-        .add("Tour 1", {
-            sequence: 10,
-            steps: () => [
-                {
-                    trigger: ".anchor",
-                },
-            ],
-        })
-        .add("Tour 2", {
-            steps: () => [
-                {
-                    trigger: ".anchor",
-                },
-            ],
-        })
-        .add("Tour 3", {
-            sequence: 5,
-            steps: () => [
-                {
-                    trigger: ".anchor",
-                    content: "Oui",
-                },
-            ],
-        });
-    await makeMockEnv();
-    const sortedTours = getService("tour_service").getSortedTours();
-    expect(sortedTours[0].name).toBe("Tour 3");
 });
 
 test("Step Tour validity", async () => {
@@ -138,8 +124,9 @@ test("Step Tour validity", async () => {
         steps[2],
         null,
         4
-    )}\nInvalid object: 'run' is not a string or function`;
-    getService("tour_service").startTour("tour1");
+    )}\nInvalid object: 'run' is not a string or function or boolean`;
+    await getService("tour_service").startTour("tour1");
+    await animationFrame();
     expect.verifySteps([waited_error1, waited_error2, waited_error3]);
 });
 
@@ -154,15 +141,13 @@ test("override existing tour by using saveAs", async () => {
             saveAs: "homepage",
         });
     await makeMockEnv({});
-    const sortedTours = getService("tour_service").getSortedTours();
-    expect(sortedTours).toHaveLength(1);
-    expect(sortedTours[0].steps).toEqual([{ trigger: "#2" }]);
-    expect(sortedTours[0].name).toBe("homepage");
+    await getService("tour_service").startTour("homepage");
+    await animationFrame();
+    expect(tourState.getCurrentTour()).toBe("Tour 2");
 });
 
 test("points to next step", async () => {
     tourRegistry.add("tour1", {
-        sequence: 10,
         steps: () => [
             {
                 trigger: "button.inc",
@@ -180,9 +165,8 @@ test("points to next step", async () => {
     }
 
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("tour1", { mode: "manual" });
+    await getService("tour_service").startTour("tour1", { mode: "manual" });
     await animationFrame();
-    await advanceTime(100);
     expect(".o_tour_pointer").toHaveCount(1);
     await contains("button.inc").click();
     expect(".o_tour_pointer").toHaveCount(0);
@@ -191,7 +175,6 @@ test("points to next step", async () => {
 
 test("next step with new anchor at same position", async () => {
     tourRegistry.add("tour1", {
-        sequence: 10,
         steps: () => [
             { trigger: "button.foo", run: "click" },
             { trigger: "button.bar", run: "click" },
@@ -217,7 +200,7 @@ test("next step with new anchor at same position", async () => {
     }
 
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("tour1", { mode: "manual" });
+    await getService("tour_service").startTour("tour1", { mode: "manual" });
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(1);
 
@@ -248,7 +231,7 @@ test("next step with new anchor at same position", async () => {
 
 test("a failing tour logs the step that failed in run", async () => {
     patchWithCleanup(browser.console, {
-        log: (s) => expect.step(`log: ${s}`),
+        groupCollapsed: (s) => expect.step(`log: ${s}`),
         warn: (s) => {},
         error: (s) => expect.step(`error: ${s}`),
     });
@@ -266,7 +249,6 @@ test("a failing tour logs the step that failed in run", async () => {
 
     await mountWithCleanup(Root);
     tourRegistry.add("tour2", {
-        test: true,
         steps: () => [
             {
                 trigger: ".button0",
@@ -281,7 +263,7 @@ test("a failing tour logs the step that failed in run", async () => {
             },
         ],
     });
-    getService("tour_service").startTour("tour2", { mode: "auto" });
+    await odoo.startTour("tour2", { mode: "auto" }); // Use odoo to run tour from registry because this is a test tour
     await advanceTime(750);
     await advanceTime(750);
     await advanceTime(750);
@@ -320,7 +302,6 @@ test("a failing tour with disabled element", async () => {
 
     await mountWithCleanup(Root);
     tourRegistry.add("tour3", {
-        test: true,
         steps: () => [
             {
                 trigger: ".button0",
@@ -336,7 +317,7 @@ test("a failing tour with disabled element", async () => {
             },
         ],
     });
-    getService("tour_service").startTour("tour3", { mode: "auto" });
+    await odoo.startTour("tour3", { mode: "auto" });
     await advanceTime(750);
     await advanceTime(750);
     await advanceTime(750);
@@ -347,8 +328,7 @@ test("a failing tour with disabled element", async () => {
             `Element has been found. The error seems to be with step.run.`,
             `Element can't be disabled when you want to click on it.`,
             `Tip: You can add the ":enabled" pseudo selector to your selector to wait for the element is enabled.`,
-        ].join('\n'),
-        `error: FAILED: [3/3] Tour tour3 → Step .button2.\nThe cause is that trigger (.button2) element cannot be found in DOM. TIP: You can use :not(:visible) to force the search for an invisible element.`,
+        ].join("\n"),
         `error: tour not succeeded`,
     ];
     await advanceTime(10000);
@@ -357,8 +337,8 @@ test("a failing tour with disabled element", async () => {
 
 test("a failing tour logs the step that failed", async () => {
     patchWithCleanup(browser.console, {
-        dir: (s) => expect.step(`runbot: ${s.replace(/[\s-]*/g, '')}`),
-        log: (s) => expect.step(`log: ${s}`),
+        dir: (s) => expect.step(`runbot: ${s.replace(/[\s-]*/g, "")}`),
+        groupCollapsed: (s) => expect.step(`log: ${s}`),
         warn: (s) => expect.step(`warn: ${s.replace(/[\s-]*/gi, "")}`),
         error: (s) => expect.step(`error: ${s}`),
     });
@@ -382,7 +362,6 @@ test("a failing tour logs the step that failed", async () => {
 
     await mountWithCleanup(Root);
     tourRegistry.add("tour1", {
-        test: true,
         steps: () => [
             {
                 content: "content",
@@ -431,8 +410,7 @@ test("a failing tour logs the step that failed", async () => {
             },
         ],
     });
-    getService("tour_service").startTour("tour1", { mode: "auto" });
-    await advanceTime(750);
+    await odoo.startTour("tour1", { mode: "auto" });
     await advanceTime(750);
     expect.verifySteps(["log: [1/9] Tour tour1 → Step content (trigger: .button0)"]);
     await advanceTime(750);
@@ -467,7 +445,6 @@ test("check tour with inactive steps", async () => {
 
     await mountWithCleanup(Root);
     registry.category("web_tour.tours").add("pipu_tour", {
-        test: true,
         steps: () => [
             {
                 isActive: [".container:not(:has(.this_selector_is_not_here))"],
@@ -492,7 +469,7 @@ test("check tour with inactive steps", async () => {
             },
         ],
     });
-    getService("tour_service").startTour("pipu_tour", { mode: "auto" });
+    await odoo.startTour("pipu_tour", { mode: "auto" });
     await advanceTime(750);
     await advanceTime(750);
     await advanceTime(750);
@@ -505,7 +482,6 @@ test("check tour with inactive steps", async () => {
 
 test("pointer is added on top of overlay's stack", async () => {
     registry.category("web_tour.tours").add("tour1", {
-        sequence: 10,
         steps: () => [
             { trigger: ".modal .a", run: "click" },
             { trigger: ".btn-primary", run: "click" },
@@ -529,7 +505,7 @@ test("pointer is added on top of overlay's stack", async () => {
 
     await mountWithCleanup(Root);
 
-    getService("tour_service").startTour("tour1", { mode: "manual" });
+    await getService("tour_service").startTour("tour1", { mode: "manual" });
     getService("dialog").add(DummyDialog, {});
     await advanceTime(100);
     expect(`.o-overlay-item`).toHaveCount(2);
@@ -548,7 +524,7 @@ test("pointer is added on top of overlay's stack", async () => {
 });
 
 test("registering test tour after service is started doesn't auto-start the tour", async () => {
-    patchWithCleanup(session, { tour_disable: false });
+    patchWithCleanup(session, { tour_enabled: true });
     class Root extends Component {
         static components = { Counter };
         static template = xml/*html*/ `
@@ -575,43 +551,15 @@ test("registering test tour after service is started doesn't auto-start the tour
     expect(".o_tour_pointer").toHaveCount(0);
 });
 
-test("registering non-test tour after service is started auto-starts the tour", async () => {
-    patchWithCleanup(session, { tour_disable: false });
-    class Root extends Component {
-        static components = { Counter };
-        static template = xml/*html*/ `
-                <t>
-                    <Counter />
-                </t>
-            `;
-        static props = ["*"];
-    }
-
-    await mountWithCleanup(Root);
-    expect(".o_tour_pointer").toHaveCount(0);
-    registry.category("web_tour.tours").add("liege_bastogne_liege", {
+test("hovering to the anchor element should show the content and not when content empty", async () => {
+    registry.category("web_tour.tours").add("la_vuelta", {
         steps: () => [
             {
                 content: "content",
                 trigger: "button.inc",
                 run: "click",
             },
-        ],
-    });
-    await animationFrame();
-    expect(".o_tour_pointer").toHaveCount(1);
-
-    click("button.inc");
-    await animationFrame();
-    expect(".o_tour_pointer").toHaveCount(0);
-});
-
-test("hovering to the anchor element should show the content", async () => {
-    registry.category("web_tour.tours").add("la_vuelta", {
-        sequence: 10,
-        steps: () => [
             {
-                content: "content",
                 trigger: "button.inc",
                 run: "click",
             },
@@ -629,7 +577,7 @@ test("hovering to the anchor element should show the content", async () => {
     }
 
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("la_vuelta", { mode: "manual" });
+    await getService("tour_service").startTour("la_vuelta", { mode: "manual" });
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(1);
     await contains("button.inc").hover();
@@ -637,6 +585,13 @@ test("hovering to the anchor element should show the content", async () => {
     expect(".o_tour_pointer_content:not(.invisible)").toHaveCount(1);
     expect(".o_tour_pointer_content:not(.invisible)").toHaveText("content");
     await contains(".other").hover();
+    await animationFrame();
+    expect(".o_tour_pointer_content.invisible").toHaveCount(1);
+
+    click("button.inc");
+    await animationFrame();
+    expect(".o_tour_pointer").toHaveCount(1);
+    await contains("button.inc").hover();
     await animationFrame();
     expect(".o_tour_pointer_content.invisible").toHaveCount(1);
 
@@ -650,7 +605,6 @@ test("should show only 1 pointer at a time", async () => {
         error: (s) => {},
     });
     registry.category("web_tour.tours").add("milan_sanremo", {
-        sequence: 10,
         steps: () => [
             {
                 trigger: ".interval input",
@@ -659,7 +613,6 @@ test("should show only 1 pointer at a time", async () => {
         ],
     });
     registry.category("web_tour.tours").add("paris_roubaix", {
-        sequence: 10,
         steps: () => [
             {
                 trigger: "button.inc",
@@ -678,20 +631,19 @@ test("should show only 1 pointer at a time", async () => {
     }
 
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("paris_roubaix", { mode: "manual" });
-    getService("tour_service").startTour("milan_sanremo", { mode: "manual" });
-    await animationFrame();
-    expect(".o_tour_pointer").toHaveCount(1);
-    click("button.inc");
+    await getService("tour_service").startTour("paris_roubaix", { mode: "manual" });
+    await getService("tour_service").startTour("milan_sanremo", { mode: "manual" });
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(1);
     await contains(".interval input").edit(5);
+    expect(".o_tour_pointer").toHaveCount(1);
+    click("button.inc");
+    await animationFrame();
     expect(".o_tour_pointer").toHaveCount(0);
 });
 
 test("perform edit on next step", async () => {
     registry.category("web_tour.tours").add("giro_d_italia", {
-        sequence: 10,
         steps: () => [
             {
                 trigger: ".interval input",
@@ -714,7 +666,7 @@ test("perform edit on next step", async () => {
     }
 
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("giro_d_italia", { mode: "manual" });
+    await getService("tour_service").startTour("giro_d_italia", { mode: "manual" });
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(1);
     await contains(".interval input").edit(5);
@@ -732,13 +684,12 @@ test("scrolling to next step should update the pointer's height", async (assert)
         },
     });
 
-    const stepContent = "Click this pretty button to increment this magnificent counter !";
+    const content = "Click this pretty button to increment this magnificent counter !";
     registry.category("web_tour.tours").add("tour_de_france", {
-        sequence: 10,
         steps: () => [
             {
                 trigger: "button.inc",
-                content: stepContent,
+                content,
                 run: "click",
             },
         ],
@@ -756,48 +707,49 @@ test("scrolling to next step should update the pointer's height", async (assert)
     }
 
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("tour_de_france", { mode: "manual" });
+    await getService("tour_service").startTour("tour_de_france", { mode: "manual" });
     await animationFrame();
-    const pointer = queryFirst(".o_tour_pointer");
-    expect(pointer).toHaveCount(1);
-    expect(pointer.textContent).toBe(stepContent);
-    expect(pointer).not.toHaveClass("o_open");
-    expect(pointer.style.height).toBe("28px");
-    expect(pointer.style.width).toBe("28px");
+    expect(".o_tour_pointer").toHaveCount(1);
+    expect(".o_tour_pointer").not.toHaveClass("o_open");
+    const firstOpenHeight = queryFirst(".o_tour_pointer").style.height;
+    const firstOpenWidth = queryFirst(".o_tour_pointer").style.width;
+    expect(firstOpenHeight).toBe("28px");
+    expect(firstOpenWidth).toBe("28px");
 
     await contains("button.inc").hover();
-    const firstOpenHeight = pointer.style.height;
-    const firstOpenWidth = pointer.style.width;
-
-    expect(pointer).toHaveClass("o_open");
+    expect(".o_tour_pointer").toHaveText(content);
+    expect(".o_tour_pointer").toHaveClass("o_open");
     await contains(".interval input").hover();
-
     expect(".o_tour_pointer").not.toHaveClass("o_open");
 
     await contains(".scrollable-parent").scroll({ top: 1000 });
-    await advanceTime(1000);
+    await runAllTimers();
     await animationFrame(); // awaits the intersection observer to update after the scroll
     // now the scroller pointer should be shown
-    expect(pointer).toHaveCount(1);
-    expect(pointer.textContent).toBe("Scroll up to reach the next step.");
+    expect(".o_tour_pointer").toHaveCount(1);
+    await contains(".o_tour_pointer").hover();
+    await animationFrame();
+    expect(".o_tour_pointer").toHaveText("Scroll up to reach the next step.");
+    await contains(".o_tour_pointer").click();
 
-    await contains(".scrollable-parent").scroll({ top: 0 });
-    await advanceTime(1000);
+    await runAllTimers();
     // awaits the intersection observer to update after the scroll
     await animationFrame();
     // now the true step pointer should be shown again
-    expect(pointer).toHaveCount(1);
-    expect(pointer.textContent).toBe(stepContent);
+    expect(".o_tour_pointer").toHaveCount(1);
+    expect(".o_tour_pointer").not.toHaveClass("o_open");
 
-    await contains(".o_tour_pointer").hover();
-    await animationFrame(); // awaits the intersection observer to update after the scroll
-    expect(pointer).toHaveClass("o_open");
-    const secondOpenHeight = pointer.style.height;
-    const secondOpenWidth = pointer.style.width;
+    await contains("button.inc").hover();
+    await animationFrame();
+    expect(".o_tour_pointer").toHaveClass("o_open");
+    expect(".o_tour_pointer").toHaveText(content);
+    await contains(".interval input").hover();
+    const secondOpenHeight = queryFirst(".o_tour_pointer").style.height;
+    const secondOpenWidth = queryFirst(".o_tour_pointer").style.width;
     expect(secondOpenHeight).toEqual(firstOpenHeight);
     expect(secondOpenWidth).toEqual(firstOpenWidth);
 
-    click("button.inc");
+    await contains("button.inc").click();
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(0);
 });
@@ -810,7 +762,6 @@ test("scroller pointer to reach next step", async () => {
     });
 
     registry.category("web_tour.tours").add("tour_des_flandres", {
-        sequence: 10,
         steps: () => [{ trigger: "button.inc", content: "Click to increment", run: "click" }],
     });
     class Root extends Component {
@@ -826,7 +777,7 @@ test("scroller pointer to reach next step", async () => {
     }
 
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("tour_des_flandres", { mode: "manual" });
+    await getService("tour_service").startTour("tour_des_flandres", { mode: "manual" });
     await animationFrame();
 
     // Even if this seems weird, it should show the initial pointer.
@@ -913,7 +864,7 @@ test("automatic tour with invisible element", async () => {
             },
         ],
     });
-    getService("tour_service").startTour("tour_de_wallonie", { mode: "auto" });
+    await odoo.startTour("tour_de_wallonie", { mode: "auto" });
     await animationFrame();
     await advanceTime(750);
     await advanceTime(750);
@@ -966,7 +917,7 @@ test("automatic tour with invisible element but use :not(:visible))", async () =
             },
         ],
     });
-    getService("tour_service").startTour("tour_de_wallonie", { mode: "auto" });
+    await odoo.startTour("tour_de_wallonie", { mode: "auto" });
     await animationFrame();
     await advanceTime(750);
     await animationFrame();
@@ -978,8 +929,6 @@ test("automatic tour with invisible element but use :not(:visible))", async () =
 
 test("manual tour with inactive steps", async () => {
     registry.category("web_tour.tours").add("tour_de_wallonie", {
-        rainbowManMessage: "bravo",
-        sequence: 10,
         steps: () => [
             {
                 isActive: ["auto"],
@@ -1028,7 +977,7 @@ test("manual tour with inactive steps", async () => {
         `;
     }
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("tour_de_wallonie", { mode: "manual" });
+    await getService("tour_service").startTour("tour_de_wallonie", { mode: "manual" });
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(1);
     await contains(".interval input").edit(5);
@@ -1041,10 +990,11 @@ test("manual tour with inactive steps", async () => {
 
 test("automatic tour with alternative trigger", async () => {
     patchWithCleanup(browser.console, {
+        groupCollapsed: (s) => {
+            expect.step("on step");
+        },
         log: (s) => {
-            if (s.includes("→ Step")) {
-                expect.step("on step");
-            } else if (s.toLowerCase().includes("tour tour_des_flandres succeeded")) {
+            if (s.toLowerCase().includes("tour tour_des_flandres succeeded")) {
                 expect.step("succeeded");
             }
         },
@@ -1084,7 +1034,7 @@ test("automatic tour with alternative trigger", async () => {
         static props = ["*"];
     }
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("tour_des_flandres", { mode: "auto" });
+    await odoo.startTour("tour_des_flandres", { mode: "auto" });
     for (let i = 0; i <= 5; i++) {
         await advanceTime(750);
     }
@@ -1099,8 +1049,6 @@ test("manual tour with alternative trigger", async () => {
         },
     });
     registry.category("web_tour.tours").add("tour_des_flandres_2", {
-        test: false,
-        sequence: 93,
         steps: () => [
             {
                 trigger: ".button1, .button2",
@@ -1137,7 +1085,7 @@ test("manual tour with alternative trigger", async () => {
         static props = ["*"];
     }
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("tour_des_flandres_2", { mode: "manual" });
+    await getService("tour_service").startTour("tour_des_flandres_2", { mode: "manual" });
     await contains(".button2").click();
     await contains(".button3").click();
     await contains(".button5").click();
@@ -1147,7 +1095,6 @@ test("manual tour with alternative trigger", async () => {
 
 test("Tour backward when the pointed element disappear", async () => {
     registry.category("web_tour.tours").add("tour1", {
-        sequence: 10,
         steps: () => [
             { trigger: "button.foo", run: "click" },
             { trigger: "button.bar", run: "click" },
@@ -1167,7 +1114,7 @@ test("Tour backward when the pointed element disappear", async () => {
 
     await mountWithCleanup(Dummy);
 
-    getService("tour_service").startTour("tour1", { mode: "manual" });
+    await getService("tour_service").startTour("tour1", { mode: "manual" });
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(1);
 
@@ -1214,7 +1161,7 @@ test("Tour backward when the pointed element disappear and ignore warn step", as
 
     await mountWithCleanup(Dummy);
 
-    getService("tour_service").startTour("tour1", { mode: "manual" });
+    await getService("tour_service").startTour("tour1", { mode: "manual" });
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(1);
 
@@ -1233,15 +1180,11 @@ test("Tour backward when the pointed element disappear and ignore warn step", as
     await contains("button.bar").click();
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(0);
-    expect.verifySteps([
-        "Step 'button.bar' ignored because no 'run'",
-        "Step 'button.bar' ignored because no 'run'",
-    ]);
+    expect.verifySteps(["Step 'button.bar' ignored.", "Step 'button.bar' ignored."]);
 });
 
 test("Tour started by the URL", async () => {
     registry.category("web_tour.tours").add("tour1", {
-        sequence: 10,
         steps: () => [
             { trigger: "button.foo", run: "click" },
             { trigger: "button.bar", run: "click" },
@@ -1280,7 +1223,6 @@ test("Log a warning if step ignored", async () => {
     });
 
     registry.category("web_tour.tours").add("tour1", {
-        sequence: 10,
         steps: () => [
             { trigger: "button.foo", run: "click" },
             { trigger: "button.bar" },
@@ -1300,7 +1242,7 @@ test("Log a warning if step ignored", async () => {
 
     await mountWithCleanup(Dummy);
 
-    getService("tour_service").startTour("tour1", { mode: "manual" });
+    await getService("tour_service").startTour("tour1", { mode: "manual" });
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(1);
 
@@ -1312,12 +1254,11 @@ test("Log a warning if step ignored", async () => {
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(0);
 
-    expect.verifySteps(["Step 'button.bar' ignored because no 'run'"]);
+    expect.verifySteps(["Step 'button.bar' ignored."]);
 });
 
 test("check tooltip position", async () => {
     registry.category("web_tour.tours").add("tour_des_tooltip", {
-        sequence: 93,
         steps: () => [
             {
                 trigger: ".button0",
@@ -1357,7 +1298,7 @@ test("check tooltip position", async () => {
     }
     await mountWithCleanup(Root);
     let tooltip;
-    getService("tour_service").startTour("tour_des_tooltip", { mode: "manual" });
+    await getService("tour_service").startTour("tour_des_tooltip", { mode: "manual" });
 
     await animationFrame();
     await advanceTime(100);
@@ -1397,11 +1338,7 @@ test("check tooltip position", async () => {
 
 test("check rainbowManMessage", async () => {
     registry.category("web_tour.tours").add("rainbow_tour", {
-        sequence: 87,
-        fadeout: "no",
-        rainbowManMessage: () => {
-            return "Congratulations !";
-        },
+        rainbowManMessage: "Congratulations !",
         steps: () => [
             {
                 trigger: ".button0",
@@ -1431,7 +1368,7 @@ test("check rainbowManMessage", async () => {
         static props = ["*"];
     }
     await mountWithCleanup(Root);
-    getService("tour_service").startTour("rainbow_tour", { mode: "manual" });
+    await getService("tour_service").startTour("rainbow_tour", { mode: "manual" });
     await contains(".button0").click();
     await contains(".button1").click();
     await contains(".button2").click();
@@ -1439,4 +1376,37 @@ test("check rainbowManMessage", async () => {
     expect(rainbowMan.getBoundingClientRect().width).toBe(400);
     expect(rainbowMan.getBoundingClientRect().height).toBe(400);
     expect(".o_reward_msg_content").toHaveText("Congratulations !");
+});
+
+test("check alternative trigger that appear after the initial trigger", async () => {
+    registry.category("web_tour.tours").add("rainbow_tour", {
+        sequence: 87,
+        steps: () => [
+            {
+                trigger: ".button0, .button1",
+                run: "click",
+            },
+        ],
+    });
+    class Root extends Component {
+        static components = {};
+        static template = xml/*html*/ `
+            <t>
+                <div class="container">
+                    <div class="p-3"><button class="button0">Button 0</button></div>
+                    <div class="p-3 add_button"></div>
+                </div>
+            </t>
+        `;
+        static props = ["*"];
+    }
+    await mountWithCleanup(Root);
+    getService("tour_service").startTour("rainbow_tour", { mode: "manual" });
+    await animationFrame();
+    expect(".o_tour_pointer").toHaveCount(1);
+    const otherButton = document.createElement("button");
+    otherButton.classList.add("button1");
+    queryFirst(".add_button").appendChild(otherButton);
+    await contains(".button1").click();
+    expect(".o_tour_pointer").toHaveCount(0);
 });

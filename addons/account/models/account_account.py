@@ -46,6 +46,7 @@ class AccountAccount(models.Model):
     company_currency_id = fields.Many2one('res.currency', compute='_compute_company_currency_id')
     company_fiscal_country_code = fields.Char(compute='_compute_company_fiscal_country_code')
     code = fields.Char(string="Code", size=64, tracking=True, compute='_compute_code', search='_search_code', inverse='_inverse_code')
+    placeholder_code = fields.Char(string="Display code", compute='_compute_placeholder_code')
     deprecated = fields.Boolean(default=False, tracking=True)
     used = fields.Boolean(compute='_compute_used', search='_search_used')
     account_type = fields.Selection(
@@ -374,6 +375,18 @@ class AccountAccount(models.Model):
 
     @api.depends_context('company')
     @api.depends('code')
+    def _compute_placeholder_code(self):
+        self.placeholder_code = False
+        for record in self:
+            if record.code:
+                record.placeholder_code = record.code
+            elif authorized_companies := (record.company_ids & self.env['res.company'].browse(self.env.user._get_company_ids())):
+                company = authorized_companies[0]
+                if code := record.with_company(company).code:
+                    record.placeholder_code = f'{code} ({company.name})'
+
+    @api.depends_context('company')
+    @api.depends('code')
     def _compute_account_root(self):
         for record in self:
             record.root_id = self.env['account.root']._from_account_code(record.code)
@@ -629,7 +642,11 @@ class AccountAccount(models.Model):
     @api.depends('account_type')
     def _compute_reconcile(self):
         for account in self:
-            account.reconcile = account.account_type in ('asset_receivable', 'liability_payable')
+            if account.internal_group in ('income', 'expense', 'equity'):
+                account.reconcile = False
+            elif account.account_type in ('asset_receivable', 'liability_payable'):
+                account.reconcile = True
+            # For other asset/liability accounts, don't do any change to account.reconcile.
 
     def _set_opening_debit(self):
         for record in self:
@@ -737,20 +754,29 @@ class AccountAccount(models.Model):
         return self._get_most_frequent_accounts_for_partner(company_id, partner_id, move_type)
 
     @api.model
-    def _name_search(self, name, domain=None, operator='ilike', limit=None, order=None):
-        if not name and self._context.get('partner_id') and self._context.get('move_type'):
-            return self._order_accounts_by_frequency_for_partner(
-                            self.env.company.id, self._context.get('partner_id'), self._context.get('move_type'))
-        domain = domain or []
-        if name:
-            if operator in ('=', '!='):
-                name_domain = ['|', ('code', '=', name.split(' ')[0]), ('name', operator, name)]
-            else:
-                name_domain = ['|', ('code', '=like', name.split(' ')[0] + '%'), ('name', operator, name)]
-            if operator in expression.NEGATIVE_TERM_OPERATORS:
-                name_domain = ['&', '!'] + name_domain[1:]
-            domain = expression.AND([name_domain, domain])
-        return self._search(domain, limit=limit, order=order)
+    def name_search(self, name='', args=None, operator='ilike', limit=100) -> list[tuple[int, str]]:
+        if (
+            not name
+            and (partner := self.env.context.get('partner_id'))
+            and (move_type := self._context.get('move_type'))
+        ):
+            ids = self._order_accounts_by_frequency_for_partner(
+                self.env.company.id, partner, move_type)
+            records = self.sudo().browse(ids)
+            records.fetch(['display_name'])
+            return [(record.id, record.display_name) for record in records]
+        return super().name_search(name, args, operator, limit)
+
+    @api.model
+    def _search_display_name(self, operator, value):
+        name = value or ''
+        if operator in ('=', '!='):
+            domain = ['|', ('code', '=', name.split(' ')[0]), ('name', operator, name)]
+        else:
+            domain = ['|', ('code', '=like', name.split(' ')[0] + '%'), ('name', operator, name)]
+        if operator in expression.NEGATIVE_TERM_OPERATORS:
+            domain = ['&', '!'] + domain[1:]
+        return domain
 
     @api.onchange('account_type')
     def _onchange_account_type(self):
@@ -773,42 +799,38 @@ class AccountAccount(models.Model):
     @api.depends('code')
     def _compute_display_name(self):
         for account in self:
-            account.display_name = f"{account.code} {account.name}"
+            account.display_name = f"{account.code} {account.name}" if account.code else account.name
 
     def copy_data(self, default=None):
         vals_list = super().copy_data(default)
         default = default or {}
-
-        # We must restrict check_company fields to values available to the company of the new account.
-        fields_to_filter_by_company = {field for field in self._fields.values() if field.relational and field.check_company}
         cache = defaultdict(set)
-        for account, vals in zip(self, vals_list):
-            match vals.get('company_ids'):
-                case [(Command.LINK, company_id, 0)] | [(Command.SET, 0, [company_id])] | [company_id] if isinstance(company_id, int):
-                    company = self.env['res.company'].browse(company_id)
-                case _:
-                    raise ValueError(_("You may only give an account a single company at creation."))
-            if 'code' not in default:
-                start_code = account.with_company(company).code or account.with_company(account.company_ids[0]).code
-                vals['code'] = account.with_company(company)._search_new_account_code(start_code, cache[company])
-                cache[company].add(vals['code'])
-            if 'name' not in default:
-                vals['name'] = _("%s (copy)", account.name or '')
 
-            # For check_company fields, only keep values that are compatible with the new account's company.
-            for field in fields_to_filter_by_company:
-                if field.name not in default:
-                    corecord = account[field.name]
-                    filtered_corecord = corecord.filtered_domain(corecord._check_company_domain(company))
-                    vals[field.name] = filtered_corecord.id if field.type == 'many2one' else [Command.set(filtered_corecord.ids)]
+        for account, vals in zip(self, vals_list):
+            company_ids = self._fields['company_ids'].convert_to_cache(vals['company_ids'], account)
+            companies = self.env['res.company'].browse(company_ids)
+
+            if 'code_by_company' not in default and ('code' not in default or len(companies) > 1):
+                companies_to_get_new_account_codes = companies if 'code' not in default else companies[1:]
+                vals['code_by_company'] = {}
+
+                for company in companies_to_get_new_account_codes:
+                    start_code = account.with_company(company).code or account.with_company(account.company_ids[0]).code
+                    new_code = account.with_company(company)._search_new_account_code(start_code, cache[company.id])
+                    vals['code_by_company'][company.id] = new_code
+                    cache[company.id].add(new_code)
+
+            if 'name' not in default:
+                vals['name'] = self.env._("%s (copy)", account.name or '')
+
         return vals_list
 
     def copy_translations(self, new, excluded=()):
         super().copy_translations(new, excluded=tuple(excluded)+('name',))
-        if new.name == _('%s (copy)', self.name):
+        if new.name == self.env._('%s (copy)', self.name):
             name_field = self._fields['name']
             self.env.cache.update_raw(new, name_field, [{
-                lang: _('%s (copy)', tr)
+                lang: self.env._('%s (copy)', tr)
                 for lang, tr in name_field._get_stored_translations(self).items()
             }], dirty=True)
 
@@ -886,23 +908,48 @@ class AccountAccount(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         records_list = []
-        for company_ids, vals_list_for_company in itertools.groupby(vals_list, lambda v: v.get('company_ids')):
-            match company_ids:
-                case None:
-                    company = self.env.company
-                case [(Command.LINK, company_id, *_)] | [(Command.SET, 0, [company_id])] | [company_id] if isinstance(company_id, int):
-                    company = self.env['res.company'].browse(company_id)
-                case _:
-                    raise ValueError(_("You may only give an account a single company at creation."))
+
+        # As we are creating accounts with a single company at first, check_company fields will need to be added
+        # at the end to avoid triggering the check_company constraint.
+        check_company_fields = {fname for fname, field in self._fields.items() if field.relational and field.check_company}
+
+        for company_ids, vals_list_for_company in itertools.groupby(vals_list, lambda v: v.get('company_ids', [])):
             cache = set()
             vals_list_for_company = list(vals_list_for_company)
+
+            # Determine the companies the new accounts will have. The first one will be used to create the accounts, the others added later.
+            company_ids = self._fields['company_ids'].convert_to_cache(company_ids, self.browse())
+            companies = self.env['res.company'].browse(company_ids) or self.env.company
+
+            # Create the accounts with a single company and a single code.
             for vals in vals_list_for_company:
                 if 'prefix' in vals:
                     prefix, digits = vals.pop('prefix'), vals.pop('code_digits')
                     start_code = prefix.ljust(digits - 1, '0') + '1' if len(prefix) < digits else prefix
-                    vals['code'] = self.with_company(company)._search_new_account_code(start_code, cache)
+                    vals['code'] = self.with_company(companies[0])._search_new_account_code(start_code, cache)
                     cache.add(vals['code'])
-            records_list.append(super(AccountAccount, self.with_company(company)).create(vals_list_for_company))
+                elif 'code' not in vals and 'code_by_company' in vals:
+                    vals['code'] = vals['code_by_company'][companies[0].id]
+                vals['company_ids'] = [Command.set(companies[0].ids)]
+
+            code_by_company_list = [vals.pop('code_by_company', {}) for vals in vals_list_for_company]
+            check_company_vals_list = [{fname: vals.pop(fname) for fname in check_company_fields if fname in vals} for vals in vals_list_for_company]
+
+            new_accounts = super(AccountAccount, self.with_context({**self.env.context, 'allowed_company_ids': companies.ids})) \
+                                .create(vals_list_for_company)
+
+            # Add the other codes, companies and check_company fields on each account.
+            for new_account, code_by_company, check_company_vals in zip(new_accounts, code_by_company_list, check_company_vals_list):
+                for company_id, code in code_by_company.items():
+                    if company_id != companies[0].id:
+                        new_account.with_context({'allowed_company_ids': [company_id, companies[0].id]}).code = code
+                if len(companies) > 1:
+                    check_company_vals['company_ids'] = [Command.link(company.id) for company in companies[1:]]
+                if check_company_vals:
+                    new_account.write(check_company_vals)
+
+            records_list.append(new_accounts)
+
         records = self.env['account.account'].union(*records_list)
         records.with_context(allowed_company_ids=records.company_ids.ids)._ensure_code_is_unique()
         return records
@@ -1158,8 +1205,7 @@ class AccountAccount(models.Model):
 
         # Step 2: Check that we have write access to all the accounts and access to all the companies
         # of these accounts.
-        self.check_access_rights('write')
-        self.check_access_rule('write')
+        self.check_access('write')
         if forbidden_companies := (self.sudo().company_ids - self.env.user.company_ids):
             raise UserError(_(
                 "You do not have the right to perform this operation as you do not have access to the following companies: %s.",
@@ -1237,15 +1283,14 @@ class AccountGroup(models.Model):
                 prefix += '-' + str(group.code_prefix_end)
             group.display_name = ' '.join(filter(None, [prefix, group.name]))
 
-
     @api.model
-    def _name_search(self, name, domain=None, operator='ilike', limit=None, order=None):
-        domain = domain or []
-        if operator != 'ilike' or (name or '').strip():
+    def _search_display_name(self, operator, value):
+        domain = []
+        if operator != 'ilike' or (value or '').strip():
             criteria_operator = ['|'] if operator not in expression.NEGATIVE_TERM_OPERATORS else ['&', '!']
-            name_domain = criteria_operator + [('code_prefix_start', '=ilike', name + '%'), ('name', operator, name)]
+            name_domain = criteria_operator + [('code_prefix_start', '=ilike', value + '%'), ('name', operator, value)]
             domain = expression.AND([name_domain, domain])
-        return self._search(domain, limit=limit, order=order)
+        return domain
 
     @api.constrains('code_prefix_start', 'code_prefix_end')
     def _constraint_prefix_overlap(self):

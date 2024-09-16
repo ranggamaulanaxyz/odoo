@@ -42,6 +42,10 @@ class HrAttendance(models.Model):
     worked_hours = fields.Float(string='Worked Hours', compute='_compute_worked_hours', store=True, readonly=True)
     color = fields.Integer(compute='_compute_color')
     overtime_hours = fields.Float(string="Over Time", compute='_compute_overtime_hours', store=True)
+    overtime_status = fields.Selection(selection=[('to_approve', "To Approve"),
+                                                  ('approved', "Approved"),
+                                                  ('refused', "Refused")], compute="_compute_overtime_status", store=True, tracking=True)
+    validated_overtime_hours = fields.Float(string="Extra Hours", compute='_compute_validated_overtime_hours', store=True, readonly=False, tracking=True)
     in_latitude = fields.Float(string="Latitude", digits=(10, 7), readonly=True, aggregator=None)
     in_longitude = fields.Float(string="Longitude", digits=(10, 7), readonly=True, aggregator=None)
     in_country_name = fields.Char(string="Country", help="Based on IP Address", readonly=True)
@@ -51,7 +55,8 @@ class HrAttendance(models.Model):
     in_mode = fields.Selection(string="Mode",
                                selection=[('kiosk', "Kiosk"),
                                           ('systray', "Systray"),
-                                          ('manual', "Manual")],
+                                          ('manual', "Manual"),
+                                          ('technical', 'Technical')],
                                readonly=True,
                                default='manual')
     out_latitude = fields.Float(digits=(10, 7), readonly=True, aggregator=None)
@@ -62,20 +67,29 @@ class HrAttendance(models.Model):
     out_browser = fields.Char(readonly=True)
     out_mode = fields.Selection(selection=[('kiosk', "Kiosk"),
                                            ('systray', "Systray"),
-                                           ('manual', "Manual")],
+                                           ('manual', "Manual"),
+                                           ('technical', 'Technical'),
+                                           ('auto_check_out', 'Automatic Check-Out')],
                                 readonly=True,
                                 default='manual')
+    expected_hours = fields.Float(compute="_compute_expected_hours", store=True, aggregator="sum")
+
+    @api.depends("worked_hours", "overtime_hours")
+    def _compute_expected_hours(self):
+        for attendance in self:
+            attendance.expected_hours = attendance.worked_hours - attendance.overtime_hours
 
     def _compute_color(self):
         for attendance in self:
             if attendance.check_out:
-                attendance.color = 1 if attendance.worked_hours > 16 else 0
+                attendance.color = 1 if attendance.worked_hours > 16 or attendance.out_mode == 'technical' else 0
             else:
                 attendance.color = 1 if attendance.check_in < (datetime.today() - timedelta(days=1)) else 10
 
     @api.depends('worked_hours')
     def _compute_overtime_hours(self):
         att_progress_values = dict()
+        negative_overtime_attendances = defaultdict(lambda: False)
         if self.employee_id:
             self.env['hr.attendance'].flush_model(['worked_hours'])
             self.env['hr.attendance.overtime'].flush_model(['duration'])
@@ -115,21 +129,47 @@ class HrAttendance(models.Model):
                     else:
                         grouped_dict[row['ot_id']]['attendances'].append((row['att_id'], row['att_wh']))
 
-            for ot in grouped_dict:
-                ot_bucket = grouped_dict[ot]['overtime_duration']
-                for att in grouped_dict[ot]['attendances']:
-                    if ot_bucket > 0:
-                        sub_time = att[1] - ot_bucket
-                        if sub_time < 0:
-                            att_progress_values[att[0]] = 0
-                            ot_bucket -= att[1]
+            for overtime in grouped_dict:
+                overtime_reservoir = grouped_dict[overtime]['overtime_duration']
+                if overtime_reservoir > 0:
+                    for attendance in grouped_dict[overtime]['attendances']:
+                        if overtime_reservoir > 0:
+                            sub_time = attendance[1] - overtime_reservoir
+                            if sub_time < 0:
+                                att_progress_values[attendance[0]] = 0
+                                overtime_reservoir -= attendance[1]
+                            else:
+                                att_progress_values[attendance[0]] = float(((attendance[1] - overtime_reservoir) / attendance[1]) * 100)
+                                overtime_reservoir = 0
                         else:
-                            att_progress_values[att[0]] = float(((att[1] - ot_bucket) / att[1])*100)
-                            ot_bucket = 0
-                    else:
-                        att_progress_values[att[0]] = 100
+                            att_progress_values[attendance[0]] = 100
+                elif overtime_reservoir < 0 and grouped_dict[overtime]['attendances']:
+                    att_id = grouped_dict[overtime]['attendances'][0][0]
+                    att_progress_values[att_id] = overtime_reservoir
+                    negative_overtime_attendances[att_id] = True
         for attendance in self:
-            attendance.overtime_hours = attendance.worked_hours * ((100 - att_progress_values.get(attendance.id, 100))/100)
+            if negative_overtime_attendances[attendance.id]:
+                attendance.overtime_hours = att_progress_values.get(attendance.id, 0)
+            else:
+                attendance.overtime_hours = attendance.worked_hours * ((100 - att_progress_values.get(attendance.id, 100)) / 100)
+
+    @api.depends('employee_id', 'overtime_status', 'overtime_hours')
+    def _compute_validated_overtime_hours(self):
+        no_validation = self.filtered(lambda a: a.employee_id.company_id.attendance_overtime_validation == 'no_validation')
+        with_validation = self - no_validation
+
+        for attendance in with_validation:
+            if attendance.overtime_status not in ['approved', 'refused']:
+                attendance.validated_overtime_hours = attendance.overtime_hours
+
+        for attendance in no_validation:
+            attendance.validated_overtime_hours = attendance.overtime_hours
+
+    @api.depends('employee_id')
+    def _compute_overtime_status(self):
+        for attendance in self:
+            if not attendance.overtime_status:
+                attendance.overtime_status = "to_approve" if attendance.employee_id.company_id.attendance_overtime_validation == 'by_manager' else "approved"
 
     @api.depends('employee_id', 'check_in', 'check_out')
     def _compute_display_name(self):
@@ -232,10 +272,8 @@ class HrAttendance(models.Model):
     def _get_attendances_dates(self):
         # Returns a dictionnary {employee_id: set((datetimes, dates))}
         attendances_emp = defaultdict(set)
-        for attendance in self.filtered(lambda a: a.employee_id.company_id.hr_attendance_overtime and a.check_in):
+        for attendance in self.filtered(lambda a: a.check_in):
             check_in_day_start = attendance._get_day_start_and_day(attendance.employee_id, attendance.check_in)
-            if check_in_day_start[0] < datetime.combine(attendance.employee_id.company_id.overtime_start_date, datetime.min.time()):
-                continue
             attendances_emp[attendance.employee_id].add(check_in_day_start)
             if attendance.check_out:
                 check_out_day_start = attendance._get_day_start_and_day(attendance.employee_id, attendance.check_out)
@@ -391,8 +429,11 @@ class HrAttendance(models.Model):
                                              created_overtimes.employee_id.ids +
                                              overtime_to_unlink.employee_id.ids)
         overtime_to_unlink.sudo().unlink()
+        to_recompute = self.search([('employee_id', 'in', employees_worked_hours_to_compute)])
         self.env.add_to_compute(self._fields['overtime_hours'],
-                                self.search([('employee_id', 'in', employees_worked_hours_to_compute)]))
+                                to_recompute)
+        self.env.add_to_compute(self._fields['validated_overtime_hours'],
+                                to_recompute)
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -449,13 +490,7 @@ class HrAttendance(models.Model):
             return True
         # This record only exists if the scenario has been already launched
         demo_tag = self.env.ref('hr_attendance.resource_calendar_std_38h', raise_if_not_found=False)
-        if demo_tag:
-            return True
-        return bool(self.env['ir.module.module'].search_count([
-            '&',
-                ('state', 'in', ['installed', 'to upgrade', 'uninstallable']),
-                ('demo', '=', True)
-        ]))
+        return bool(demo_tag) or bool(self.env['ir.module.module'].search_count([('demo', '=', True)]))
 
     def _load_demo_data(self):
         if self.has_demo_data():
@@ -610,3 +645,84 @@ class HrAttendance(models.Model):
                 if len(leaf) == 3 and leaf[0] == 'employee_id':
                     employee_name_domain.append([('name', leaf[1], leaf[2])])
             return resources | self.env['hr.employee'].search(OR(employee_name_domain))
+
+    def action_approve_overtime(self):
+        self.write({
+            'overtime_status': 'approved'
+        })
+
+    def action_refuse_overtime(self):
+        self.write({
+            'overtime_status': 'refused'
+        })
+
+    def _cron_auto_check_out(self):
+        to_verify = self.env['hr.attendance'].search(
+            [('check_out', '=', False),
+             ('employee_id.company_id.auto_check_out', '=', True)]
+        )
+
+        if not to_verify:
+            return
+
+        previous_duration = self.env['hr.attendance']._read_group(
+            domain=[
+                ('employee_id', 'in', to_verify.mapped('employee_id').ids),
+                ('check_in', '>', (fields.Datetime.now() - relativedelta(days=1)).replace(hour=0, minute=0, second=0)),
+                ('check_out', '!=', False)], groupby=['check_in:day', 'employee_id'], aggregates=['worked_hours:sum'])
+
+        mapped_previous_duration = defaultdict(lambda: defaultdict(float))
+        for rec in previous_duration:
+            mapped_previous_duration[rec[1]][rec[0].date()] += rec[2]
+
+        all_companies = to_verify.employee_id.company_id
+
+        for company in all_companies:
+            max_tol = company.auto_check_out_tolerance
+            to_verify_company = to_verify.filtered(lambda a: a.employee_id.company_id.id == company.id)
+
+            # Attendances where Last open attendance worked time + previously worked time on that day + tolerance greater than the planned worked hours in his calendar
+            to_check_out = to_verify_company.filtered(lambda a: (fields.Datetime.now() - a.check_in).seconds + mapped_previous_duration[a.employee_id][a.check_in.date()] - max_tol > (sum(a.employee_id.resource_calendar_id.attendance_ids.filtered(lambda att: att.dayofweek == str(a.check_in.weekday())).mapped('duration_hours'))))
+            body = _('This attendance was automatically checked out because the employee exceeded the allowed time for their scheduled work hours.')
+
+            for att in to_check_out:
+                delta_duration = max(1, (sum(att.employee_id.resource_calendar_id.attendance_ids.filtered(lambda a: a.dayofweek == str(att.check_in.weekday())).mapped('duration_hours')) + max_tol - mapped_previous_duration[att.employee_id][att.check_in.date()]) * 3600)
+                att.write({
+                    "check_out": att.check_in + relativedelta(seconds=delta_duration),
+                    "out_mode": "auto_check_out"
+                })
+                att.message_post(body=body)
+
+    def _cron_absence_detection(self):
+        """
+        Objective is to create technical attendances on absence days to have negative overtime created for that day
+        """
+        yesterday = datetime.today().replace(hour=0, minute=0, second=0) - relativedelta(days=1)
+        companies = self.env['res.company'].search([('absence_management', '=', True)])
+        if not companies:
+            return
+
+        checked_in_employees = self.env['hr.attendance.overtime'].search([('date', '=', yesterday),
+                                                                          ('adjustment', '=', False)]).employee_id
+
+        technical_attendances_vals = []
+        absent_employees = self.env['hr.employee'].search([('id', 'not in', checked_in_employees.ids),
+                                                           ('company_id', 'in', companies.ids)])
+        for emp in absent_employees:
+            local_day_start = pytz.utc.localize(yesterday).astimezone(pytz.timezone(emp._get_tz()))
+            technical_attendances_vals.append({
+                'check_in': local_day_start.strftime('%Y-%m-%d %H:%M:%S'),
+                'check_out': (local_day_start + relativedelta(seconds=1)).strftime('%Y-%m-%d %H:%M:%S'),
+                'in_mode': 'technical',
+                'out_mode': 'technical',
+                'employee_id': emp.id
+            })
+
+        technical_attendances = self.env['hr.attendance'].create(technical_attendances_vals)
+        to_unlink = technical_attendances.filtered(lambda a: a.overtime_hours == 0)
+
+        body = _('This attendance was automatically created to cover an unjustified absence on that day.')
+        for technical_attendance in technical_attendances - to_unlink:
+            technical_attendance.message_post(body=body)
+
+        to_unlink.unlink()

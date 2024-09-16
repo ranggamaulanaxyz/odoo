@@ -23,8 +23,7 @@ QUnit.module("leave dashboard", {
                     show_unusual_days="True"
                     color="color"
                     hide_time="True"
-                    mode="year"
-                    all_day="last_several_days">
+                    mode="year">
                 <field name="name"/>
                 <field name="holiday_status_id" filters="1" invisible="1" color="color"/>
                 <field name="state" invisible="1"/>
@@ -107,7 +106,7 @@ QUnit.module("leave dashboard", {
 QUnit.test("test employee is passed to has_accrual_allocation", async (assert) => {
 
     const webClient = await createWebClient({ serverData, async mockRPC(route, args) {
-        if (route == '/web/dataset/call_kw/hr.leave/check_access_rights'){
+        if (route == '/web/dataset/call_kw/hr.leave/has_access'){
             return true;
         }
         if (route == '/web/dataset/call_kw/hr.leave/get_unusual_days'){

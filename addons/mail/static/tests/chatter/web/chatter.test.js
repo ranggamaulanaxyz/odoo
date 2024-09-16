@@ -3,7 +3,6 @@ import {
     assertSteps,
     click,
     contains,
-    createFile,
     defineMailModels,
     dragenterFiles,
     dropFiles,
@@ -67,15 +66,9 @@ test("can post a message on a record thread", async () => {
             context: args.context,
             post_data: {
                 body: "hey",
-                attachment_ids: [],
                 message_type: "comment",
-                partner_ids: [],
                 subtype_xmlid: "mail.mt_comment",
             },
-            canned_response_ids: [],
-            attachment_tokens: [],
-            partner_additional_values: {},
-            partner_emails: [],
             thread_id: partnerId,
             thread_model: "res.partner",
         };
@@ -102,16 +95,10 @@ test("can post a note on a record thread", async () => {
         const expected = {
             context: args.context,
             post_data: {
-                attachment_ids: [],
                 body: "hey",
                 message_type: "comment",
-                partner_ids: [],
                 subtype_xmlid: "mail.mt_note",
             },
-            attachment_tokens: [],
-            canned_response_ids: [],
-            partner_additional_values: {},
-            partner_emails: [],
             thread_id: partnerId,
             thread_model: "res.partner",
         };
@@ -195,34 +182,20 @@ test("Composer type is kept when switching from aside to bottom", async () => {
 test("chatter: drop attachments", async () => {
     const pyEnv = await startServer();
     const partnerId = pyEnv["res.partner"].create({});
+    const text = new File(["hello, world"], "text.txt", { type: "text/plain" });
+    const text2 = new File(["hello, worldub"], "text2.txt", { type: "text/plain" });
+    const text3 = new File(["hello, world"], "text3.txt", { type: "text/plain" });
     await start();
     await openFormView("res.partner", partnerId);
-    const files = [
-        await createFile({
-            content: "hello, world",
-            contentType: "text/plain",
-            name: "text.txt",
-        }),
-        await createFile({
-            content: "hello, worlduh",
-            contentType: "text/plain",
-            name: "text2.txt",
-        }),
-    ];
+    const files = [text, text2];
     await dragenterFiles(".o-mail-Chatter", files);
-    await contains(".o-mail-Dropzone");
+    await contains(".o-Dropzone");
     await contains(".o-mail-AttachmentCard", { count: 0 });
-    await dropFiles(".o-mail-Dropzone", files);
+    await dropFiles(".o-Dropzone", files);
     await contains(".o-mail-AttachmentCard", { count: 2 });
-    const extraFiles = [
-        await createFile({
-            content: "hello, world",
-            contentType: "text/plain",
-            name: "text3.txt",
-        }),
-    ];
+    const extraFiles = [text3];
     await dragenterFiles(".o-mail-Chatter", extraFiles);
-    await dropFiles(".o-mail-Dropzone", extraFiles);
+    await dropFiles(".o-Dropzone", extraFiles);
     await contains(".o-mail-AttachmentCard", { count: 3 });
 });
 
@@ -230,6 +203,7 @@ test("chatter: drop attachment should refresh thread data with hasParentReloadOn
     patchUiSize({ size: SIZES.XXL });
     const pyEnv = await startServer();
     const partnerId = pyEnv["res.partner"].create({});
+    const textPdf = new File([new Uint8Array(1)], "text.pdf", { type: "application/pdf" });
 
     await start();
     await openFormView("res.partner", partnerId, {
@@ -242,14 +216,8 @@ test("chatter: drop attachment should refresh thread data with hasParentReloadOn
                 <chatter reload_on_post="True" reload_on_attachment="True"/>
             </form>`,
     });
-    const files = [
-        await createFile({
-            contentType: "application/pdf",
-            name: "text.pdf",
-        }),
-    ];
-    await dragenterFiles(".o-mail-Chatter", files);
-    await dropFiles(".o-mail-Dropzone", files);
+    await dragenterFiles(".o-mail-Chatter", [textPdf]);
+    await dropFiles(".o-Dropzone", [textPdf]);
     await contains(".o-mail-Attachment iframe", { count: 1 });
 });
 
@@ -633,6 +601,7 @@ test("schedule activities on draft record should prompt with scheduling an activ
 });
 
 test("upload attachment on draft record", async () => {
+    const text = new File(["hello, world"], "text.text", { type: "text/plain" });
     await start();
     await openFormView("res.partner", undefined, {
         arch: `
@@ -645,15 +614,8 @@ test("upload attachment on draft record", async () => {
     });
     await contains("button[aria-label='Attach files']");
     await contains("button[aria-label='Attach files']", { count: 0, text: "1" });
-    const files = [
-        await createFile({
-            content: "hello, world",
-            contentType: "text/plain",
-            name: "text.txt",
-        }),
-    ];
-    await dragenterFiles(".o-mail-Chatter", files);
-    await dropFiles(".o-mail-Dropzone", files);
+    await dragenterFiles(".o-mail-Chatter", [text]);
+    await dropFiles(".o-Dropzone", [text]);
     await contains("button[aria-label='Attach files']", { text: "1" });
 });
 
@@ -694,4 +656,18 @@ test("form views in dialogs do not have chatter", async () => {
     await getService("action").doAction(1);
     await contains(".o_dialog .o_form_view");
     await contains(".o-mail-Form-Chatter", { count: 0 });
+});
+
+test("should display the subject even if the record name is false", async () => {
+    const pyEnv = await startServer();
+    const fakeId = pyEnv["res.fake"].create({ name: false });
+    pyEnv["mail.message"].create({
+        body: "not empty",
+        model: "res.fake",
+        res_id: fakeId,
+        subject: "Salutations, voyageur",
+    });
+    await start();
+    await openFormView("res.fake", fakeId);
+    await contains(".o-mail-Message", { text: "Subject: Salutations, voyageurnot empty" });
 });

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
+from __future__ import annotations
 
 import base64
 import collections
@@ -15,6 +16,13 @@ from werkzeug import urls
 
 from odoo import api, fields, models, tools, SUPERUSER_ID, _, Command
 from odoo.exceptions import RedirectWarning, UserError, ValidationError
+
+import typing
+if typing.TYPE_CHECKING:
+    from .res_users import UsersView as ResUsers
+    from .res_bank import ResPartnerBank
+    from .res_country import Country, CountryState
+    from .res_company import Company as ResCompany
 
 # Global variables used for the warning fields declared on the res.partner
 # in the following modules : sale, purchase, account, stock
@@ -57,6 +65,15 @@ class FormatAddressMixin(models.AbstractModel):
     _name = "format.address.mixin"
     _description = 'Address Format'
 
+    def _extract_fields_from_address(self, address_line):
+        """
+        Extract keys from the address line.
+        For example, if the address line is "zip: %(zip)s, city: %(city)s.",
+        this method will return ['zip', 'city'].
+        """
+        address_fields = ['%(' + field + ')s' for field in ADDRESS_FIELDS + ('state_code', 'state_name')]
+        return sorted([field[2:-2] for field in address_fields if field in address_line], key=address_line.index)
+
     def _view_get_address(self, arch):
         # consider the country of the user, not the country of the partner we want to display
         address_view_id = self.env.company.country_id.address_view_id.sudo()
@@ -77,12 +94,13 @@ class FormatAddressMixin(models.AbstractModel):
         elif address_format and not self._context.get('no_address_format'):
             # For the zip, city and state fields we need to move them around in order to follow the country address format.
             # The purpose of this is to help the user by following a format he is used to.
-            city_line = [line.split(' ') for line in address_format.split('\n') if 'city' in line]
+            city_line = [self._extract_fields_from_address(line) for line in address_format.split('\n') if 'city' in line]
             if city_line:
-                field_order = [field.replace('%(', '').replace(')s', '') for field in city_line[0]]
+                field_order = city_line[0]
                 for address_node in arch.xpath("//div[hasclass('o_address_format')]"):
-                    concerned_fields = {'zip', 'city', 'state_id'} - {field_order[0]}
-                    current_field = address_node.find(f".//field[@name='{field_order[0]}']")
+                    first_field = field_order[0] if field_order[0] not in ('state_code', 'state_name') else 'state_id'
+                    concerned_fields = {'zip', 'city', 'state_id'} - {first_field}
+                    current_field = address_node.find(f".//field[@name='{first_field}']")
                     # First loop into the fields displayed in the address_format, and order them.
                     for field in field_order[1:]:
                         if field in ('state_code', 'state_name'):
@@ -128,13 +146,12 @@ class PartnerCategory(models.Model):
         return randint(1, 11)
 
     name = fields.Char('Name', required=True, translate=True)
-    display_name = fields.Char('Display Name', compute='_compute_display_name', search='_search_display_name')
     color = fields.Integer(string='Color', default=_get_default_color, aggregator=False)
-    parent_id = fields.Many2one('res.partner.category', string='Category', index=True, ondelete='cascade')
-    child_ids = fields.One2many('res.partner.category', 'parent_id', string='Child Tags')
+    parent_id: PartnerCategory = fields.Many2one('res.partner.category', string='Category', index=True, ondelete='cascade')
+    child_ids: PartnerCategory = fields.One2many('res.partner.category', 'parent_id', string='Child Tags')
     active = fields.Boolean(default=True, help="The active field allows you to hide the category without removing it.")
     parent_path = fields.Char(index=True)
-    partner_ids = fields.Many2many('res.partner', column1='category_id', column2='partner_id', string='Partners', copy=False)
+    partner_ids: Partner = fields.Many2many('res.partner', column1='category_id', column2='partner_id', string='Partners', copy=False)
 
     @api.constrains('parent_id')
     def _check_parent_id(self):
@@ -155,17 +172,11 @@ class PartnerCategory(models.Model):
             category.display_name = ' / '.join(reversed(names))
 
     @api.model
-    def _name_search(self, name, domain=None, operator='ilike', limit=None, order=None):
-        domain = domain or []
-        if name:
-            # Be sure name_search is symetric to display_name
-            name = name.split(' / ')[-1]
-            domain = [('name', operator, name)] + domain
-        return self._search(domain, limit=limit, order=order)
-
-    @api.model
     def _search_display_name(self, operator, value):
-        return [('id', 'child_of', self._search([('name', operator, value)]))]
+        domain = super()._search_display_name(operator, value)
+        if operator.endswith('like'):
+            return [('id', 'child_of', self._search(domain))]
+        return domain
 
 class PartnerTitle(models.Model):
     _name = 'res.partner.title'
@@ -210,10 +221,10 @@ class Partner(models.Model):
 
     name = fields.Char(index=True, default_export_compatible=True)
     complete_name = fields.Char(compute='_compute_complete_name', store=True, index=True)
-    title = fields.Many2one('res.partner.title')
-    parent_id = fields.Many2one('res.partner', string='Related Company', index=True)
+    title: PartnerTitle = fields.Many2one('res.partner.title')
+    parent_id: Partner = fields.Many2one('res.partner', string='Related Company', index=True)
     parent_name = fields.Char(related='parent_id.name', readonly=True, string='Parent name')
-    child_ids = fields.One2many('res.partner', 'parent_id', string='Contact', domain=[('active', '=', True)], context={'active_test': False})
+    child_ids: Partner = fields.One2many('res.partner', 'parent_id', string='Contact', domain=[('active', '=', True)], context={'active_test': False})
     ref = fields.Char(string='Reference', index=True)
     lang = fields.Selection(_lang_get, string='Language',
                             help="All the emails and documents sent to this contact will be translated in this language.")
@@ -224,22 +235,22 @@ class Partner(models.Model):
                                "Anywhere else, time values are computed according to the time offset of your web client.")
 
     tz_offset = fields.Char(compute='_compute_tz_offset', string='Timezone offset')
-    user_id = fields.Many2one(
+    user_id: ResUsers = fields.Many2one(
         'res.users', string='Salesperson',
         compute='_compute_user_id',
         precompute=True,  # avoid queries post-create
         readonly=False, store=True,
         help='The internal user in charge of this contact.')
     vat = fields.Char(string='Tax ID', index=True, help="The Tax Identification Number. Values here will be validated based on the country format. You can use '/' to indicate that the partner is not subject to tax.")
-    same_vat_partner_id = fields.Many2one('res.partner', string='Partner with same Tax ID', compute='_compute_same_vat_partner_id', store=False)
-    same_company_registry_partner_id = fields.Many2one('res.partner', string='Partner with same Company Registry', compute='_compute_same_vat_partner_id', store=False)
+    same_vat_partner_id: Partner = fields.Many2one('res.partner', string='Partner with same Tax ID', compute='_compute_same_vat_partner_id', store=False)
+    same_company_registry_partner_id: Partner = fields.Many2one('res.partner', string='Partner with same Company Registry', compute='_compute_same_vat_partner_id', store=False)
     company_registry = fields.Char(string="Company ID", compute='_compute_company_registry', store=True, readonly=False,
        help="The registry number of the company. Use it if it is different from the Tax ID. It must be unique across all partners of a same country")
-    bank_ids = fields.One2many('res.partner.bank', 'partner_id', string='Banks')
+    bank_ids: ResPartnerBank = fields.One2many('res.partner.bank', 'partner_id', string='Banks')
     website = fields.Char('Website Link')
     comment = fields.Html(string='Notes')
 
-    category_id = fields.Many2many('res.partner.category', column1='partner_id',
+    category_id: PartnerCategory = fields.Many2many('res.partner.category', column1='partner_id',
                                     column2='category_id', string='Tags', default=_default_category)
     active = fields.Boolean(default=True)
     employee = fields.Boolean(help="Check this box if this contact is an Employee.")
@@ -256,8 +267,8 @@ class Partner(models.Model):
     street2 = fields.Char()
     zip = fields.Char(change_default=True)
     city = fields.Char()
-    state_id = fields.Many2one("res.country.state", string='State', ondelete='restrict', domain="[('country_id', '=?', country_id)]")
-    country_id = fields.Many2one('res.country', string='Country', ondelete='restrict')
+    state_id: CountryState = fields.Many2one("res.country.state", string='State', ondelete='restrict', domain="[('country_id', '=?', country_id)]")
+    country_id: Country = fields.Many2one('res.country', string='Country', ondelete='restrict')
     country_code = fields.Char(related='country_id.code', string="Country Code")
     partner_latitude = fields.Float(string='Geo Latitude', digits=(10, 7))
     partner_longitude = fields.Float(string='Geo Longitude', digits=(10, 7))
@@ -270,14 +281,14 @@ class Partner(models.Model):
     is_company = fields.Boolean(string='Is a Company', default=False,
         help="Check if the contact is a company, otherwise it is a person")
     is_public = fields.Boolean(compute='_compute_is_public')
-    industry_id = fields.Many2one('res.partner.industry', 'Industry')
+    industry_id: ResPartnerIndustry = fields.Many2one('res.partner.industry', 'Industry')
     # company_type is only an interface field, do not use it in business logic
     company_type = fields.Selection(string='Company Type',
         selection=[('person', 'Individual'), ('company', 'Company')],
         compute='_compute_company_type', inverse='_write_company_type')
-    company_id = fields.Many2one('res.company', 'Company', index=True)
+    company_id: ResCompany = fields.Many2one('res.company', 'Company', index=True)
     color = fields.Integer(string='Color Index', default=0)
-    user_ids = fields.One2many('res.users', 'partner_id', string='Users', auto_join=True)
+    user_ids: ResUsers = fields.One2many('res.users', 'partner_id', string='Users', auto_join=True)
     partner_share = fields.Boolean(
         'Share Partner', compute='_compute_partner_share', store=True,
         help="Either customer (not a user), either shared user. Indicated the current partner is a customer without "
@@ -285,7 +296,7 @@ class Partner(models.Model):
     contact_address = fields.Char(compute='_compute_contact_address', string='Complete Address')
 
     # technical field used for managing commercial fields
-    commercial_partner_id = fields.Many2one(
+    commercial_partner_id: Partner = fields.Many2one(
         'res.partner', string='Commercial Entity',
         compute='_compute_commercial_partner', store=True,
         recursive=True, index=True)
@@ -295,7 +306,7 @@ class Partner(models.Model):
     barcode = fields.Char(help="Use a barcode to identify this contact.", copy=False, company_dependent=True)
 
     # hack to allow using plain browse record in qweb views, and used in ir.qweb.field.contact
-    self = fields.Many2one(comodel_name=_name, compute='_compute_get_ids')
+    self: Partner = fields.Many2one(comodel_name='res.partner', compute='_compute_get_ids')
 
     _sql_constraints = [
         ('check_name', "CHECK( (type='contact' AND name IS NOT NULL) or (type!='contact') )", 'Contacts require a name'),
@@ -449,12 +460,25 @@ class Partner(models.Model):
         if self._has_cycle():
             raise ValidationError(_('You cannot create recursive Partner hierarchies.'))
 
+    @api.constrains('company_id')
+    def _check_partner_company(self):
+        """
+        Check that for every partner which has a company,
+        if there exists a company linked to that partner,
+        the company_id set on the partner is that company
+        """
+        partners = self.filtered(lambda p: p.is_company and p.company_id)
+        companies = self.env['res.company'].search_fetch([('partner_id', 'in', partners.ids)], ['partner_id'])
+        for company in companies:
+            if company != company.partner_id.company_id:
+                raise (_('The company assigned to this partner does not match the company this partner represents.'))
+
     def copy_data(self, default=None):
         default = dict(default or {})
         vals_list = super().copy_data(default=default)
         if default.get('name'):
             return vals_list
-        return [dict(vals, name=_("%s (copy)", partner.name)) for partner, vals in zip(self, vals_list)]
+        return [dict(vals, name=self.env._("%s (copy)", partner.name)) for partner, vals in zip(self, vals_list)]
 
     @api.onchange('parent_id')
     def onchange_parent_id(self):
@@ -588,7 +612,7 @@ class Partner(models.Model):
     def update_address(self, vals):
         addr_vals = {key: vals[key] for key in self._address_fields() if key in vals}
         if addr_vals:
-            return super(Partner, self).write(addr_vals)
+            return super().write(addr_vals)
 
     @api.model
     def _commercial_fields(self):
@@ -689,7 +713,7 @@ class Partner(models.Model):
             self.invalidate_recordset(['user_ids'])
             users = self.env['res.users'].sudo().search([('partner_id', 'in', self.ids)])
             if users:
-                if self.env['res.users'].sudo(False).check_access_rights('write', raise_exception=False):
+                if self.env['res.users'].sudo(False).has_access('write'):
                     error_msg = _('You cannot archive contacts linked to an active user.\n'
                                   'You first need to archive their associated user.\n\n'
                                   'Linked active users : %(names)s', names=", ".join([u.display_name for u in users]))
@@ -724,10 +748,10 @@ class Partner(models.Model):
         if 'is_company' in vals and not self.env.su and self.env.user.has_group('base.group_partner_manager'):
             result = super(Partner, self.sudo()).write({'is_company': vals.get('is_company')})
             del vals['is_company']
-        result = result and super(Partner, self).write(vals)
+        result = result and super().write(vals)
         for partner in self:
             if any(u._is_internal() for u in partner.user_ids if u != self.env.user):
-                self.env['res.users'].check_access_rights('write')
+                self.env['res.users'].check_access('write')
             partner._fields_sync(vals)
         return result
 
@@ -740,7 +764,7 @@ class Partner(models.Model):
                 vals['website'] = self._clean_website(vals['website'])
             if vals.get('parent_id'):
                 vals['company_name'] = False
-        partners = super(Partner, self).create(vals_list)
+        partners = super().create(vals_list)
 
         if self.env.context.get('_partners_skip_fields_sync'):
             return partners
@@ -758,7 +782,7 @@ class Partner(models.Model):
         users = self.env['res.users'].sudo().search([('partner_id', 'in', self.ids)])
         if not users:
             return  # no linked user, operation is allowed
-        if self.env['res.users'].sudo(False).check_access_rights('write', raise_exception=False):
+        if self.env['res.users'].sudo(False).has_access('write'):
             error_msg = _('You cannot delete contacts linked to an active user.\n'
                           'You should rather archive them after archiving their associated user.\n\n'
                           'Linked active users : %(names)s', names=", ".join([u.display_name for u in users]))

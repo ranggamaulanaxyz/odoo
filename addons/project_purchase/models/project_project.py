@@ -1,9 +1,8 @@
-# -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 import json
 
-from odoo import api, fields, models, _, _lt
+from odoo import fields, models
 from odoo.osv import expression
 
 
@@ -12,36 +11,34 @@ class Project(models.Model):
 
     purchase_orders_count = fields.Integer('# Purchase Orders', compute='_compute_purchase_orders_count', groups='purchase.group_purchase_user', export_string_translation=False)
 
-    @api.depends('analytic_account_id')
     def _compute_purchase_orders_count(self):
-        data = self.env['purchase.order.line']._read_group(
-            [('analytic_distribution', 'in', self.analytic_account_id.ids)],
-            ['analytic_distribution'],
-            ['__count'],
+        purchase_count_per_project = dict(
+            self.env['purchase.order']._read_group(
+                [('project_id', 'in', self.ids)],
+                ['project_id'], ['__count'],
+            )
         )
-        data = {int(account_id): order_count for account_id, order_count in data}
         for project in self:
-            project.purchase_orders_count = data.get(project.analytic_account_id.id, 0)
+            project.purchase_orders_count = purchase_count_per_project.get(project)
 
     # ----------------------------
     #  Actions
     # ----------------------------
 
     def action_open_project_purchase_orders(self):
-        purchase_orders = self.env['purchase.order.line'].search(
-            [('analytic_distribution', 'in', self.analytic_account_id.ids)]
-        ).order_id
+        purchase_orders_domain = [('project_id', '=', self.id)]
         action_window = {
-            'name': _('Purchase Orders'),
+            'name': self.env._('Purchase Orders'),
             'type': 'ir.actions.act_window',
             'res_model': 'purchase.order',
-            'views': [[False, 'tree'], [False, 'form']],
-            'domain': [('id', 'in', purchase_orders.ids)],
+            'views': [[False, 'list'], [False, 'form']],
+            'domain': purchase_orders_domain,
             'context': {
-                'project_id': self.id,
-            }
+                'default_project_id': self.id,
+            },
         }
-        if len(purchase_orders) == 1:
+        purchase_orders = self.env['purchase.order'].search(purchase_orders_domain)
+        if len(purchase_orders) == 1 and not self.env.context.get('from_embedded_action'):
             action_window['views'] = [[False, 'form']]
             action_window['res_id'] = purchase_orders.id
         return action_window
@@ -49,10 +46,10 @@ class Project(models.Model):
     def action_profitability_items(self, section_name, domain=None, res_id=False):
         if section_name == 'purchase_order':
             action = {
-                'name': _('Purchase Order Items'),
+                'name': self.env._('Purchase Order Items'),
                 'type': 'ir.actions.act_window',
                 'res_model': 'purchase.order.line',
-                'views': [[False, 'tree'], [False, 'form']],
+                'views': [[False, 'list'], [False, 'form']],
                 'domain': domain,
                 'context': {
                     'create': False,
@@ -81,7 +78,7 @@ class Project(models.Model):
             self_sudo = self.sudo()
             buttons.append({
                 'icon': 'credit-card',
-                'text': _lt('Purchase Orders'),
+                'text': self.env._('Purchase Orders'),
                 'number': self_sudo.purchase_orders_count,
                 'action_type': 'object',
                 'action': 'action_open_project_purchase_orders',
@@ -101,7 +98,7 @@ class Project(models.Model):
 
     def _get_profitability_labels(self):
         labels = super()._get_profitability_labels()
-        labels['purchase_order'] = _lt('Purchase Orders')
+        labels['purchase_order'] = self.env._('Purchase Orders')
         return labels
 
     def _get_profitability_sequence_per_invoice_type(self):
@@ -111,10 +108,10 @@ class Project(models.Model):
 
     def _get_profitability_items(self, with_action=True):
         profitability_items = super()._get_profitability_items(with_action)
-        if self.analytic_account_id:
+        if self.account_id:
             invoice_lines = self.env['account.move.line'].sudo().search_fetch([
                 ('parent_state', 'in', ['draft', 'posted']),
-                ('analytic_distribution', 'in', self.analytic_account_id.ids),
+                ('analytic_distribution', 'in', self.account_id.ids),
                 ('purchase_line_id', '!=', False),
             ], ['parent_state', 'currency_id', 'price_subtotal', 'analytic_distribution'])
             purchase_order_line_invoice_line_ids = self._get_already_included_profitability_invoice_line_ids()
@@ -131,9 +128,9 @@ class Project(models.Model):
                     # an analytic account can appear several time in an analytic distribution with different repartition percentage
                     analytic_contribution = sum(
                         percentage for ids, percentage in line.analytic_distribution.items()
-                        if str(self.analytic_account_id.id) in ids.split(',')
+                        if str(self.account_id.id) in ids.split(',')
                     ) / 100.
-                    cost = price_subtotal * analytic_contribution
+                    cost = price_subtotal * analytic_contribution * (-1 if line.is_refund else 1)
                     if line.parent_state == 'posted':
                         amount_invoiced -= cost
                     else:

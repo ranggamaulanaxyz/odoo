@@ -257,6 +257,7 @@ class Task(models.Model):
                                      column2="depends_on_id", string="Blocked By", tracking=True, copy=False,
                                      domain="[('project_id', '!=', False), ('id', '!=', id)]")
     depend_on_count = fields.Integer(string="Depending on Tasks", compute='_compute_depend_on_count', compute_sudo=True)
+    closed_depend_on_count = fields.Integer(string="Closed Depending on Tasks", compute='_compute_depend_on_count', compute_sudo=True)
     dependent_ids = fields.Many2many('project.task', relation="task_dependencies_rel", column1="depends_on_id",
                                      column2="task_id", string="Block", copy=False,
                                      domain="[('project_id', '!=', False), ('id', '!=', id)]", export_string_translation=False)
@@ -283,13 +284,6 @@ class Task(models.Model):
         ('until', 'Until'),
     ], default="forever", string="Until", compute='_compute_repeat', compute_sudo=True, readonly=False)
     repeat_until = fields.Date(string="End Date", compute='_compute_repeat', compute_sudo=True, readonly=False)
-
-    # Account analytic
-    analytic_account_id = fields.Many2one('account.analytic.account', ondelete='set null', compute='_compute_analytic_account_id', store=True, readonly=False,
-        domain="[('company_id', '=?', company_id)]",
-        help="Analytic account to which this task and its timesheets are linked.\n"
-            "Track the costs and revenues of your task by setting its analytic account on your related documents (e.g. sales orders, invoices, purchase orders, vendor bills, expenses etc.).\n"
-            "By default, the analytic account of the project is set. However, it can be changed on each task individually if necessary.")
 
     # Quick creation shortcuts
     display_name = fields.Char(compute='_compute_display_name', inverse='_inverse_display_name',
@@ -356,11 +350,6 @@ class Task(models.Model):
     def _compute_show_display_in_project(self):
         for task in self:
             task.show_display_in_project = bool(task.parent_id) and task.project_id == task.parent_id.project_id
-
-    @api.depends('project_id.analytic_account_id')
-    def _compute_analytic_account_id(self):
-        for task in self:
-            task.analytic_account_id = task.project_id.analytic_account_id
 
     @api.depends('stage_id', 'depend_on_ids.state', 'project_id.allow_task_dependencies')
     def _compute_state(self):
@@ -526,17 +515,26 @@ class Task(models.Model):
     @api.depends('depend_on_ids')
     def _compute_depend_on_count(self):
         tasks_with_dependency = self.filtered('allow_task_dependencies')
-        (self - tasks_with_dependency).depend_on_count = 0
+        tasks_without_dependency = self - tasks_with_dependency
+        tasks_without_dependency.depend_on_count = 0
+        tasks_without_dependency.closed_depend_on_count = 0
+        if not any(self._ids):
+            for task in self:
+                task.depend_on_count = len(task.depend_on_ids)
+                task.closed_depend_on_count = len(task.depend_on_ids.filtered(lambda r: r.state in CLOSED_STATES))
+            return
         if tasks_with_dependency:
             # need the sudo for project sharing
-            depend_on_count = {
-                dependent_on.id: count
-                for dependent_on, count in self.env['project.task']._read_group([
-                    ('dependent_ids', 'in', tasks_with_dependency.ids),
-                ], ['dependent_ids'], ['__count'])
+            total_and_closed_depend_on_count = {
+                dependent_on.id: (count, sum(s in CLOSED_STATES for s in states))
+                for dependent_on, states, count in self.env['project.task']._read_group(
+                    [('dependent_ids', 'in', tasks_with_dependency.ids)],
+                    ['dependent_ids'],
+                    ['state:array_agg', '__count'],
+                )
             }
             for task in tasks_with_dependency:
-                task.depend_on_count = depend_on_count.get(task._origin.id or task.id, 0)
+                task.depend_on_count, task.closed_depend_on_count = total_and_closed_depend_on_count.get(task._origin.id or task.id, (0, 0))
 
     @api.depends('dependent_ids')
     def _compute_dependent_tasks_count(self):
@@ -689,7 +687,7 @@ class Task(models.Model):
         return [('id', 'in', sql)]
 
     def _compute_display_parent_task_button(self):
-        accessible_parent_tasks = self.parent_id.with_user(self.env.user)._filter_access_rules('read')
+        accessible_parent_tasks = self.parent_id.with_user(self.env.user)._filtered_access('read')
         for task in self:
             task.display_parent_task_button = task.parent_id in accessible_parent_tasks
 
@@ -956,8 +954,6 @@ class Task(models.Model):
         project_id = vals.get('project_id', self.env.context.get('default_project_id'))
         if project_id:
             project = self.env['project.project'].browse(project_id)
-            if project.analytic_account_id:
-                vals['analytic_account_id'] = project.analytic_account_id.id
             if 'company_id' in default_fields and 'default_project_id' not in self.env.context:
                 vals['company_id'] = project.sudo().company_id
         elif 'default_user_ids' not in self.env.context and 'user_ids' in default_fields:
@@ -1066,7 +1062,7 @@ class Task(models.Model):
 
         is_portal_user = self.env.user._is_portal()
         if is_portal_user:
-            self.check_access_rights('create')
+            self.browse().check_access('create')
         default_stage = dict()
         for vals in vals_list:
             project_id = vals.get('project_id') or default_project_id
@@ -1129,7 +1125,7 @@ class Task(models.Model):
         if is_portal_user and not was_in_sudo:
             # since we use sudo to create tasks, we need to check
             # if the portal user could really create the tasks based on the ir rule.
-            tasks.with_user(self.env.user).check_access_rule('create')
+            tasks.browse().with_user(self.env.user).check_access('create')
         current_partner = self.env.user.partner_id
 
         all_partner_emails = []
@@ -1171,8 +1167,7 @@ class Task(models.Model):
         if self.env.user._is_portal() and not self.env.su:
             # Check if all fields in vals are in SELF_WRITABLE_FIELDS
             self._ensure_fields_are_accessible(vals.keys(), operation='write', check_group_user=False)
-            self.check_access_rights('write')
-            self.check_access_rule('write')
+            self.check_access('write')
             portal_can_write = True
 
         if 'milestone_id' in vals:
@@ -1308,7 +1303,11 @@ class Task(models.Model):
             for task in self:
                 project_link = project_link_per_task_id.get(task.id)
                 if project_link:
-                    body = _('Task Transferred from Project %s', project_link)
+                    body = _(
+                        'Task Transferred from Project %(source_project)s to %(destination_project)s',
+                        source_project=project_link,
+                        destination_project=self.project_id._get_html_link(title=self.project_id.display_name),
+                    )
                 else:
                     body = _('Task Converted from To-Do')
                 task.message_notify(
@@ -1335,7 +1334,15 @@ class Task(models.Model):
         return {'date_end': False}
 
     def _search_on_comodel(self, domain, field, comodel, additional_domain=None):
+        """ This method is called by `group_expand` methods, whose purpose is to add empty groups to the `read_group`
+            (which otherwise returns groups containing records that match the domain).
+            When specifically filtering on a comodel's field, the result of the `read_group` should contain all matching groups.
+            However, if the search isn't filtered on any comodel's field, the result shouldn't be affected,
+            which explains why we return `False` if `filtered_domain` is empty.
 
+            Returns:
+                False or recordset of the comodel given in parameter.
+        """
         def _change_operator(domain):
             new_domain = []
             for dom in domain:
@@ -1366,9 +1373,11 @@ class Task(models.Model):
             f"{field}.name": "name",
         })
         filtered_domain = _change_operator(filtered_domain)
+        if not filtered_domain:
+            return False
         if additional_domain:
             filtered_domain = expression.AND([filtered_domain, additional_domain])
-        return self.env[comodel].search(filtered_domain) if filtered_domain else False
+        return self.env[comodel].search(filtered_domain)
 
     # ---------------------------------------------------
     # Subtasks
@@ -1751,7 +1760,7 @@ class Task(models.Model):
 
     def action_project_sharing_view_parent_task(self):
         if self.parent_id.project_id != self.project_id and self.env.user._is_portal():
-            project = self.parent_id.project_id._filter_access_rules_python('read')
+            project = self.parent_id.project_id._filtered_access('read')
             if project:
                 url = f"/my/projects/{self.parent_id.project_id.id}/task/{self.parent_id.id}"
                 if project._check_project_sharing_access():
@@ -1824,7 +1833,7 @@ class Task(models.Model):
             'context': {**self._context, 'default_depend_on_ids': [Command.link(self.id)], 'show_project_update': False, 'search_default_open_tasks': True},
             'domain': [('depend_on_ids', '=', self.id)],
             'name': _('Dependent Tasks'),
-            'view_mode': 'tree,form,kanban,calendar,pivot,graph,activity',
+            'view_mode': 'list,form,kanban,calendar,pivot,graph,activity',
         }
 
     def action_recurring_tasks(self):
@@ -1832,7 +1841,7 @@ class Task(models.Model):
             'name': _('Tasks in Recurrence'),
             'type': 'ir.actions.act_window',
             'res_model': 'project.task',
-            'view_mode': 'tree,form,kanban,calendar,pivot,graph,activity',
+            'view_mode': 'list,form,kanban,calendar,pivot,graph,activity',
             'context': {'create': False},
             'domain': [('recurrence_id', 'in', self.recurrence_id.ids)],
         }
@@ -1944,13 +1953,6 @@ class Task(models.Model):
     def _unsubscribe_portal_users(self):
         self.message_unsubscribe(partner_ids=self.message_partner_ids.filtered('user_ids.share').ids)
 
-    # ---------------------------------------------------
-    # Analytic accounting
-    # ---------------------------------------------------
-    def _get_task_analytic_account_id(self):
-        self.ensure_one()
-        return self.analytic_account_id or self.project_id.analytic_account_id
-
     @api.model
     def get_unusual_days(self, date_from, date_to=None):
         calendar = self.env.company.resource_calendar_id
@@ -1986,8 +1988,7 @@ class Task(models.Model):
 
     def project_sharing_toggle_is_follower(self):
         self.ensure_one()
-        self.check_access_rights('write')
-        self.check_access_rule('write')
+        self.check_access('write')
         is_follower = self.message_is_follower
         if is_follower:
             self.sudo().message_unsubscribe(self.env.user.partner_id.ids)

@@ -19,8 +19,10 @@ export const BUTTON_CLICK_PARAMS = [
     "name",
     "type",
     "args",
+    "block-ui", // Blocks UI with a spinner until the action is done
     "context",
     "close",
+    "cancel-label",
     "confirm",
     "confirm-title",
     "confirm-label",
@@ -128,21 +130,20 @@ export const computeReportMeasures = (
 };
 
 /**
- * @param {String} fieldName
- * @param {Object} rawAttrs
  * @param {Record} record
+ * @param {String} fieldName
+ * @param {Object} [fieldInfo]
  * @returns {String}
  */
-export function getFormattedValue(record, fieldName, attrs) {
+export function getFormattedValue(record, fieldName, fieldInfo = null) {
     const field = record.fields[fieldName];
     const formatter = registry.category("formatters").get(field.type, (val) => val);
-    const formatOptions = {
-        escape: false,
-        data: record.data,
-        isPassword: "password" in attrs,
-        digits: attrs.digits ? JSON.parse(attrs.digits) : field.digits,
-        field: record.fields[fieldName],
-    };
+    const formatOptions = {};
+    if (fieldInfo && formatter.extractOptions) {
+        Object.assign(formatOptions, formatter.extractOptions(fieldInfo));
+    }
+    formatOptions.data = record.data;
+    formatOptions.field = field;
     return record.data[fieldName] !== undefined
         ? formatter(record.data[fieldName], formatOptions)
         : "";

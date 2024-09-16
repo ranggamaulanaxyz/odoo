@@ -20,7 +20,7 @@ test("project.task (tree): check group label for no project", async () => {
     await mountView({
         resModel: "project.task",
         type: "list",
-        arch: `<tree js_class="project_task_list"/>`,
+        arch: `<list js_class="project_task_list"/>`,
         groupBy: ["project_id"],
     });
     expect(".o_group_name").toHaveText("🔒 Private (1)");
@@ -30,7 +30,7 @@ test("project.task (tree): check group label for no assignees", async () => {
     await mountView({
         resModel: "project.task",
         type: "list",
-        arch: `<tree js_class="project_task_list"/>`,
+        arch: `<list js_class="project_task_list"/>`,
         groupBy: ["user_ids"],
     });
     expect(".o_group_name").toHaveText("👤 Unassigned (1)");
@@ -40,7 +40,7 @@ test("project.task (tree): check group label for no deadline", async () => {
     await mountView({
         resModel: "project.task",
         type: "list",
-        arch: `<tree js_class="project_task_list"/>`,
+        arch: `<list js_class="project_task_list"/>`,
         groupBy: ["date_deadline"],
     });
     expect(".o_group_name").toHaveText("None (1)");
@@ -53,12 +53,12 @@ test("project.task (kanban): check group label for no project", async () => {
         arch: `
             <kanban js_class="project_task_kanban" default_group_by="project_id">
                 <templates>
-                    <t t-name="kanban-box"/>
+                    <t t-name="kanban-card"/>
                 </templates>
             </kanban>
         `,
     });
-    expect(".o_column_title").toHaveText("🔒 Private\n1");
+    expect(".o_column_title").toHaveText("🔒 Private\n(1)");
 });
 
 test("project.task (kanban): check group label for no assignees", async () => {
@@ -68,12 +68,12 @@ test("project.task (kanban): check group label for no assignees", async () => {
         arch: `
             <kanban js_class="project_task_kanban" default_group_by="user_ids">
                 <templates>
-                    <t t-name="kanban-box"/>
+                    <t t-name="kanban-card"/>
                 </templates>
             </kanban>
         `,
     });
-    expect(".o_column_title").toHaveText("👤 Unassigned\n1");
+    expect(".o_column_title").toHaveText("👤 Unassigned\n(1)");
 });
 
 test("project.task (kanban): check group label for no deadline", async () => {
@@ -83,12 +83,12 @@ test("project.task (kanban): check group label for no deadline", async () => {
         arch: `
             <kanban js_class="project_task_kanban" default_group_by="date_deadline">
                 <templates>
-                    <t t-name="kanban-box"/>
+                    <t t-name="kanban-card"/>
                 </templates>
             </kanban>
         `,
     });
-    expect(".o_column_title").toHaveText("None");
+    expect(".o_column_title").toHaveText("None\n(1)");
 });
 
 test("project.task (pivot): check group label for no project", async () => {

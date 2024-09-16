@@ -3,7 +3,7 @@
 import json
 
 import odoo
-from odoo.tools import mute_logger, date_utils
+from odoo.tools import mute_logger
 from odoo.addons.base.tests.common import HttpCaseWithUserDemo
 from odoo.http import STATIC_CACHE_LONG
 from odoo import Command, fields, http
@@ -48,9 +48,7 @@ class TestMessageController(HttpCaseWithUserDemo):
     @mute_logger("odoo.addons.http_routing.models.ir_http", "odoo.http")
     def test_channel_message_attachments(self):
         self.authenticate(None, None)
-        self.opener.cookies[
-            self.guest._cookie_name
-        ] = f"{self.guest.id}{self.guest._cookie_separator}{self.guest.access_token}"
+        self.opener.cookies[self.guest._cookie_name] = self.guest._format_auth_cookie()
         # test message post: token error
         res1 = self.url_open(
             url="/mail/message/post",
@@ -275,9 +273,7 @@ class TestMessageController(HttpCaseWithUserDemo):
     @mute_logger("odoo.addons.http_routing.models.ir_http", "odoo.http")
     def test_mail_partner_from_email_authenticated(self):
         self.authenticate(None, None)
-        self.opener.cookies[
-            self.guest._cookie_name
-        ] = f"{self.guest.id}{self.guest._cookie_separator}{self.guest.access_token}"
+        self.opener.cookies[self.guest._cookie_name] = self.guest._format_auth_cookie()
         res1 = self.url_open(
             url="/mail/partner/from_email",
             data=json.dumps(

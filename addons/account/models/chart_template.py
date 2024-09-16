@@ -10,14 +10,12 @@ from copy import deepcopy
 import logging
 import re
 
-from psycopg2.extras import Json
-
-from odoo import Command, _, models, api
+from odoo import Command, api, models
 from odoo.addons.base.models.ir_model import MODULE_UNINSTALL_FLAG
 from odoo.exceptions import AccessError, UserError
 from odoo.modules import get_resource_from_path
 from odoo.tools import file_open, get_lang, groupby, SQL
-from odoo.tools.translate import code_translations, TranslationImporter
+from odoo.tools.translate import _, code_translations, TranslationImporter
 
 _logger = logging.getLogger(__name__)
 
@@ -436,6 +434,9 @@ class AccountChartTemplate(models.AbstractModel):
         if not company.country_id:
             vals['country_id'] = fiscal_country.id
 
+        # Ensure that we write on 'anglo_saxon_accounting' when changing to a CoA that relies on the default of `False`.
+        vals.setdefault('anglo_saxon_accounting', False)
+
         # This write method is important because it's overridden and has additional triggers
         # e.g it activates the currency
         company.write(vals)
@@ -645,6 +646,20 @@ class AccountChartTemplate(models.AbstractModel):
             company.account_purchase_tax_id = self.env['account.tax'].search([
                 *self.env['account.tax']._check_company_domain(company),
                 ('type_tax_use', 'in', ('purchase', 'all'))], limit=1).id
+        # Set default taxes on products (only on products having already a tax set in another company, as some flows require no tax at all (e.g TIPS in PoS))
+        # We need to browse the product in sudo to check for the taxes_id and supplier_taxes_id fields regardless of the companies record rules
+        # that would, otherwise, just look empty all the time for the current user/company
+        sudoed_products = self.env['product.template'].sudo().search(self.env['product.template']._check_company_domain(company))
+
+        if company.account_sale_tax_id:
+            sudoed_products_sale = sudoed_products.filtered(
+                lambda p: p.taxes_id and not p.taxes_id.filtered_domain(p.taxes_id._check_company_domain(company)))
+            sudoed_products_sale._force_default_sale_tax(company)
+        if company.account_purchase_tax_id:
+            sudoed_products_purchase = sudoed_products.filtered(
+                lambda p: p.supplier_taxes_id and not p.supplier_taxes_id.filtered_domain(p.taxes_id._check_company_domain(company)))
+            sudoed_products_purchase._force_default_purchase_tax(company)
+
         # Display caba fields if there are caba taxes
         if not company.parent_id and self.env['account.tax'].search_count([('tax_exigibility', '=', 'on_payment')], limit=1):
             company.tax_exigibility = True
@@ -928,7 +943,7 @@ class AccountChartTemplate(models.AbstractModel):
         }
         # add the prefix to the "children_tax_ids" value for group-type taxes
         for tax_data in data['account.tax'].values():
-            if tax_data.get('amount_type') == 'group':
+            if tax_data.get('amount_type') == 'group' and 'children_tax_ids' in tax_data:
                 children_taxes = tax_data['children_tax_ids'].split(',')
                 for idx, child_tax in enumerate(children_taxes):
                     children_taxes[idx] = f"{chart_template_code}_{child_tax}"
@@ -1004,12 +1019,6 @@ class AccountChartTemplate(models.AbstractModel):
                 'type': 'bank',
                 'show_on_dashboard': True,
                 'sequence': 7,
-            },
-            "credit": {
-                'name': _('Credit Card'),
-                'type': 'credit',
-                'show_on_dashboard': True,
-                'sequence': 8,
             },
             "cash": {
                 'name': _('Cash'),
@@ -1104,7 +1113,7 @@ class AccountChartTemplate(models.AbstractModel):
                     format_tag = re.sub(r'\s+', ' ', tag.strip())
                     mapped_tag = tags.get(format_tag)
                     if not mapped_tag:
-                        raise UserError(_('Error while loading the localization. You should probably update your localization app first.'))
+                        raise UserError(self.env._('Error while loading the localization. You should probably update your localization app first.'))
                     res.append(mapped_tag)
             return res
         return mapping_getter

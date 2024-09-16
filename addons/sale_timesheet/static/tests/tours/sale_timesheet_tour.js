@@ -18,14 +18,10 @@ registry.category("web_tour.tours").add('sale_timesheet_tour', {
 {
     trigger: 'div[name="product_uom_qty"] input',
     content: "Add 10 hours as ordered quantity for this product.",
-    run: "edit 10",
-},
-...tourUtils.clickSomewhereElse(),
-{
+    run: "edit 10 && press Tab",
+}, {
     trigger: '.o_field_cell[name=price_subtotal]:contains(2,500.00)',
-},
-tourUtils.checkSOLDescriptionContains("Service Product (Prepaid Hours)", ""),
-{
+}, {
     trigger: "button[name=action_confirm]:enabled",
     content: 'Click on Confirm button to create a sale order with this quotation.',
     run: "click",
@@ -268,23 +264,13 @@ tourUtils.checkSOLDescriptionContains("Service Product (Prepaid Hours)", ""),
     content: "Open embedded actions dropdown",
     run: "click",
 }, {
-    trigger: ".o-dropdown-item div span:contains('Project Updates')",
-    content: "Put Project Updates in the embedded actions",
+    trigger: ".o-dropdown-item div span:contains('Dashboard')",
+    content: "Put Dashboard in the embedded actions",
     run: "click",
 }, {
-    trigger: ".o_embedded_actions button span:contains('Project Updates')",
-    content: "Open Project Updates",
+    trigger: ".o_embedded_actions button span:contains('Dashboard')",
+    content: "Open Dashboard",
     run: "click",
-}, {
-    trigger: ".o_rightpanel_section[name='sales'] .o_rightpanel_title:contains('Sales')",
-    content: 'Check the user sees Sales section',
-}, {
-    trigger: ".o_rightpanel_section[name='sales'] .o_rightpanel_data:contains('Prepaid Hours')",
-    content: 'Check the user sees a line in the Sales section',
-    // timer: 300,
-}, {
-    trigger: ".o_rightpanel_section .o-form-buttonbox .o_stat_text:contains('Sales Orders')",
-    content: 'Check the user sees Sales Orders Stat Button',
 }, {
     trigger: ".o_rightpanel_section[name='profitability'] .o_rightpanel_title:contains('Profitability')",
     content: 'Check the user sees Profitability section',
@@ -292,10 +278,21 @@ tourUtils.checkSOLDescriptionContains("Service Product (Prepaid Hours)", ""),
     trigger: ".o_rightpanel_section[name='profitability'] .o_rightpanel_data > .o_rightpanel_subsection:eq(0) > table > thead > tr > th:eq(0):contains('Revenues')",
     content: 'Check the user sees Profitability subsection row',
 }, {
+    trigger: "button.fa-caret-right",
+    content: 'Check that the dropdown button is present',
+    run: "click",
+}, {
+    trigger: "th:contains('Sales Order Items')",
+    content: 'Check that the sale items section is present',
+}, {
+    trigger: "button.fa-caret-down",
+    content: 'Check that the button has changed',
+    run: "click",
+}, {
     trigger: ".o_rightpanel_section[name='profitability'] .o_rightpanel_data > .o_rightpanel_subsection:eq(1) > table > thead > tr > th:eq(0):contains('Costs')",
     content: 'Check the user sees Profitability subsection row',
 }, {
-    trigger: ".o_rightpanel_section[name='profitability'] .o_rightpanel_data > .o_rightpanel_subsection:eq(2) > table > thead > tr > th:eq(0):contains('Margin')",
+    trigger: ".o_rightpanel_section[name='profitability'] .o_rightpanel_data > .o_rightpanel_subsection:eq(2) > table > thead > tr > th:eq(0):contains('Total')",
     content: 'Check the user sees Profitability subsection row',
 }, {
     trigger: ".o_rightpanel_section[name='milestones'] .o_rightpanel_title:contains('Milestones')",
@@ -325,12 +322,6 @@ tourUtils.checkSOLDescriptionContains("Service Product (Prepaid Hours)", ""),
     trigger: "div.o_field_widget[name=name] input",
     content: "Give a name to Project Update",
     run: "edit New update",
-}, {
-    trigger: ".o_field_widget[name=description] h3:contains('Sales')",
-    content: "Sales title must be in description in description",
-    }, {
-    trigger: ".o_field_widget[name=description] td:contains('Prepaid Hours')",
-    content: "Prepaid Hours title must be in description",
 }, {
     trigger: ".o_field_widget[name=description] h3:contains('Profitability')",
     content: "Profitability title must be in description",

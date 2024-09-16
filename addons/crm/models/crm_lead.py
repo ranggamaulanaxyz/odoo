@@ -1484,7 +1484,7 @@ class Lead(models.Model):
                     subject = _("From %(source_name)s: %(source_subject)s", source_name=opportunity.name, source_subject=message.subject)
                 else:
                     subject = _("From %(source_name)s", source_name=opportunity.name)
-                message.write({
+                message.sudo().write({
                     'res_id': self.id,
                     'subject': subject,
                 })
@@ -2276,7 +2276,7 @@ class Lead(models.Model):
     def _rebuild_pls_frequency_table(self):
         # Clear the frequencies table (in sql to speed up the cron)
         try:
-            self.check_access_rights('unlink')
+            self.browse().check_access('unlink')
         except AccessError:
             raise UserError(_("You don't have the access needed to run this cron."))
         else:

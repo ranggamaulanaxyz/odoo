@@ -47,17 +47,10 @@ export class QWebPlugin extends Plugin {
                 this.normalize(payload.node);
                 break;
             case "CLEAN":
-                // TODO @phoenix: evaluate if this should be cleanforsave instead
-                for (const node of payload.root.querySelectorAll(
-                    "[data-oe-t-group], [data-oe-t-inline], [data-oe-t-selectable], [data-oe-t-group-active]"
-                )) {
-                    node.removeAttribute("data-oe-t-group-active");
-                    node.removeAttribute("data-oe-t-group");
-                    node.removeAttribute("data-oe-t-inline");
-                    node.removeAttribute("data-oe-t-selectable");
-                }
+                this.clearDataAttributes(payload.root);
                 break;
             case "CLEAN_FOR_SAVE":
+                this.clearDataAttributes(payload.root);
                 for (const element of payload.root.querySelectorAll(
                     "[t-esc], [t-raw], [t-out], [t-field]"
                 )) {
@@ -67,12 +60,15 @@ export class QWebPlugin extends Plugin {
         }
     }
 
-    onSelectionChange(selection) {
-        const documentSelection = this.document.getSelection();
+    /**
+     * @param { SelectionData } selectionData
+     */
+    onSelectionChange(selectionData) {
+        const selection = selectionData.documentSelection;
         const qwebNode =
-            documentSelection &&
-            documentSelection.anchorNode &&
-            closestElement(documentSelection.anchorNode, "[t-field],[t-esc],[t-out]");
+            selection &&
+            selection.anchorNode &&
+            closestElement(selection.anchorNode, "[t-field],[t-esc],[t-out]");
         if (qwebNode && this.editable.contains(qwebNode)) {
             // select the whole qweb node
             this.shared.setSelection(selection);
@@ -203,5 +199,16 @@ export class QWebPlugin extends Plugin {
         this.selectedNode = node;
         this.picker.close();
         this.selectNode(node);
+    }
+
+    clearDataAttributes(root) {
+        for (const node of root.querySelectorAll(
+            "[data-oe-t-group], [data-oe-t-inline], [data-oe-t-selectable], [data-oe-t-group-active]"
+        )) {
+            node.removeAttribute("data-oe-t-group-active");
+            node.removeAttribute("data-oe-t-group");
+            node.removeAttribute("data-oe-t-inline");
+            node.removeAttribute("data-oe-t-selectable");
+        }
     }
 }

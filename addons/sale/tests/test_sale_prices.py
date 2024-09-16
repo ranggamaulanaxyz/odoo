@@ -47,7 +47,6 @@ class TestSalePrices(SaleCommon):
         )
         product_price = self.product.lst_price
         product_dozen_price = product_price * 12
-        discount = 1 - self.discount/100
 
         self.empty_order.order_line = [
             Command.create({
@@ -87,6 +86,9 @@ class TestSalePrices(SaleCommon):
             discounted_lines.mapped('price_unit'),
             [product_price, product_price, product_dozen_price, product_dozen_price])
         self.assertEqual(discounted_lines.mapped('discount'), [self.discount]*len(discounted_lines))
+
+        discounted_lines[0].product_uom_qty = 3.0
+        self.assertFalse(discounted_lines[0].discount)
 
     def test_pricelist_dates(self):
         """ Verify the order date is correctly provided to the pricelist API"""
@@ -521,6 +523,21 @@ class TestSalePrices(SaleCommon):
             "The SO amount without pricelist should be the same than with an empty pricelist"
         )
 
+    def test_manual_price_prevents_recompute(self):
+        sale_order_line = self.sale_order.order_line[0]
+        # Ensure initial price is set correctly
+        self.assertEqual(sale_order_line.price_unit, 20.0)
+
+        # Update the price manually and then change the quantity
+        with Form(sale_order_line) as line:
+            line.price_unit = 100.0
+            line.product_uom_qty = 10
+
+        self.assertEqual(
+            sale_order_line.price_unit, 100.0,
+            "Price should remain 100.0 after changing the quantity"
+        )
+
     # Taxes tests:
     # We do not rely on accounting common on purpose to avoid
     # all the useless setup not needed here.
@@ -767,7 +784,7 @@ class TestSalePrices(SaleCommon):
             line.product_id = product_tmpl_c.product_variant_id
             line.product_uom_qty = 1.0
         sale_order = order_form.save()
-        self.assertRecordValues(sale_order.order_line, [{'price_unit': 100, 'price_subtotal': 84.34}])
+        self.assertRecordValues(sale_order.order_line, [{'price_unit': 100, 'price_subtotal': 84.91}])
 
         # Test Mapping (excluded,included) to (excluded, excluded)
         order_form = Form(SaleOrder)
@@ -947,6 +964,7 @@ class TestSalePrices(SaleCommon):
         order_line.write({
             'product_uom_qty': 3.0,
             'price_unit': 100.0,
+            'discount': 1.0,
         })
         order.invalidate_recordset(['amount_undiscounted'])
 

@@ -84,7 +84,7 @@ class ProductProduct(models.Model):
     def _load_pos_data_fields(self, config_id):
         return [
             'id', 'display_name', 'lst_price', 'standard_price', 'categ_id', 'pos_categ_ids', 'taxes_id', 'barcode', 'name',
-            'default_code', 'to_weight', 'uom_id', 'description_sale', 'description', 'product_tmpl_id', 'tracking', 'type', 'service_tracking',
+            'default_code', 'to_weight', 'uom_id', 'description_sale', 'description', 'product_tmpl_id', 'tracking', 'type', 'service_tracking', 'is_storable',
             'write_date', 'available_in_pos', 'attribute_line_ids', 'active', 'image_128', 'combo_ids', 'product_template_variant_value_ids',
         ]
 
@@ -195,7 +195,7 @@ class ProductProduct(models.Model):
             'available_quantity': self.with_context({'warehouse_id': w.id}).qty_available,
             'forecasted_quantity': self.with_context({'warehouse_id': w.id}).virtual_available,
             'uom': self.uom_name}
-            for w in self.env['stock.warehouse'].search([])]
+            for w in self.env['stock.warehouse'].search([('company_id', '=', config.company_id.id)])]
 
         if config.picking_type_id.warehouse_id:
             # Sort the warehouse_list, prioritizing config.picking_type_id.warehouse_id
@@ -263,6 +263,11 @@ class ProductTemplateAttributeLine(models.Model):
     def _load_pos_data_fields(self, config_id):
         return ['display_name', 'attribute_id', 'product_template_value_ids']
 
+    @api.model
+    def _load_pos_data_domain(self, data):
+        loaded_product_tmpl_ids = list({p['product_tmpl_id'] for p in data['product.product']['data']})
+        return [('product_tmpl_id', 'in', loaded_product_tmpl_ids)]
+
 
 class ProductTemplateAttributeValue(models.Model):
     _name = 'product.template.attribute.value'
@@ -270,7 +275,12 @@ class ProductTemplateAttributeValue(models.Model):
 
     @api.model
     def _load_pos_data_domain(self, data):
-        return AND([[('ptav_active', '=', True)], [('attribute_id', 'in', [attr['id'] for attr in data['product.attribute']['data']])]])
+        loaded_product_tmpl_ids = list({p['product_tmpl_id'] for p in data['product.product']['data']})
+        return AND([
+            [('ptav_active', '=', True)],
+            [('attribute_id', 'in', [attr['id'] for attr in data['product.attribute']['data']])],
+            [('product_tmpl_id', 'in', loaded_product_tmpl_ids)]
+        ])
 
     @api.model
     def _load_pos_data_fields(self, config_id):

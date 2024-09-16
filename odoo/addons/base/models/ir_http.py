@@ -32,6 +32,7 @@ from odoo.exceptions import AccessDenied
 from odoo.http import request, Response, ROUTING_KEYS
 from odoo.modules.registry import Registry
 from odoo.service import security
+from odoo.tools.json import json_default
 from odoo.tools.misc import get_lang, submap
 from odoo.tools.translate import code_translations
 
@@ -239,6 +240,10 @@ class IrHttp(models.AbstractModel):
         return request._geoip_resolve()
 
     @classmethod
+    def _sanitize_cookies(cls, cookies):
+        pass
+
+    @classmethod
     def _pre_dispatch(cls, rule, args):
         ICP = request.env['ir.config_parameter'].with_user(SUPERUSER_ID)
 
@@ -272,8 +277,7 @@ class IrHttp(models.AbstractModel):
 
             try:
                 # explicitly crash now, instead of crashing later
-                args[key].check_access_rights('read')
-                args[key].check_access_rule('read')
+                args[key].check_access('read')
             except (odoo.exceptions.AccessError, odoo.exceptions.MissingError) as e:
                 # custom behavior in case a record is not accessible / has been removed
                 if handle_error := rule.endpoint.routing.get('handle_params_access_error'):
@@ -380,7 +384,7 @@ class IrHttp(models.AbstractModel):
             'lang': lang,
             'multi_lang': len(self.env['res.lang'].sudo().get_installed()) > 1,
         }
-        return hashlib.sha1(json.dumps(translation_cache, sort_keys=True).encode()).hexdigest()
+        return hashlib.sha1(json.dumps(translation_cache, sort_keys=True, default=json_default).encode()).hexdigest()
 
     @classmethod
     def _is_allowed_cookie(cls, cookie_type):

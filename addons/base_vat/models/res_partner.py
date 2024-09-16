@@ -9,11 +9,11 @@ from stdnum import luhn
 
 import logging
 
-from odoo import api, models, fields, _
-from odoo.tools import zeep
+from odoo import api, models, fields
+from odoo.tools import _, zeep, LazyTranslate
 from odoo.exceptions import ValidationError
 
-
+_lt = LazyTranslate(__name__)
 _logger = logging.getLogger(__name__)
 
 _eu_country_vat = {
@@ -24,32 +24,32 @@ _eu_country_vat_inverse = {v: k for k, v in _eu_country_vat.items()}
 
 _ref_vat = {
     'al': 'ALJ91402501L',
-    'ar': _('AR200-5536168-2 or 20055361682'),
+    'ar': _lt('AR200-5536168-2 or 20055361682'),
     'at': 'ATU12345675',
     'au': '83 914 571 673',
     'be': 'BE0477472701',
     'bg': 'BG1234567892',
-    'br': _('either 11 digits for CPF or 14 digits for CNPJ'),
-    'cr': _('3101012009'),
-    'ch': _('CHE-123.456.788 TVA or CHE-123.456.788 MWST or CHE-123.456.788 IVA'),  # Swiss by Yannick Vaucher @ Camptocamp
+    'br': _lt('either 11 digits for CPF or 14 digits for CNPJ'),
+    'cr': _lt('3101012009'),
+    'ch': _lt('CHE-123.456.788 TVA or CHE-123.456.788 MWST or CHE-123.456.788 IVA'),  # Swiss by Yannick Vaucher @ Camptocamp
     'cl': 'CL76086428-5',
-    'co': _('CO213123432-1 or CO213.123.432-1'),
+    'co': _lt('CO213123432-1 or CO213.123.432-1'),
     'cy': 'CY10259033P',
     'cz': 'CZ12345679',
-    'de': _('DE123456788 or 12/345/67890'),
+    'de': _lt('DE123456788 or 12/345/67890'),
     'dk': 'DK12345674',
-    'do': _('DO1-01-85004-3 or 101850043'),
-    'ec': _('1792060346001 or 1792060346'),
+    'do': _lt('DO1-01-85004-3 or 101850043'),
+    'ec': _lt('1792060346001 or 1792060346'),
     'ee': 'EE123456780',
     'es': 'ESA12345674',
     'fi': 'FI12345671',
     'fr': 'FR23334175221',
-    'gb': _('GB123456782 or XI123456782'),
+    'gb': _lt('GB123456782 or XI123456782'),
     'gr': 'EL123456783',
-    'hu': _('HU12345676 or 12345678-1-11 or 8071592153'),
+    'hu': _lt('HU12345676 or 12345678-1-11 or 8071592153'),
     'hr': 'HR01234567896',  # Croatia, contributed by Milan Tribuson
     'ie': 'IE1234567FA',
-    'il': _('XXXXXXXXX [9 digits] and it should respect the Luhn algorithm checksum'),
+    'il': _lt('XXXXXXXXX [9 digits] and it should respect the Luhn algorithm checksum'),
     'in': "12AAAAA1234AAZA",
     'is': 'IS062199',
     'it': 'IT12345670017',
@@ -58,11 +58,11 @@ _ref_vat = {
     'lv': 'LV41234567891',
     'mc': 'FR53000004605',
     'mt': 'MT12345634',
-    'mx': _('MXGODE561231GR8 or GODE561231GR8'),
+    'mx': _lt('MXGODE561231GR8 or GODE561231GR8'),
     'nl': 'NL123456782B90',
     'no': 'NO123456785',
-    'nz': _('49-098-576 or 49098576'),
-    'pe': _('10XXXXXXXXY or 20XXXXXXXXY or 15XXXXXXXXY or 16XXXXXXXXY or 17XXXXXXXXY'),
+    'nz': _lt('49-098-576 or 49098576'),
+    'pe': _lt('10XXXXXXXXY or 20XXXXXXXXY or 15XXXXXXXXY or 16XXXXXXXXY or 17XXXXXXXXY'),
     'ph': '123-456-789-123',
     'pl': 'PL1234567883',
     'pt': 'PT123456789',
@@ -73,10 +73,11 @@ _ref_vat = {
     'si': 'SI12345679',
     'sk': 'SK2022749619',
     'sm': 'SM24165',
-    'tr': _('TR1234567890 (VERGINO) or TR17291716060 (TCKIMLIKNO)'),  # Levent Karakas @ Eska Yazilim A.S.
+    'tr': _lt('TR1234567890 (VERGINO) or TR17291716060 (TCKIMLIKNO)'),  # Levent Karakas @ Eska Yazilim A.S.
+    'uy': _lt("'219999830019' (should be 12 digits)"),
     've': 'V-12345678-1, V123456781, V-12.345.678-1',
     'xi': 'XI123456782',
-    'sa': _('310175397400003 [Fifteen digits, first and last digits should be "3"]')
+    'sa': _lt('310175397400003 [Fifteen digits, first and last digits should be "3"]')
 }
 
 _region_specific_vat_codes = {
@@ -384,22 +385,9 @@ class ResPartner(models.Model):
         checksum = extra + sum((8-i) * int(x) for i, x in enumerate(vat[:7]))
         return 'WABCDEFGHIJKLMNOPQRSTUV'[checksum % 23]
 
+    # TODO: remove in master
     def check_vat_ie(self, vat):
-        """ Temporary Ireland VAT validation to support the new format
-        introduced in January 2013 in Ireland, until upstream is fixed.
-        TODO: remove when fixed upstream"""
-        if len(vat) not in (8, 9) or not vat[2:7].isdigit():
-            return False
-        if len(vat) == 8:
-            # Normalize pre-2013 numbers: final space or 'W' not significant
-            vat += ' '
-        if vat[:7].isdigit():
-            return vat[7] == self._ie_check_char(vat[:7] + vat[8])
-        elif vat[1] in (string.ascii_uppercase + '+*'):
-            # Deprecated format
-            # See http://www.revenue.ie/en/online/third-party-reporting/reporting-payment-details/faqs.html#section3
-            return vat[7] == self._ie_check_char(vat[2:7] + vat[0] + vat[8])
-        return False
+        return stdnum.util.get_cc_module('ie', 'vat').is_valid(vat)
 
     # Mexican VAT verification, contributed by Vauxoo
     # and Panos Christeas <p_christ@hol.gr>
@@ -727,10 +715,16 @@ class ResPartner(models.Model):
             if values.get('vat'):
                 country_id = values.get('country_id')
                 values['vat'] = self._fix_vat_number(values['vat'], country_id)
-        return super(ResPartner, self).create(vals_list)
+        res = super().create(vals_list)
+        if self.env.context.get('import_file'):
+            res.env.remove_to_compute(self._fields['vies_valid'], res)
+        return res
 
     def write(self, values):
         if values.get('vat') and len(self.mapped('country_id')) == 1:
             country_id = values.get('country_id', self.country_id.id)
             values['vat'] = self._fix_vat_number(values['vat'], country_id)
-        return super(ResPartner, self).write(values)
+        res = super().write(values)
+        if self.env.context.get('import_file'):
+            self.env.remove_to_compute(self._fields['vies_valid'], self)
+        return res

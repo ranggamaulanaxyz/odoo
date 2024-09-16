@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 from datetime import datetime, timedelta
@@ -14,7 +13,10 @@ from odoo.tools import float_compare, format_datetime, float_is_zero, float_roun
 class MrpWorkorder(models.Model):
     _name = 'mrp.workorder'
     _description = 'Work Order'
-    _order = 'leave_id, date_start, id'
+    _order = 'sequence, leave_id, date_start, id'
+
+    def _default_sequence(self):
+        return self.operation_id.sequence or 100
 
     def _read_group_workcenter_id(self, workcenters, domain):
         workcenter_ids = self.env.context.get('default_workcenter_id')
@@ -26,6 +28,7 @@ class MrpWorkorder(models.Model):
 
     name = fields.Char(
         'Work Order', required=True)
+    sequence = fields.Integer("Sequence", default=_default_sequence)
     barcode = fields.Char(compute='_compute_barcode', store=True)
     workcenter_id = fields.Many2one(
         'mrp.workcenter', 'Work Center', required=True,
@@ -298,10 +301,13 @@ class MrpWorkorder(models.Model):
             rounding = order.production_id.product_uom_id.rounding
             order.is_produced = float_compare(order.qty_produced, order.production_id.product_qty, precision_rounding=rounding) >= 0
 
-    @api.depends('operation_id', 'workcenter_id', 'qty_production')
+    @api.depends('operation_id', 'workcenter_id', 'qty_producing', 'qty_production')
     def _compute_duration_expected(self):
         for workorder in self:
-            if workorder.state not in ['done', 'cancel']:
+            # Recompute the duration expected if the qty_producing has been changed:
+            # compare with the origin record if it happens during an onchange
+            if workorder.state not in ['done', 'cancel'] and (workorder.qty_producing != workorder.qty_production
+                or (workorder._origin != workorder and workorder._origin.qty_producing and workorder.qty_producing != workorder._origin.qty_producing)):
                 workorder.duration_expected = workorder._get_duration_expected()
 
     @api.depends('time_ids.duration', 'qty_produced')
@@ -471,6 +477,12 @@ class MrpWorkorder(models.Model):
     @api.model_create_multi
     def create(self, values):
         res = super().create(values)
+
+        # resequence the workorders if necessary
+        for mo in res.mapped('production_id'):
+            if len(set(mo.workorder_ids.mapped('sequence'))) != len(mo.workorder_ids):
+                mo._resequence_workorders()
+
         # Auto-confirm manually added workorders.
         # We need to go through `_action_confirm` for all workorders of the current productions to
         # make sure the links between them are correct.
@@ -553,13 +565,15 @@ class MrpWorkorder(models.Model):
             total += (duration / 60.0) * wo.workcenter_id.costs_hour
         return total
 
-    def button_start(self):
+    def button_start(self, raise_on_invalid_state=False):
         if any(wo.working_state == 'blocked' for wo in self):
             raise UserError(_('Please unblock the work center to start the work order.'))
         for wo in self:
             if any(not time.date_end for time in wo.time_ids.filtered(lambda t: t.user_id.id == self.env.user.id)):
                 continue
             if wo.state in ('done', 'cancel'):
+                if raise_on_invalid_state:
+                    continue
                 raise UserError(_('You cannot start a work order that is already done or cancelled'))
 
             if wo.product_tracking == 'serial' and wo.qty_producing == 0:
@@ -602,7 +616,6 @@ class MrpWorkorder(models.Model):
                 if wo.date_finished and wo.date_finished < date_start:
                     vals['date_finished'] = date_start
                 wo.with_context(bypass_duration_calculation=True).write(vals)
-        return True
 
     def button_finish(self):
         date_finished = fields.Datetime.now()
@@ -648,7 +661,6 @@ class MrpWorkorder(models.Model):
 
     def button_pending(self):
         self.end_previous()
-        return True
 
     def button_unblock(self):
         for order in self:
@@ -724,8 +736,12 @@ class MrpWorkorder(models.Model):
             duration_expected_working = (self.duration_expected - self.workcenter_id.time_start - self.workcenter_id.time_stop) * self.workcenter_id.time_efficiency / 100.0
             if duration_expected_working < 0:
                 duration_expected_working = 0
-            return self.workcenter_id._get_expected_duration(self.product_id) + duration_expected_working * ratio * 100.0 / self.workcenter_id.time_efficiency
-        qty_production = self.production_id.product_uom_id._compute_quantity(self.qty_production, self.production_id.product_id.uom_id)
+            if self.qty_producing not in (0, self.qty_production, self._origin.qty_producing):
+                qty_ratio = self.qty_producing / (self._origin.qty_producing or self.qty_production)
+            else:
+                qty_ratio = 1
+            return self.workcenter_id._get_expected_duration(self.product_id) + duration_expected_working * qty_ratio * ratio * 100.0 / self.workcenter_id.time_efficiency
+        qty_production = self.production_id.product_uom_id._compute_quantity(self.qty_producing or self.qty_production, self.production_id.product_id.uom_id)
         capacity = self.workcenter_id._get_capacity(self.product_id)
         cycle_number = float_round(qty_production / capacity, precision_digits=0, rounding_method='UP')
         if alternative_workcenter:

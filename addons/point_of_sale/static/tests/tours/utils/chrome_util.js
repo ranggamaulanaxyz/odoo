@@ -28,13 +28,6 @@ export function isCashMoveButtonHidden() {
         },
     ];
 }
-export function newOrder() {
-    return {
-        content: "create new order",
-        trigger: ".pos-topheader button i.fa-plus-circle",
-        run: "click",
-    };
-}
 export function endTour() {
     return {
         content: "Last tour step that avoids error mentioned in commit 443c209",
@@ -50,6 +43,22 @@ export function clickPlanButton() {
     return {
         content: "go back to the floor screen",
         trigger: ".pos-leftheader .back-button:not(:has(.btn-primary))",
+        run: "click",
+    };
+}
+export function startPoS() {
+    return [
+        {
+            content: "Start PoS",
+            trigger: ".screen-login .btn.open-register-btn",
+            run: "click",
+        },
+    ];
+}
+export function clickBtn(name) {
+    return {
+        content: `Click on ${name}`,
+        trigger: `body button:contains(${name})`,
         run: "click",
     };
 }

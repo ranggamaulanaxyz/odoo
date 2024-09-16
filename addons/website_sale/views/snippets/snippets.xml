@@ -131,6 +131,14 @@
                          data-no-preview="true"
                          data-reload="/"
             />
+            <we-checkbox
+                id="collapsible_sidebar"
+                string="Collapsible sidebar"
+                data-customize-website-views="website_sale.products_categories_list_collapsible, website_sale.products_attributes_collapsible"
+                data-dependencies="categories_opt, attributes_opt"
+                data-no-preview="true"
+                data-reload="/"
+            />
             <we-row string="Top Bar" class="o_we_full_row">
                 <we-button string="Sort by"
                            data-customize-website-views="website_sale.sort"
@@ -269,6 +277,13 @@
                     Buy Now
                 </we-button>
             </we-row>
+            <we-checkbox
+                string="More Information"
+                data-name="o_wsale_accordion_item"
+                data-customize-website-views="website_sale.accordion_more_information"
+                data-no-preview="true"
+                data-reload="/"
+            />
             <!-- Image config -->
             <we-button-group string="Images Width" data-no-preview="true" data-reload="/">
                 <we-button data-set-image-width="none" data-img="/website_sale/static/src/img/snippet_options/image-width-none.svg" title="None"/>
@@ -279,6 +294,28 @@
             <we-select string="Layout" data-name="o_wsale_image_layout" data-no-preview="true" data-reload="/">
                 <we-button data-set-image-layout="carousel">Carousel</we-button>
                 <we-button data-set-image-layout="grid">Grid</we-button>
+            </we-select>
+            <we-select
+                string="Images Ratio"
+                data-name="o_wsale_image_ratio"
+                class="o_we_sublevel_1"
+                data-reload="/"
+            >
+                <we-button data-customize-website-views="">
+                    Default (1x1)
+                </we-button>
+                <we-button data-customize-website-views="website_sale.products_carousel_4x3">
+                    Landscape (4/3)
+                </we-button>
+                <we-button data-customize-website-views="website_sale.products_carousel_4x5">
+                    Portrait (4/5)
+                </we-button>
+                <we-button data-customize-website-views="website_sale.products_carousel_16x9">
+                    Wide (16/9)
+                </we-button>
+                <we-button data-customize-website-views="website_sale.products_carousel_21x9">
+                    Wider (21/9)
+                </we-button>
             </we-select>
             <we-select string="Image Zoom" class="o_we_sublevel_1" data-name="o_wsale_zoom_mode" data-no-preview="true" data-reload="/">
                 <we-button data-name="o_wsale_zoom_hover" data-customize-website-views="website_sale.product_picture_magnify_hover">Magnifier on hover</we-button>

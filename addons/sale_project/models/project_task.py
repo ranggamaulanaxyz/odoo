@@ -4,19 +4,30 @@ from odoo import api, fields, models, _
 from odoo.exceptions import ValidationError, AccessError
 from odoo.osv import expression
 from odoo.tools import SQL
+from odoo.tools.misc import unquote
 
 
 class ProjectTask(models.Model):
     _inherit = "project.task"
+
+    def _domain_sale_line_id(self):
+        domain = expression.AND([
+            self.env['sale.order.line']._sellable_lines_domain(),
+            self.env['sale.order.line']._domain_sale_line_service(),
+            [
+                '|',
+                ('order_partner_id.commercial_partner_id.id', 'parent_of', unquote('partner_id if partner_id else []')),
+                ('order_partner_id', '=?', unquote('partner_id')),
+            ],
+        ])
+        return str(domain)
 
     sale_order_id = fields.Many2one('sale.order', 'Sales Order', compute='_compute_sale_order_id', store=True, help="Sales order to which the task is linked.", group_expand="_group_expand_sales_order")
     sale_line_id = fields.Many2one(
         'sale.order.line', 'Sales Order Item',
         copy=True, tracking=True, index='btree_not_null', recursive=True,
         compute='_compute_sale_line', store=True, readonly=False,
-        domain=lambda self: self.env['sale.order.line']._domain_sale_line_service_str(
-            "['|', ('order_partner_id.commercial_partner_id.id', 'parent_of', partner_id if partner_id else []), ('order_partner_id', '=?', partner_id)]"
-        ),
+        domain=_domain_sale_line_id,
         help="Sales Order Item to which the time spent on this task will be added in order to be invoiced to your customer.\n"
              "By default the sales order item set on the project will be selected. In the absence of one, the last prepaid sales order item that has time remaining will be used.\n"
              "Remove the sales order item in order to make this task non billable. You can also change or remove the sales order item of each timesheet entry individually.")
@@ -50,17 +61,22 @@ class ProjectTask(models.Model):
             if not task.allow_billable:
                 task.sale_order_id = False
                 continue
-            sale_order_id = task.sale_order_id or self.env["sale.order"]
-            if task.sale_line_id:
-                sale_order_id = task.sale_line_id.sudo().order_id
-            elif task.project_id.sale_order_id:
-                sale_order_id = task.project_id.sale_order_id
-                consistent_partners = [sale_order_id.partner_id.commercial_partner_id, sale_order_id.partner_shipping_id.commercial_partner_id]
-                if task.partner_id and task.partner_id not in consistent_partners:
-                    sale_order_id = self.env["sale.order"]
-            if sale_order_id and not task.partner_id:
-                task.partner_id = sale_order_id.partner_id
-            task.sale_order_id = sale_order_id
+            sale_order = (
+                task.sale_line_id.order_id
+                or task.project_id.sale_order_id
+                or task.sale_order_id
+            )
+            if sale_order and not task.partner_id:
+                task.partner_id = sale_order.partner_id
+            consistent_partners = (
+                sale_order.partner_id
+                | sale_order.partner_invoice_id
+                | sale_order.partner_shipping_id
+            ).commercial_partner_id
+            if task.partner_id.commercial_partner_id in consistent_partners:
+                task.sale_order_id = sale_order
+            else:
+                task.sale_order_id = False
 
     @api.depends('allow_billable')
     def _compute_partner_id(self):
@@ -71,7 +87,11 @@ class ProjectTask(models.Model):
     def _inverse_partner_id(self):
         for task in self:
             # check that sale_line_id/sale_order_id and customer are consistent
-            consistent_partners = [task.sale_order_id.partner_id.commercial_partner_id, task.sale_order_id.partner_shipping_id.commercial_partner_id]
+            consistent_partners = (
+                task.sale_order_id.partner_id
+                | task.sale_order_id.partner_invoice_id
+                | task.sale_order_id.partner_shipping_id
+            ).commercial_partner_id
             if task.sale_order_id and task.partner_id.commercial_partner_id not in consistent_partners:
                 task.sale_order_id = task.sale_line_id = False
 
@@ -128,7 +148,7 @@ class ProjectTask(models.Model):
             "type": "ir.actions.act_window",
             "res_model": "sale.order",
             "name": _("Sales Order"),
-            "views": [[False, "tree"], [False, "kanban"], [False, "form"]],
+            "views": [[False, "list"], [False, "kanban"], [False, "form"]],
             "context": {"create": False, "show_sale": True},
             "domain": [["id", "in", so_ids]],
         }

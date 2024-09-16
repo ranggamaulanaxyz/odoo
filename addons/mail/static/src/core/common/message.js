@@ -15,8 +15,8 @@ import {
     Component,
     markup,
     onMounted,
+    onPatched,
     onWillDestroy,
-    onWillStart,
     onWillUpdateProps,
     toRaw,
     useChildSubEnv,
@@ -37,7 +37,7 @@ import { url } from "@web/core/utils/urls";
 import { messageActionsRegistry, useMessageActions } from "./message_actions";
 import { cookie } from "@web/core/browser/cookie";
 import { rpc } from "@web/core/network/rpc";
-import { useLongTouchPress } from "@mail/utils/common/hooks";
+import { escape } from "@web/core/utils/strings";
 import { MessageActionMenuMobile } from "./message_action_menu_mobile";
 import { discussComponentRegistry } from "./discuss_component_registry";
 
@@ -87,6 +87,7 @@ export class Message extends Component {
         "message",
         "messageEdition?",
         "messageToReplyTo?",
+        "previousMessage?",
         "squashed?",
         "thread?",
         "messageSearch?",
@@ -98,6 +99,7 @@ export class Message extends Component {
 
     setup() {
         super.setup();
+        this.escape = escape;
         this.popover = usePopover(this.constructor.components.Popover, { position: "top" });
         this.state = useState({
             isEditing: false,
@@ -107,16 +109,15 @@ export class Message extends Component {
             emailHeaderOpen: false,
             showTranslation: false,
             actionMenuMobileOpen: false,
-            longTouching: false,
         });
         /** @type {ShadowRoot} */
         this.shadowRoot;
         this.root = useRef("root");
-        onWillStart(() => this.props.registerMessageRef?.(this.props.message, this.root));
         onWillUpdateProps((nextProps) => {
             this.props.registerMessageRef?.(this.props.message, null);
-            this.props.registerMessageRef?.(nextProps.message, this.root);
         });
+        onMounted(() => this.props.registerMessageRef?.(this.props.message, this.root));
+        onPatched(() => this.props.registerMessageRef?.(this.props.message, this.root));
         onWillDestroy(() => this.props.registerMessageRef?.(this.props.message, null));
         this.hasTouch = hasTouch;
         this.messageBody = useRef("body");
@@ -127,7 +128,6 @@ export class Message extends Component {
         this.ui = useState(useService("ui"));
         this.openReactionMenu = this.openReactionMenu.bind(this);
         this.optionsDropdown = useDropdownState();
-        useLongTouchPress("root", () => this.openMobileActions());
         useChildSubEnv({
             message: this.props.message,
             alignedRight: this.isAlignedRight,
@@ -195,7 +195,7 @@ export class Message extends Component {
     get attClass() {
         return {
             [this.props.className]: true,
-            "o-card p-2 mt-2 bg-view": this.props.asCard,
+            "o-card p-2 mt-2": this.props.asCard,
             "pt-1": !this.props.asCard,
             "o-selfAuthored": this.message.isSelfAuthored && !this.env.messageCard,
             "o-selected": this.props.messageToReplyTo?.isSelected(
@@ -213,8 +213,8 @@ export class Message extends Component {
                 this.props.thread,
                 this.props.message
             ),
-            "o-longTouching": this.state.longTouching,
             "o-actionMenuMobileOpen": this.state.actionMenuMobileOpen,
+            "o-editing": this.state.isEditing,
         };
     }
 
@@ -306,6 +306,10 @@ export class Message extends Component {
         return isMobileOS();
     }
 
+    get isPersistentMessageFromAnotherThread() {
+        return !this.isOriginThread && !this.message.is_transient && this.message.thread;
+    }
+
     get isOriginThread() {
         if (!this.props.thread) {
             return false;
@@ -376,6 +380,23 @@ export class Message extends Component {
         }
     }
 
+    /**
+     * @param {MouseEvent} ev
+     */
+    async onClickNotificationMessage(ev) {
+        const { oeType, oeId } = ev.target.dataset;
+        if (oeType === "highlight") {
+            await this.env.messageHighlight?.highlightMessage(
+                this.store.Message.insert({
+                    id: Number(oeId),
+                    res_id: this.props.thread.id,
+                    model: this.props.thread.model,
+                }),
+                this.props.thread
+            );
+        }
+    }
+
     /** @param {HTMLElement} bodyEl */
     prepareMessageBody(bodyEl) {}
 
@@ -414,16 +435,6 @@ export class Message extends Component {
                 mail_message_to_resend: message.id,
             },
         });
-    }
-
-    onTouchstart() {
-        clearTimeout(this.longTouchingTimeoutId);
-        this.longTouchingTimeoutId = setTimeout(() => (this.state.longTouching = true), 150);
-    }
-
-    onTouchend() {
-        clearTimeout(this.longTouchingTimeoutId);
-        this.state.longTouching = false;
     }
 
     /** @param {MouseEvent} [ev] */

@@ -3,7 +3,6 @@ import {
     assertSteps,
     click,
     contains,
-    createFile,
     defineMailModels,
     focus,
     hover,
@@ -183,15 +182,15 @@ test("chat window: basic rendering", async () => {
     });
     await click("[title='Open Actions Menu']");
     await contains(".o-mail-ChatWindow-command", { count: 13 });
-    await contains("[title='Search Messages']");
-    await contains("[title='Notification Settings']");
-    await contains("[title='Rename']");
-    await contains("[title='Pinned Messages']");
-    await contains("[title='Show Attachments']");
-    await contains("[title='Add Users']");
-    await contains("[title='Show Member List']");
-    await contains("[title='Show Call Settings']");
-    await contains("[title='Open in Discuss']");
+    await contains(".o-dropdown-item", { text: "Search Messages" });
+    await contains(".o-dropdown-item", { text: "Notification Settings" });
+    await contains(".o-dropdown-item", { text: "Rename Thread" });
+    await contains(".o-dropdown-item", { text: "Pinned Messages" });
+    await contains(".o-dropdown-item", { text: "Attachments" });
+    await contains(".o-dropdown-item", { text: "Invite People" });
+    await contains(".o-dropdown-item", { text: "Members" });
+    await contains(".o-dropdown-item", { text: "Call Settings" });
+    await contains(".o-dropdown-item", { text: "Open in Discuss" });
 });
 
 test.skip("Fold state of chat window is sync among browser tabs", async () => {
@@ -710,6 +709,16 @@ test("chat window should remain folded when new message is received", async () =
 test("chat window: composer state conservation on toggle discuss", async () => {
     const pyEnv = await startServer();
     const channelId = pyEnv["discuss.channel"].create({});
+    const textFile1 = new File(
+        ["hello, world"],
+        "text state conversation on toggle home menu.txt",
+        { type: "text/plain" }
+    );
+    const textFile2 = new File(
+        ["hello, xdu is da best man"],
+        "text2 state conversation on toggle home menu.txt",
+        { type: "text/plain" }
+    );
     await start();
     await click(".o_menu_systray i[aria-label='Messages']");
     await click(".o-mail-NotificationItem");
@@ -719,18 +728,7 @@ test("chat window: composer state conservation on toggle discuss", async () => {
         count: 0,
     });
     // Set attachments of the composer
-    await inputFiles(".o-mail-Composer-coreMain .o_input_file", [
-        await createFile({
-            name: "text state conservation on toggle home menu.txt",
-            content: "hello, world",
-            contentType: "text/plain",
-        }),
-        await createFile({
-            name: "text2 state conservation on toggle home menu.txt",
-            content: "hello, xdu is da best man",
-            contentType: "text/plain",
-        }),
-    ]);
+    await inputFiles(".o-mail-Composer-coreMain .o_input_file", [textFile1, textFile2]);
     await contains(".o-mail-AttachmentCard .fa-check", { count: 2 });
     await openDiscuss();
     await contains(".o-mail-ChatWindow", { count: 0 });
@@ -828,20 +826,20 @@ test("folded chat window should hide member-list and settings buttons", async ()
     await click("button i[aria-label='Messages']");
     await click(".o-mail-NotificationItem");
     await click("[title='Open Actions Menu']");
-    await contains("[title='Show Member List']");
-    await contains("[title='Show Call Settings']");
+    await contains(".o-dropdown-item", { text: "Members" });
+    await contains(".o-dropdown-item", { text: "Call Settings" });
     await click(".o-mail-ChatWindow-header"); // click away to close the more menu
-    await contains("[title='Show Member List']", { count: 0 });
+    await contains(".o-dropdown-item", { text: "Members", count: 0 });
     // Fold chat window
     await click(".o-mail-ChatWindow-command[title='Fold']");
     await contains("[title='Open Actions Menu']", { count: 0 });
-    await contains("[title='Show Member List']", { count: 0 });
-    await contains("[title='Show Call Settings']", { count: 0 });
+    await contains(".o-dropdown-item", { text: "Members", count: 0 });
+    await contains(".o-dropdown-item", { text: "Call Settings", count: 0 });
     // Unfold chat window
     await click(".o-mail-ChatBubble");
     await click("[title='Open Actions Menu']");
-    await contains("[title='Show Member List']");
-    await contains("[title='Show Call Settings']");
+    await contains(".o-dropdown-item", { text: "Members" });
+    await contains(".o-dropdown-item", { text: "Call Settings" });
 });
 
 test("Chat window in mobile are not foldable", async () => {
@@ -886,7 +884,7 @@ test("chat window of channels should not have 'Open in Discuss' (mobile)", async
     await contains(".o-mail-ChatWindow");
     await contains("[title='Open Actions Menu']");
     await click("[title='Open Actions Menu']");
-    await contains("[title='Open in Discuss']", { count: 0 });
+    await contains(".o-dropdown-item", { text: "Open in Discuss", count: 0 });
 });
 
 test("Open chat window of new inviter", async () => {
@@ -999,7 +997,7 @@ test("Notification settings rendering in chatwindow", async () => {
     await click(".o-mail-NotificationItem", { text: "general" });
     await contains(".o-mail-ChatWindow", { count: 1 });
     await click("[title='Open Actions Menu']");
-    await click("[title='Notification Settings']");
+    await click(".o-dropdown-item", { text: "Notification Settings" });
     await contains("button", { text: "All Messages" });
     await contains("button", { text: "Mentions Only", count: 2 }); // the extra is in the Use Default as subtitle
     await contains("button", { text: "Nothing" });

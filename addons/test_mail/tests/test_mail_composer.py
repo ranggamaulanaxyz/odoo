@@ -1218,7 +1218,7 @@ class TestComposerInternals(TestMailComposer):
         self.test_record.message_subscribe(partner_ids=portal_user.partner_id.ids)
 
         # patch check access rights for write access, required to post a message by default
-        with patch.object(MailTestTicket, 'check_access_rights', return_value=True):
+        with patch.object(MailTestTicket, '_check_access', return_value=None):
             with self.assertRaises(AccessError):
                 # ensure portal can not send messages
                 self.env['mail.compose.message'].with_user(portal_user).with_context(
@@ -1234,6 +1234,7 @@ class TestComposerInternals(TestMailComposer):
         self.env['mail.compose.message'].with_context(
             self._get_web_context(self.test_record, add_web=False)
         ).create({
+            'template_name': 'My Template',
             'subject': 'Template Subject',
             'body': '<p>Template Body</p>',
         }).create_mail_template()
@@ -1243,7 +1244,9 @@ class TestComposerInternals(TestMailComposer):
             ('model', '=', self.test_record._name),
             ('subject', '=', 'Template Subject')
         ], limit=1)
-        self.assertEqual(template.name, 'Template Subject')
+
+        self.assertEqual(template.name, 'My Template')
+        self.assertEqual(template.subject, 'Template Subject')
         self.assertEqual(template.body_html, '<p>Template Body</p>', 'email_template incorrect body_html')
 
     @users('erp_manager')
@@ -3142,42 +3145,6 @@ class TestComposerResultsMass(TestMailComposer):
                 },
                 mail_message=record.message_ids[0],  # message copy is kept
             )
-
-    @users('employee')
-    @mute_logger('odoo.models.unlink', 'odoo.addons.mail.models.mail_mail')
-    def test_mail_composer_wtpl_recipients_res_domain(self):
-        """ Test specific use case of res_domain usage, in combination with
-        res_domain_user_id allowing to set the evaluation environment for
-        the domain. """
-        def _search_as_employee_2(recordset, *args, **kwargs):
-            """ Mock to return only one record, simulating a specific ir.rule """
-            if recordset.env.uid == self.user_employee_2.id:
-                return self.test_records[0]
-            return DEFAULT
-
-        composer_form = Form(self.env['mail.compose.message'].with_context(
-            default_composition_mode='mass_mail',
-            default_force_send=True,  # otherwise res_domain = email queue
-            default_model=self.test_records._name,
-            default_res_domain=[('id', 'in', self.test_records.ids)],
-            default_res_domain_user_id=self.user_employee_2.id,
-            default_template_id=self.template.id,
-        ))
-        composer = composer_form.save()
-        self.assertEqual(literal_eval(composer.res_domain), [('id', 'in', self.test_records.ids)])
-        self.assertEqual(composer.res_domain_user_id, self.user_employee_2)
-
-        with self.mock_mail_gateway(mail_unlink_sent=True), \
-            patch.object(MailTestTicket, 'search', autospec=True, side_effect=_search_as_employee_2):
-            composer._action_send_mail()
-
-        # global outgoing
-        self.assertEqual(len(self._new_mails), 1, 'Should have created 1 mail.mail, search done by employee 2')
-        self.assertEqual(len(self._mails), 1, 'Should have sent 1 email, search done by employee 2')
-
-        # template is sent directly using customer field, whatever the author
-        self.assertSentEmail(self.partner_employee_2.email_formatted,
-                             self.test_records[0].customer_id)
 
     @users('employee')
     @mute_logger('odoo.models.unlink', 'odoo.addons.mail.models.mail_mail')

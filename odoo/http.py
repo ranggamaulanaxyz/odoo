@@ -197,7 +197,7 @@ from .exceptions import UserError, AccessError, AccessDenied
 from .modules.module import get_manifest
 from .modules.registry import Registry
 from .service import security, model as service_model
-from .tools import (config, consteq, date_utils, file_path, get_lang,
+from .tools import (config, consteq, file_path, get_lang, json_default,
                     parse_version, profiler, unique, exception_to_unicode)
 from .tools.func import filter_kwargs, lazy_property
 from .tools.misc import submap
@@ -433,22 +433,6 @@ def serialize_exception(exception):
 # File Streaming
 # =========================================================
 
-def send_file(filepath_or_fp, mimetype=None, as_attachment=False, filename=None, mtime=None,
-              add_etags=True, cache_timeout=STATIC_CACHE, conditional=True):
-    warnings.warn('odoo.http.send_file is deprecated, please use odoo.http.Stream instead.', DeprecationWarning, stacklevel=2)
-    return _send_file(
-        filepath_or_fp,
-        request.httprequest.environ,
-        mimetype=mimetype,
-        as_attachment=as_attachment,
-        download_name=filename,
-        last_modified=mtime,
-        etag=add_etags,
-        max_age=cache_timeout,
-        response_class=Response,
-        conditional=conditional
-    )
-
 
 class Stream:
     """
@@ -482,6 +466,8 @@ class Stream:
     public = False
 
     def __init__(self, **kwargs):
+        # Remove class methods from the instances
+        self.from_path = self.from_attachment = self.from_binary_field = None
         self.__dict__.update(kwargs)
 
     @classmethod
@@ -993,9 +979,6 @@ class Session(collections.abc.MutableMapping):
     # MutableMapping implementation with DocDict-like extension
     #
     def __getitem__(self, item):
-        if item == 'geoip':
-            warnings.warn('request.session.geoip have been moved to request.geoip', DeprecationWarning)
-            return request.geoip if request else {}
         return self.__data[item]
 
     def __setitem__(self, item, value):
@@ -1557,6 +1540,13 @@ class Request:
         except (ValueError, KeyError):
             return None
 
+    @lazy_property
+    def cookies(self):
+        cookies = werkzeug.datastructures.MultiDict(self.httprequest.cookies)
+        if self.registry:
+            self.registry['ir.http']._sanitize_cookies(cookies)
+        return werkzeug.datastructures.ImmutableMultiDict(cookies)
+
     # =====================================================
     # Helpers
     # =====================================================
@@ -1710,7 +1700,7 @@ class Request:
         :param collections.abc.Mapping cookies: cookies to set on the client
         :rtype: :class:`~odoo.http.Response`
         """
-        data = json.dumps(data, ensure_ascii=False, default=date_utils.json_default)
+        data = json.dumps(data, ensure_ascii=False, default=json_default)
 
         headers = werkzeug.datastructures.Headers(headers)
         headers['Content-Length'] = len(data)
@@ -1797,7 +1787,7 @@ class Request:
         elif sess.is_dirty:
             root.session_store.save(sess)
 
-        cookie_sid = self.httprequest.cookies.get('session_id')
+        cookie_sid = self.cookies.get('session_id')
         if sess.is_dirty or cookie_sid != sess.sid:
             self.future_response.set_cookie('session_id', sess.sid, max_age=get_session_max_inactivity(self.env), httponly=True)
 

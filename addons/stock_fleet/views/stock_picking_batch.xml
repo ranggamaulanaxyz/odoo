@@ -28,10 +28,10 @@
         <field name="arch" type="xml">
             <xpath expr="//group[@id='batch_delivery_data']" position="after">
                 <group>
-                    <field name="dock_id" groups="stock.group_stock_multi_locations"/>
+                    <field name="dock_id" invisible="picking_type_code == 'outgoing' and not dock_id" readonly="picking_type_code == 'outgoing'" groups="stock.group_stock_multi_locations"/>
                     <field name="vehicle_id" placeholder="Third Party Provider"/>
                     <field name="vehicle_category_id" placeholder="semi-truck"/>
-                    <label for='used_weight_percentage' invisible="not vehicle_category_id or not vehicle_weight_capacity"/>
+                    <label for='used_weight_percentage' string="Weight" invisible="not vehicle_category_id or not vehicle_weight_capacity"/>
                         <div class='d-flex flex-row gap-4' invisible="not vehicle_category_id or not vehicle_weight_capacity">
                             <div class='d-flex flex-row gap-1'>
                                 <field name='estimated_shipping_weight'/>
@@ -40,7 +40,7 @@
                             <field name='used_weight_percentage' widget='progressbar'/>
                         </div>
 
-                    <label for='used_volume_percentage' invisible="not vehicle_category_id or not vehicle_volume_capacity"/>
+                    <label for='used_volume_percentage' string="Volume" invisible="not vehicle_category_id or not vehicle_volume_capacity"/>
                         <div class='d-flex flex-row gap-4' invisible="not vehicle_category_id or not vehicle_volume_capacity">
                             <div class='d-flex flex-row gap-1'>
                                 <field name='estimated_shipping_volume'/>
@@ -54,7 +54,7 @@
     </record>
 
     <record id="stock_picking_batch_tree" model="ir.ui.view">
-        <field name="name">stock.picking.batch.tree.inherit.stock.fleet</field>
+        <field name="name">stock.picking.batch.list.inherit.stock.fleet</field>
         <field name="model">stock.picking.batch</field>
         <field name="inherit_id" ref="stock_picking_batch.stock_picking_batch_tree"/>
         <field name="arch" type="xml">
@@ -66,8 +66,8 @@
                     <field name="vehicle_category_id" optional="hide"/>
                     <field name="vehicle_id" optional="hide"/>
                     <field name="dock_id" optional="hide" groups="stock.group_stock_multi_locations"/>
-                    <field name="used_volume_percentage" string="Volume %" optional="hide"/>
-                    <field name="used_weight_percentage" string="Weight %" optional="hide"/>
+                    <field name="used_volume_percentage" optional="hide"/>
+                    <field name="used_weight_percentage" optional="hide"/>
                 </field>
             </data>
         </field>
@@ -109,19 +109,15 @@
         <field name="inherit_id" ref="stock_picking_batch.stock_picking_batch_kanban"/>
         <field name="arch" type="xml">
             <data>
-                <xpath expr="//templates/t/div/div[2]" position="replace">
-                    <div class="o_kanban_record_bottom">
-                        <div class="col">
-                            <div><field name="dock_id"/></div>
-                            <div class="col">
-                                <field name="state" widget="state_selection" class="ms-auto float-start" style="padding-top: 4px; margin-right: 6px"/>
-                                <field name="scheduled_date" readonly="state in ['cancel', 'done']"/>
-                            </div>
+                <xpath expr="//footer" position="replace">
+                    <footer class="fs-6 pt-0">
+                        <field name="dock_id"/>
+                        <div>
+                            <field name="state" widget="state_selection" class="float-start pt-1 me-1"/>
+                            <field name="scheduled_date" readonly="state in ['cancel', 'done']"/>
                         </div>
-                        <div class="oe_kanban_bottom_right">
-                            <field name="user_id" widget="many2one_avatar_user" readonly="state not in ['draft', 'in_progress']"/>
-                        </div>
-                    </div>
+                        <field name="user_id" widget="many2one_avatar_user" readonly="state not in ['draft', 'in_progress']" class="ms-auto"/>
+                    </footer>
                 </xpath>
             </data>
         </field>

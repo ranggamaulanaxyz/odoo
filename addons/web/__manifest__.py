@@ -177,8 +177,6 @@ This module provides the core of the Odoo Web Client.
 
             'web/static/src/libs/fontawesome/css/font-awesome.css',
             'web/static/lib/odoo_ui_icons/*',
-            'web/static/lib/select2/select2.css',
-            'web/static/lib/select2-bootstrap-css/select2-bootstrap.css',
             'web/static/src/webclient/navbar/navbar.scss',
             'web/static/src/scss/animation.scss',
             'web/static/src/scss/base_frontend.scss',
@@ -222,13 +220,9 @@ This module provides the core of the Odoo Web Client.
             'web/static/lib/bootstrap/js/dist/scrollspy.js',
             'web/static/lib/bootstrap/js/dist/tab.js',
             'web/static/lib/bootstrap/js/dist/toast.js',
-            'web/static/lib/select2/select2.js',
             'web/static/src/libs/bootstrap.js',
             'web/static/src/legacy/js/libs/jquery.js',
             'web/static/src/legacy/js/core/class.js',
-            'web/static/src/legacy/js/core/dom.js',
-            'web/static/src/legacy/js/core/mixins.js',
-            'web/static/src/legacy/js/core/service_mixins.js',
 
             'web/static/src/env.js',
             'web/static/src/core/utils/transitions.scss',  # included early because used by other files
@@ -527,6 +521,7 @@ This module provides the core of the Odoo Web Client.
             ('remove', 'web/static/tests/legacy/views/calendar/helpers.js'),
             'web/static/tests/legacy/webclient/**/*.js',
             ('remove', 'web/static/tests/legacy/webclient/**/helpers.js'),
+            'web/static/tests/legacy/public/**/*.js',
 
             # Legacy
             'web/static/tests/legacy/legacy_tests/**/*.js',

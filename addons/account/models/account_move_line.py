@@ -45,6 +45,14 @@ class AccountMoveLine(models.Model):
         index=True,
         copy=False,
     )
+
+    journal_group_id = fields.Many2one(
+        string='Ledger',
+        comodel_name='account.journal.group',
+        store=False,
+        search='_search_journal_group_id',
+    )
+
     company_id = fields.Many2one(
         related='move_id.company_id', store=True, readonly=True, precompute=True,
         index=True,
@@ -128,7 +136,6 @@ class AccountMoveLine(models.Model):
     )
     amount_currency = fields.Monetary(
         string='Amount in Currency',
-        aggregator=None,
         compute='_compute_amount_currency', inverse='_inverse_amount_currency', store=True, readonly=False, precompute=True,
         help="The amount expressed in an optional other currency if it is a multi-currency entry.")
     currency_id = fields.Many2one(
@@ -455,9 +462,9 @@ class AccountMoveLine(models.Model):
     @api.model
     def get_views(self, views, options=None):
         res = super().get_views(views, options)
-        if res['views'].get('list') and self.env['ir.ui.view'].sudo().browse(res['views']['list']['id']).name == "account.move.line.payment.tree":
+        if res['views'].get('list') and self.env['ir.ui.view'].sudo().browse(res['views']['list']['id']).name == "account.move.line.payment.list":
             if toolbar := res['views']['list'].get('toolbar'):
-                # We dont want any additionnal action in the "account.move.line.payment.tree" view toolbar
+                # We dont want any additionnal action in the "account.move.line.payment.list" view toolbar
                 toolbar['action'] = []
         return res
 
@@ -986,7 +993,7 @@ class AccountMoveLine(models.Model):
                     'move_id': line.move_id.id,
                     'display_type': line.display_type,
                 }): {
-                    'name': _('%(tax_name)s (Discount)', tax_name=tax['name']) if line.display_type == 'epd' else tax['name'],
+                    'name': self.env._('%(tax_name)s (Discount)', tax_name=tax['name']) if line.display_type == 'epd' else tax['name'],
                     'balance': sign * tax['amount'] / rate,
                     'amount_currency': sign * tax['amount'],
                     'tax_base_amount': sign * tax['base'] / rate * (-1 if line.tax_tag_invert else 1),
@@ -1205,6 +1212,15 @@ class AccountMoveLine(models.Model):
             'target': 'new',
             'type': 'ir.actions.act_window',
         }
+
+    # -------------------------------------------------------------------------
+    # SEARCH METHODS
+    # -------------------------------------------------------------------------
+
+    def _search_journal_group_id(self, operator, value):
+        field = 'name' if 'like' in operator else 'id'
+        journal_groups = self.env['account.journal.group'].search([(field, operator, value)])
+        return [('journal_id', 'not in', journal_groups.excluded_journal_ids.ids)]
 
     # -------------------------------------------------------------------------
     # INVERSE METHODS
@@ -1818,7 +1834,7 @@ class AccountMoveLine(models.Model):
             return {}
 
         # Override in order to not read the complete move line table and use the index instead
-        query_account = self.env['account.account']._search([('company_ids', '=', self.env.companies.ids)])
+        query_account = self.env['account.account']._search([('company_ids', 'in', self.env.companies.ids), ('code', '!=', False)])
         account_code_alias = self.env['account.account']._field_to_sql('account_account', 'code', query_account)
 
         query_line = self._search(domain, limit=1)
@@ -3388,6 +3404,18 @@ class AccountMoveLine(models.Model):
             'unece_uom_code': self.product_id.product_tmpl_id.uom_id._get_unece_code(),
         }
         return res
+
+    @api.model
+    def read_group(self, domain, fields, groupby, offset=0, limit=None, orderby=False, lazy=True):
+        # Hide total amount_currency from read_group when view is not grouped by currency_id. Avoids mix of currencies
+        res = super().read_group(domain, fields, groupby, offset=offset, limit=limit, orderby=orderby, lazy=lazy)
+        if 'currency_id' not in groupby and 'amount_currency:sum' in fields:
+            for group_line in res:
+                group_line['amount_currency'] = False
+        return res
+
+    def _get_journal_items_full_name(self, name, display_name):
+        return name if not display_name or display_name in name else f"{display_name} {name}"
 
     # -------------------------------------------------------------------------
     # PUBLIC ACTIONS

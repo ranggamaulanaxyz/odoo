@@ -2,10 +2,11 @@
 
 import json
 
-from odoo import api, fields, models, _, _lt
+from odoo import api, fields, models
 from odoo.osv import expression
 from odoo.tools import SQL
 from odoo.exceptions import ValidationError, UserError
+from odoo.tools.translate import _
 
 
 class ProjectProject(models.Model):
@@ -220,7 +221,7 @@ class ProjectProject(models.Model):
             'domain': [('project_id', '!=', False)],
             'res_model': 'account.analytic.line',
             'view_id': False,
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'help': _("""
                 <p class="o_view_nocontent_smiling_face">
                     Record timesheets
@@ -283,7 +284,7 @@ class ProjectProject(models.Model):
         panel_data = super().get_panel_data()
         return {
             **panel_data,
-            'analytic_account_id': self.analytic_account_id.id,
+            'account_id': self.account_id.id,
         }
 
     def _get_sale_order_items_query(self, domain_per_model=None):
@@ -331,16 +332,53 @@ class ProjectProject(models.Model):
         ]))
         return query
 
+    def _get_items_id_per_section_id(self):
+        return {
+            'materials': {'data': [], 'displayLoadMore': False},
+            'billable_fixed': {'data': [], 'displayLoadMore': False},
+            'billable_milestones': {'data': [], 'displayLoadMore': False},
+            'billable_time': {'data': [], 'displayLoadMore': False},
+            'billable_manual': {'data': [], 'displayLoadMore': False},
+        }
+
+    def _get_domain_from_section_id(self, section_id):
+        section_domains = {
+            'materials': [
+                ('product_id.type', '!=', 'service')
+            ],
+            'billable_fixed': [
+                ('product_id.type', '=', 'service'),
+                ('product_id.invoice_policy', '=', 'order')
+            ],
+            'billable_milestones': [
+                ('product_id.type', '=', 'service'),
+                ('product_id.invoice_policy', '=', 'delivery'),
+                ('product_id.service_type', '=', 'milestones'),
+            ],
+            'billable_time': [
+                ('product_id.type', '=', 'service'),
+                ('product_id.invoice_policy', '=', 'delivery'),
+                ('product_id.service_type', '=', 'timesheet'),
+            ],
+            'billable_manual': [
+                ('product_id.type', '=', 'service'),
+                ('product_id.invoice_policy', '=', 'delivery'),
+                ('product_id.service_type', '=', 'manual'),
+            ],
+        }
+
+        return self._get_sale_items_domain(section_domains.get(section_id, []))
+
     def _get_profitability_labels(self):
         return {
             **super()._get_profitability_labels(),
-            'billable_fixed': _lt('Timesheets (Fixed Price)'),
-            'billable_time': _lt('Timesheets (Billed on Timesheets)'),
-            'billable_milestones': _lt('Timesheets (Billed on Milestones)'),
-            'billable_manual': _lt('Timesheets (Billed Manually)'),
-            'non_billable': _lt('Timesheets (Non-Billable)'),
-            'timesheet_revenues': _lt('Timesheets revenues'),
-            'other_costs': _lt('Materials'),
+            'billable_fixed': self.env._('Timesheets (Fixed Price)'),
+            'billable_time': self.env._('Timesheets (Billed on Timesheets)'),
+            'billable_milestones': self.env._('Timesheets (Billed on Milestones)'),
+            'billable_manual': self.env._('Timesheets (Billed Manually)'),
+            'non_billable': self.env._('Timesheets (Non-Billable)'),
+            'timesheet_revenues': self.env._('Timesheets revenues'),
+            'other_costs': self.env._('Materials'),
         }
 
     def _get_profitability_sequence_per_invoice_type(self):

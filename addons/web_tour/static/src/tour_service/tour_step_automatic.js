@@ -6,7 +6,6 @@ import { setupEventActions } from "@web/../lib/hoot-dom/helpers/events";
 import { callWithUnloadCheck } from "./tour_utils";
 import { TourHelpers } from "./tour_helpers";
 import { TourStep } from "./tour_step";
-import { pick } from "@web/core/utils/objects";
 
 export class TourStepAutomatic extends TourStep {
     triggerFound = false;
@@ -16,6 +15,7 @@ export class TourStepAutomatic extends TourStep {
     constructor(data, tour, index) {
         super(data, tour);
         this.index = index;
+        this.tourConfig = tourState.getCurrentConfig();
     }
 
     get canContinue() {
@@ -32,7 +32,7 @@ export class TourStepAutomatic extends TourStep {
      * @returns {{trigger, action}[]}
      */
     compileToMacro(pointer) {
-        const debugMode = tourState.get(this.tour.name, "debug");
+        const debugMode = this.tourConfig.debug;
 
         return [
             {
@@ -47,7 +47,11 @@ export class TourStepAutomatic extends TourStep {
             },
             {
                 action: async () => {
-                    console.log(this.describeMe);
+                    console.groupCollapsed(this.describeMe);
+                    if (debugMode !== false) {
+                        console.log(this.stringify);
+                    }
+                    console.groupEnd();
                     this._timeout = browser.setTimeout(
                         () => this.throwError(),
                         (this.timeout || 10000) + this.tour.stepDelay
@@ -74,7 +78,7 @@ export class TourStepAutomatic extends TourStep {
                 },
                 action: async (stepEl) => {
                     clearTimeout(this._timeout);
-                    tourState.set(this.tour.name, "currentIndex", this.index + 1);
+                    tourState.setCurrentIndex(this.index + 1);
                     if (this.tour.showPointerDuration > 0 && stepEl !== true) {
                         // Useful in watch mode.
                         pointer.pointTo(stepEl, this);
@@ -152,26 +156,7 @@ export class TourStepAutomatic extends TourStep {
         const end = Math.min(this.index + offset, this.tour.steps.length - 1);
         const result = [];
         for (let i = start; i <= end; i++) {
-            const stepString =
-                JSON.stringify(
-                    pick(
-                        this.tour.steps[i],
-                        "isActive",
-                        "content",
-                        "trigger",
-                        "run",
-                        "tooltipPosition",
-                        "timeout"
-                    ),
-                    (_key, value) => {
-                        if (typeof value === "function") {
-                            return "[function]";
-                        } else {
-                            return value;
-                        }
-                    },
-                    2
-                ) + ",";
+            const stepString = new TourStep(this.tour.steps[i]).stringify;
             const text = [stepString];
             if (i === this.index) {
                 const line = "-".repeat(10);
@@ -205,19 +190,15 @@ export class TourStepAutomatic extends TourStep {
      * @param {string} [error]
      */
     throwError(error = "") {
-        tourState.set(this.tour.name, "stepState", "errored");
-        const debugMode = tourState.get(this.tour.name, "debug");
+        tourState.setCurrentTourOnError();
+        const tourConfig = tourState.getCurrentConfig();
         // console.error notifies the test runner that the tour failed.
-        const errors = [
-            `FAILED: ${this.describeMe}.`,
-            this.describeWhyIFailed,
-            error,
-        ]
+        const errors = [`FAILED: ${this.describeMe}.`, this.describeWhyIFailed, error];
         console.error(errors.filter(Boolean).join("\n"));
         // The logged text shows the relative position of the failed step.
         // Useful for finding the failed step.
         console.dir(this.describeWhyIFailedDetailed);
-        if (debugMode !== false) {
+        if (tourConfig.debug !== false) {
             // eslint-disable-next-line no-debugger
             debugger;
         }

@@ -99,7 +99,7 @@ export const accountTaxHelpers = {
         }
 
         function add_extra_base(other_tax, sign) {
-            const tax_amount = taxes_data[tax.id].tax_amount_factorized;
+            const tax_amount = taxes_data[tax.id].tax_amount;
             if (!("tax_amount" in taxes_data[other_tax.id])) {
                 taxes_data[other_tax.id].extra_base_for_tax += sign * tax_amount;
             }
@@ -107,26 +107,28 @@ export const accountTaxHelpers = {
         }
 
         if (tax.price_include) {
-            // Case: no special mode
-            if (!special_mode) {
+            // Case: special mode is False or 'total_included'
+            if (special_mode === null || special_mode === "total_included") {
+                if (!tax.include_base_amount) {
+                    for (const other_tax of get_tax_after()) {
+                        if (other_tax.price_include) {
+                            add_extra_base(other_tax, -1)
+                        }
+                    }
+                }
                 for (const other_tax of get_tax_before()) {
                     add_extra_base(other_tax, -1);
                 }
 
-                // Case: special_mode = 'total_excluded'
-            } else if (special_mode === "total_excluded") {
+            // Case: special_mode = 'total_excluded'
+            } else {
                 for (const other_tax of get_tax_after()) {
-                    if (!taxes_data[other_tax.id].price_include) {
+                    if (!other_tax.price_include || tax.include_base_amount) {
                         add_extra_base(other_tax, 1);
                     }
                 }
-
-                // Case: special_mode = 'total_included'
-            } else if (special_mode === "total_included") {
-                for (const other_tax of get_tax_before()) {
-                    add_extra_base(other_tax, -1);
-                }
             }
+
         } else if (!tax.price_include) {
             // Case: special_mode is False or 'total_excluded'
             if (special_mode === null || special_mode === "total_excluded") {
@@ -136,15 +138,15 @@ export const accountTaxHelpers = {
                     }
                 }
 
-                // Case: special_mode = 'total_included'
-            } else if (special_mode === "total_included") {
+            // Case: special_mode = 'total_included'
+            } else {
                 if (!tax.include_base_amount) {
-                    for (const other_tax of get_tax_before()) {
-                        add_extra_base(other_tax, -1);
-                    }
                     for (const other_tax of get_tax_after()) {
                         add_extra_base(other_tax, -1);
                     }
+                }
+                for (const other_tax of get_tax_before()) {
+                    add_extra_base(other_tax, -1);
                 }
             }
         }
@@ -169,7 +171,7 @@ export const accountTaxHelpers = {
         if (tax.amount_type === "percent") {
             const total_percentage =
                 batch.reduce(
-                    (sum, batch_tax) => sum + batch_tax.total_tax_factor * batch_tax.amount,
+                    (sum, batch_tax) => sum + batch_tax.amount,
                     0
                 ) / 100.0;
             const to_price_excluded_factor =
@@ -195,7 +197,7 @@ export const accountTaxHelpers = {
         if (tax.amount_type === "division") {
             const total_percentage =
                 batch.reduce(
-                    (sum, batch_tax) => sum + batch_tax.total_tax_factor * batch_tax.amount,
+                    (sum, batch_tax) => sum + batch_tax.amount,
                     0
                 ) / 100.0;
             const incl_base_multiplicator = total_percentage === 1.0 ? 1.0 : 1 - total_percentage;
@@ -223,10 +225,9 @@ export const accountTaxHelpers = {
 
         function add_tax_amount_to_results(tax, tax_amount) {
             taxes_data[tax.id].tax_amount = tax_amount;
-            taxes_data[tax.id].tax_amount_factorized = tax_amount * tax.total_tax_factor;
             if (rounding_method === "round_per_line") {
-                taxes_data[tax.id].tax_amount_factorized = roundPrecision(
-                    taxes_data[tax.id].tax_amount_factorized,
+                taxes_data[tax.id].tax_amount = roundPrecision(
+                    taxes_data[tax.id].tax_amount,
                     precision_rounding
                 );
             }
@@ -326,7 +327,7 @@ export const accountTaxHelpers = {
             }
 
             const total_tax_amount = taxes_data[tax.id].batch.reduce(
-                (sum, other_tax) => sum + taxes_data[other_tax.id].tax_amount_factorized,
+                (sum, other_tax) => sum + taxes_data[other_tax.id].tax_amount,
                 0
             );
             let base = raw_base + taxes_data[tax.id].extra_base_for_base;
@@ -347,7 +348,7 @@ export const accountTaxHelpers = {
         if (taxes_data_list.length > 0) {
             total_excluded = taxes_data_list[0].base;
             const tax_amount = taxes_data_list.reduce(
-                (sum, tax_data) => sum + tax_data.tax_amount_factorized,
+                (sum, tax_data) => sum + tax_data.tax_amount,
                 0
             );
             total_included = total_excluded + tax_amount;
@@ -362,8 +363,7 @@ export const accountTaxHelpers = {
                 tax: tax_data.tax,
                 group: batching_results.group_per_tax[tax_data.tax.id],
                 batch: batching_results.batch_per_tax[tax_data.tax.id],
-                tax_amount_unfactorized: tax_data.tax_amount,
-                tax_amount: tax_data.tax_amount_factorized,
+                tax_amount: tax_data.tax_amount,
                 base_amount: tax_data.base
             })),
             tax_data_index: taxes_data_list.reduce(function(results, tax_data, i){

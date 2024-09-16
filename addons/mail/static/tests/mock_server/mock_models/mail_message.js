@@ -77,8 +77,6 @@ export class MailMessage extends models.ServerModel {
 
         /** @type {import("mock_models").IrAttachment} */
         const IrAttachment = this.env["ir.attachment"];
-        /** @type {import("mock_models").MailGuest} */
-        const MailGuest = this.env["mail.guest"];
         /** @type {import("mock_models").MailFollowers} */
         const MailFollowers = this.env["mail.followers"];
         /** @type {import("mock_models").MailLinkPreview} */
@@ -146,35 +144,8 @@ export class MailMessage extends models.ServerModel {
                     makeKwArgs({ as_thread: true })
                 );
             }
-            const reactionsPerContent = {};
-            for (const reactionId of message.reaction_ids ?? []) {
-                const [reaction] = MailMessageReaction.browse(reactionId);
-                if (reactionsPerContent[reaction.content]) {
-                    reactionsPerContent[reaction.content].push(reaction);
-                } else {
-                    reactionsPerContent[reaction.content] = [reaction];
-                }
-            }
-            const reactionGroups = [];
-            for (const content in reactionsPerContent) {
-                const reactions = reactionsPerContent[content];
-                const guests = MailGuest.browse(reactions.map((reaction) => reaction.guest_id));
-                const partners = ResPartner.browse(
-                    reactions.map((reaction) => reaction.partner_id)
-                );
-                store.add(guests, makeKwArgs({ fields: ["name", "write_date"] }));
-                store.add(partners, makeKwArgs({ fields: ["name", "write_date"] }));
-                reactionGroups.push({
-                    content: content,
-                    count: reactionsPerContent[content].length,
-                    message: mailDataHelpers.Store.one_id(this.browse(message.id)),
-                    personas: mailDataHelpers.Store.many_ids(guests).concat(
-                        mailDataHelpers.Store.many_ids(partners)
-                    ),
-                });
-            }
             Object.assign(data, {
-                attachments: mailDataHelpers.Store.many(
+                attachment_ids: mailDataHelpers.Store.many(
                     IrAttachment.browse(message.attachment_ids).sort((a1, a2) => a1.id - a2.id)
                 ),
                 default_subject:
@@ -196,7 +167,9 @@ export class MailMessage extends models.ServerModel {
                     MailMessage.browse(message.parent_id),
                     makeKwArgs({ format_reply: false })
                 ),
-                reactions: reactionGroups,
+                reactions: mailDataHelpers.Store.many(
+                    MailMessageReaction.browse(message.reaction_ids)
+                ),
                 recipients: mailDataHelpers.Store.many(
                     ResPartner.browse(message.partner_ids),
                     makeKwArgs({ fields: ["name"] })
@@ -371,22 +344,25 @@ export class MailMessage extends models.ServerModel {
     /**
      * @param {number} id
      * @param {string} content
+     * @param {number} partner_id
+     * @param {number} guest_id
      * @param {string} action
+     * @param {import("@mail/../tests/mock_server/mail_mock_server").mailDataHelpers.Store} store
      */
-    _message_reaction(id, content, action) {
-        ({ id, content, action } = getKwArgs(arguments, "id", "content", "action"));
+    _message_reaction(id, content, partner_id, guest_id, action, store) {
+        ({ id, content, partner_id, guest_id, action, store } = getKwArgs(
+            arguments,
+            "id",
+            "content",
+            "partner_id",
+            "guest_id",
+            "action",
+            "store"
+        ));
 
-        /** @type {import("mock_models").BusBus} */
-        const BusBus = this.env["bus.bus"];
-        /** @type {import("mock_models").MailGuest} */
-        const MailGuest = this.env["mail.guest"];
         /** @type {import("mock_models").MailMessageReaction} */
         const MailMessageReaction = this.env["mail.message.reaction"];
-        /** @type {import("mock_models").ResPartner} */
-        const ResPartner = this.env["res.partner"];
 
-        const partner_id = this.env.user?.partner_id ?? false;
-        const guest_id = this.env.cookie.get("dgid") ?? false;
         const [reaction] = MailMessageReaction.search_read([
             ["content", "=", content],
             ["message_id", "=", id],
@@ -404,36 +380,38 @@ export class MailMessage extends models.ServerModel {
         if (action === "remove" && reaction) {
             MailMessageReaction.unlink(reaction.id);
         }
+        this._reaction_group_to_store(id, store, content);
+        this._bus_send_reaction_group(id, content);
+    }
+
+    _bus_send_reaction_group(id, content) {
+        /** @type {import("mock_models").BusBus} */
+        const BusBus = this.env["bus.bus"];
+        const store = new mailDataHelpers.Store();
+        this._reaction_group_to_store(id, store, content);
+        BusBus._sendone(
+            this._bus_notification_target(id),
+            "mail.record/insert",
+            store.get_result()
+        );
+    }
+
+    _reaction_group_to_store(id, store, content) {
+        /** @type {import("mock_models").MailMessageReaction} */
+        const MailMessageReaction = this.env["mail.message.reaction"];
+
         const reactions = MailMessageReaction.search([
             ["message_id", "=", id],
             ["content", "=", content],
         ]);
-        const guest = MailGuest._get_guest_from_context();
-        const personas = guest
-            ? MailGuest.browse(guest.id)
-            : ResPartner.browse(serverState.partnerId);
-        BusBus._sendone(
-            this._bus_notification_target(id),
-            "mail.record/insert",
-            new mailDataHelpers.Store(this.browse(id), {
-                reactions: [
-                    [
-                        reactions.length > 0 ? "ADD" : "DELETE",
-                        {
-                            content,
-                            count: reactions.length,
-                            message: mailDataHelpers.Store.one_id(this.browse(id)),
-                            personas: mailDataHelpers.Store.many_ids(
-                                personas,
-                                action === "add" ? "ADD" : "DELETE"
-                            ),
-                        },
-                    ],
-                ],
-            })
-                .add(personas, makeKwArgs({ fields: ["name", "write_date"] }))
-                .get_result()
+        let reaction_group = mailDataHelpers.Store.many(
+            MailMessageReaction.browse(reactions),
+            "ADD"
         );
+        if (reactions.length === 0) {
+            reaction_group = [["DELETE", { message: this.browse(id), content: content }]];
+        }
+        store.add(this.browse(id), { reactions: reaction_group });
     }
 
     /**

@@ -4,6 +4,7 @@ import publicWidget from '@web/legacy/js/public/public_widget';
 import { rpc } from "@web/core/network/rpc";
 
 const CUSTOM_BUTTON_EXTRA_WIDTH = 10;
+let cachedCurrency;
 
 publicWidget.registry.DonationSnippet = publicWidget.Widget.extend({
     selector: '.s_donation',
@@ -81,7 +82,11 @@ publicWidget.registry.DonationSnippet = publicWidget.Widget.extend({
      * @private
      */
     _displayCurrencies() {
-        return rpc('/website/get_current_currency').then((result) => {
+        return this._getCachedCurrency().then((result) => {
+            // No need to recreate the elements if the currency is already set.
+            if (this.currency === result) {
+                return;
+            }
             this.currency = result;
             this.$('.s_donation_currency').remove();
             const $prefilledButtons = this.$('.s_donation_btn, .s_range_bubble');
@@ -97,6 +102,17 @@ publicWidget.registry.DonationSnippet = publicWidget.Widget.extend({
                 }
             });
         });
+    },
+    /**
+     * @private
+     */
+    _getCachedCurrency() {
+        return cachedCurrency
+            ? Promise.resolve(cachedCurrency)
+            : rpc("/website/get_current_currency").then((result) => {
+                cachedCurrency = result;
+                return result;
+            });
     },
 
     //--------------------------------------------------------------------------
@@ -132,10 +148,10 @@ publicWidget.registry.DonationSnippet = publicWidget.Widget.extend({
             } else if ($buttons.length) {
                 amount = parseFloat(this.$('#s_donation_amount_input').val());
                 let errorMessage = '';
-                const minAmount = this.el.dataset.minimumAmount;
+                const minAmount = parseFloat(this.el.dataset.minimumAmount);
                 if (!amount) {
                     errorMessage = _t("Please select or enter an amount");
-                } else if (amount < parseFloat(minAmount)) {
+                } else if (amount < minAmount) {
                     errorMessage = _t(
                         "The minimum donation amount is %(amount)s",
                         {

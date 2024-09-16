@@ -139,7 +139,7 @@ class LivechatController(http.Controller):
             chatbot_script=chatbot_script,
             user_id=user_id,
             country_id=country_id,
-            lang=request.httprequest.cookies.get('frontend_lang')
+            lang=request.cookies.get('frontend_lang')
         )
         if not channel_vals:
             return False
@@ -195,14 +195,14 @@ class LivechatController(http.Controller):
 
     def _post_feedback_message(self, channel, rating, reason):
         reason = Markup("<br>" + re.sub(r'\r\n|\r|\n', "<br>", reason) if reason else "")
-        body = Markup('''
-            <div class="o_mail_notification o_hide_author">
-                %(rating)s: <img class="o_livechat_emoji_rating" src="%(rating_url)s" alt="rating"/>%(reason)s
-            </div>
-        ''') % {
-            'rating': _('Rating'),
-            'rating_url': rating.rating_image_url,
-            'reason': reason,
+        body = Markup(
+            """<div class="o_mail_notification o_hide_author">"""
+            """%(rating)s: <img class="o_livechat_emoji_rating" src="%(rating_url)s" alt="rating"/>%(reason)s"""
+            """</div>"""
+        ) % {
+            "rating": _("Rating"),
+            "rating_url": rating.rating_image_url,
+            "reason": reason,
         }
         # sudo: discuss.channel - not necessary for posting, but necessary to update related rating
         channel.sudo().message_post(

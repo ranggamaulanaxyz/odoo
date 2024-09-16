@@ -86,6 +86,8 @@ class PurchaseOrderLine(models.Model):
             "CHECK(display_type IS NULL OR (product_id IS NULL AND price_unit = 0 AND product_uom_qty = 0 AND product_uom IS NULL AND date_planned is NULL))",
             "Forbidden values on non-accountable purchase order line"),
     ]
+    product_template_attribute_value_ids = fields.Many2many(related='product_id.product_template_attribute_value_ids', readonly=True)
+    product_no_variant_attribute_value_ids = fields.Many2many('product.template.attribute.value', string='Product attribute values that do not create variants', ondelete='restrict')
 
     @api.depends('product_qty', 'price_unit', 'taxes_id', 'discount')
     def _compute_amount(self):
@@ -336,6 +338,7 @@ class PurchaseOrderLine(models.Model):
 
             # If not seller, use the standard price. It needs a proper currency conversion.
             if not seller:
+                line.discount = 0
                 unavailable_seller = line.product_id.seller_ids.filtered(
                     lambda s: s.partner_id == line.order_id.partner_id)
                 if not unavailable_seller and line.price_unit and line.product_uom == line._origin.product_uom:
@@ -441,14 +444,13 @@ class PurchaseOrderLine(models.Model):
             price_unit = price_unit * (1 - self.discount / 100)
         if self.taxes_id:
             qty = self.product_qty or 1
-            price_unit_prec = self.env['decimal.precision'].precision_get('Product Price')
             price_unit = self.taxes_id.compute_all(
                 price_unit,
                 currency=self.order_id.currency_id,
                 quantity=qty,
                 rounding_method='round_globally',
             )['total_void']
-            price_unit = float_round(price_unit / qty, precision_digits=price_unit_prec)
+            price_unit = price_unit / qty
         if self.product_uom.id != self.product_id.uom_id.id:
             price_unit *= self.product_uom.factor / self.product_id.uom_id.factor
         return price_unit
@@ -564,7 +566,7 @@ class PurchaseOrderLine(models.Model):
 
         res = {
             'display_type': self.display_type or 'product',
-            'name': self.name,
+            'name': self.env['account.move.line']._get_journal_items_full_name(self.name, self.product_id.display_name),
             'product_id': self.product_id.id,
             'product_uom_id': self.product_uom.id,
             'quantity': self.qty_to_invoice,

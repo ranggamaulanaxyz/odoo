@@ -3,8 +3,6 @@
 import json
 import math
 import pytz
-import random
-import time
 from ast import literal_eval
 from datetime import date, timedelta
 from collections import defaultdict
@@ -14,7 +12,7 @@ from odoo.addons.stock.models.stock_move import PROCUREMENT_PRIORITIES
 from odoo.addons.web.controllers.utils import clean_action
 from odoo.exceptions import UserError, ValidationError
 from odoo.osv import expression
-from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT, format_datetime, format_date, format_list, groupby, SQL
+from odoo.tools import format_datetime, format_date, format_list, groupby, SQL
 from odoo.tools.float_utils import float_compare, float_is_zero
 
 
@@ -33,14 +31,14 @@ class PickingType(models.Model):
         check_company=True, copy=False)
     sequence_code = fields.Char('Sequence Prefix', required=True)
     default_location_src_id = fields.Many2one(
-        'stock.location', 'Default Source Location', compute='_compute_default_location_src_id',
+        'stock.location', 'Source Location', compute='_compute_default_location_src_id',
         check_company=True, store=True, readonly=False, precompute=True, required=True,
         help="This is the default source location when you create a picking manually with this operation type. It is possible however to change it or that the routes put another location.")
     default_location_dest_id = fields.Many2one(
-        'stock.location', 'Default Destination Location', compute='_compute_default_location_dest_id',
+        'stock.location', 'Destination Location', compute='_compute_default_location_dest_id',
         check_company=True, store=True, readonly=False, precompute=True, required=True,
         help="This is the default destination location when you create a picking manually with this operation type. It is possible however to change it or that the routes put another location.")
-    default_location_return_id = fields.Many2one('stock.location', 'Default returns location', check_company=True,
+    default_location_return_id = fields.Many2one('stock.location', 'Return Location', check_company=True,
         help="This is the default location for returns created from a picking with this operation type.",
         domain="[('return_location', '=', True)]")
     code = fields.Selection([('incoming', 'Receipt'), ('outgoing', 'Delivery'), ('internal', 'Internal Transfer')], 'Type of Operation', required=True)
@@ -61,7 +59,7 @@ class PickingType(models.Model):
         compute='_compute_use_existing_lots', store=True, readonly=False,
         help="If this is checked, you will be able to choose the Lots/Serial Numbers. You can also decide to not put lots in this operation type.  This means it will create stock with no lot or not put a restriction on the lot taken. ")
     print_label = fields.Boolean(
-        'Print Label', compute="_compute_print_label", store=True, readonly=False,
+        'Generate Shipping Labels', compute="_compute_print_label", store=True, readonly=False,
         help="Check this box if you want to generate shipping label in this operation.")
     # TODO: delete this field `show_operations`
     show_operations = fields.Boolean(
@@ -150,6 +148,10 @@ class PickingType(models.Model):
         compute_sudo=True, string='Show Operation in Overview'
     )
     kanban_dashboard_graph = fields.Text(compute='_compute_kanban_dashboard_graph')
+    move_type = fields.Selection([
+        ('direct', 'As soon as possible'), ('one', 'When all products are ready')],
+        'Shipping Policy', default='direct', required=True,
+        help="It specifies goods to be transferred partially or all at once")
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -199,6 +201,22 @@ class PickingType(models.Model):
                         'prefix': vals['sequence_code'], 'padding': 5,
                         'company_id': picking_type.env.company.id,
                     })
+        if 'reservation_method' in vals:
+            if vals['reservation_method'] == 'by_date':
+                if picking_types := self.filtered(lambda p: p.reservation_method != 'by_date'):
+                    domain = [('picking_type_id', 'in', picking_types.ids), ('state', 'in', ('draft', 'confirmed', 'waiting', 'partially_available'))]
+                    group_by = ['picking_type_id']
+                    aggregates = ['id:recordset']
+                    for picking_type, moves in self.env['stock.move']._read_group(domain, group_by, aggregates):
+                        common_days = vals.get('reservation_days_before') or picking_type.reservation_days_before
+                        priority_days = vals.get('reservation_days_before_priority') or picking_type.reservation_days_before_priority
+                        for move in moves:
+                            move.reservation_date = fields.Date.to_date(move.date) - timedelta(days=priority_days if move.priority == '1' else common_days)
+            else:
+                if picking_types := self.filtered(lambda p: p.reservation_method == 'by_date'):
+                    moves = self.env['stock.move'].search([('picking_type_id', 'in', picking_types.ids), ('state', 'not in', ('assigned', 'done', 'cancel'))])
+                    moves.reservation_date = False
+
         return super(PickingType, self).write(vals)
 
     @api.model
@@ -240,7 +258,7 @@ class PickingType(models.Model):
             'count_picking_waiting': [('state', 'in', ('confirmed', 'waiting'))],
             'count_picking_ready': [('state', '=', 'assigned')],
             'count_picking': [('state', 'in', ('assigned', 'waiting', 'confirmed'))],
-            'count_picking_late': [('scheduled_date', '<', time.strftime(DEFAULT_SERVER_DATETIME_FORMAT)), ('state', 'in', ('assigned', 'waiting', 'confirmed'))],
+            'count_picking_late': [('state', 'in', ('assigned', 'waiting', 'confirmed')), '|', ('scheduled_date', '<', fields.Date.today()), ('has_deadline_issue', '=', True)],
             'count_picking_backorders': [('backorder_id', '!=', False), ('state', 'in', ('confirmed', 'assigned', 'waiting'))],
         }
         for field_name, domain in domains.items():
@@ -282,17 +300,18 @@ class PickingType(models.Model):
                 picking_type.use_existing_lots = True
 
     @api.model
-    def _name_search(self, name, domain=None, operator='ilike', limit=None, order=None):
+    def _search_display_name(self, operator, value):
         # Try to reverse the `display_name` structure
-        parts = name.split(': ')
-        if len(parts) == 2:
-            name_domain = [('warehouse_id.name', operator, parts[0]), ('name', operator, parts[1])]
-            return self._search(expression.AND([name_domain, domain]), limit=limit, order=order)
-        return super()._name_search(name, domain, operator, limit, order)
+        parts = isinstance(value, str) and value.split(': ')
+        if parts and len(parts) == 2:
+            return ['&', ('warehouse_id.name', operator, parts[0]), ('name', operator, parts[1])]
+        return super()._search_display_name(operator, value)
 
     @api.depends('code')
     def _compute_default_location_src_id(self):
         for picking_type in self:
+            if not picking_type.warehouse_id:
+                self.env['stock.warehouse']._warehouse_redirect_warning()
             stock_location = picking_type.warehouse_id.lot_stock_id
             if picking_type.code == 'incoming':
                 picking_type.default_location_src_id = self.env.ref('stock.stock_location_suppliers').id
@@ -302,6 +321,8 @@ class PickingType(models.Model):
     @api.depends('code')
     def _compute_default_location_dest_id(self):
         for picking_type in self:
+            if not picking_type.warehouse_id:
+                self.env['stock.warehouse']._warehouse_redirect_warning()
             stock_location = picking_type.warehouse_id.lot_stock_id
             if picking_type.code == 'outgoing':
                 picking_type.default_location_dest_id = self.env.ref('stock.stock_location_customers').id
@@ -333,8 +354,6 @@ class PickingType(models.Model):
             if picking_type.company_id:
                 warehouse = self.env['stock.warehouse'].search([('company_id', '=', picking_type.company_id.id)], limit=1)
                 picking_type.warehouse_id = warehouse
-            else:
-                picking_type.warehouse_id = False
 
     @api.depends('code')
     def _compute_show_picking_type(self):
@@ -344,15 +363,9 @@ class PickingType(models.Model):
     def _compute_kanban_dashboard_graph(self):
         grouped_records = self._get_aggregated_records_by_date()
 
-        start_today = fields.Date.context_today(self)
-
-        start_yesterday = start_today + timedelta(days=-1)
-        start_day_1 = start_today + timedelta(days=1)
-        start_day_2 = start_today + timedelta(days=2)
-
         summaries = {}
         for picking_type_id, dates, data_series_name in grouped_records:
-            summaries[picking_type_id.id] = {
+            summaries[picking_type_id] = {
                 'data_series_name': data_series_name,
                 'total_before': 0,
                 'total_yesterday': 0,
@@ -362,24 +375,10 @@ class PickingType(models.Model):
                 'total_after': 0,
             }
             for p_date in dates:
-                p_date = p_date.astimezone(pytz.UTC).date()
-                if p_date < start_yesterday:
-                    summaries[picking_type_id.id]['total_before'] += 1
-                elif p_date == start_yesterday:
-                    summaries[picking_type_id.id]['total_yesterday'] += 1
-                elif p_date == start_today:
-                    summaries[picking_type_id.id]['total_today'] += 1
-                elif p_date == start_day_1:
-                    summaries[picking_type_id.id]['total_day_1'] += 1
-                elif p_date == start_day_2:
-                    summaries[picking_type_id.id]['total_day_2'] += 1
-                else:
-                    summaries[picking_type_id.id]['total_after'] += 1
+                date_category = self.env["stock.picking"].calculate_date_category(p_date)
+                summaries[picking_type_id]['total_' + date_category] += 1
 
-        for picking_type in self:
-            picking_type_summary = summaries.get(picking_type.id)
-            graph_data = self._prepare_graph_data(picking_type_summary)
-            picking_type.kanban_dashboard_graph = json.dumps(graph_data)
+        self._prepare_graph_data(summaries)
 
     def _compute_ready_items_label(self):
         for pt in self:
@@ -488,20 +487,26 @@ class PickingType(models.Model):
         records = self.env['stock.picking']._read_group(
             [
                 ('picking_type_id', 'in', self.ids),
-                ('state', '=', 'assigned')
+                ('state', 'in', ['assigned', 'waiting', 'confirmed'])
             ],
             ['picking_type_id'],
             ['scheduled_date' + ':array_agg'],
         )
-        return [(r[0], r[1], _('Ready')) for r in records]
+        # Make sure that all picking type IDs are represented, even if empty
+        picking_type_id_to_dates = {i: [] for i in self.ids}
+        picking_type_id_to_dates.update({r[0].id: r[1] for r in records})
+        return [(i, d, self.env._('Transfers')) for i, d in picking_type_id_to_dates.items()]
 
-    def _prepare_graph_data(self, picking_type_summary):
+    def _prepare_graph_data(self, summaries):
         """
-        Takes in a summary of a picking type, containing the name of the data series
-        and categories to display with their corresponding stock picking counts.
-        Returns the data in a form suitable for the dashboard graph.
+        Takes in summaries of picking types, each containing the name of the data
+        series and categories to display with their corresponding stock picking counts.
+        Converts each summary into data suitable for the dashboard graph and assigns
+        that data to the corresponding picking type from `self`.
+
+        If all values in a graph are 0, then they are assigned the "sample" type.
         """
-        mapping = {
+        data_category_mapping = {
             'total_before': {'label': _('Before'), 'type': 'past'},
             'total_yesterday': {'label': _('Yesterday'), 'type': 'past'},
             'total_today': {'label': _('Today'), 'type': 'present'},
@@ -509,24 +514,21 @@ class PickingType(models.Model):
             'total_day_2': {'label': _('The day after tomorrow'), 'type': 'future'},
             'total_after': {'label': _('After'), 'type': 'future'},
         }
-        if picking_type_summary:
+
+        for picking_type in self:
+            picking_type_summary = summaries.get(picking_type.id)
+            # Graph is empty if all its "total_*" values are 0
+            empty = all(picking_type_summary[k] == 0 for k in data_category_mapping)
             graph_data = [{
-                'key': picking_type_summary['data_series_name'],
+                'key': _('Sample data') if empty else picking_type_summary['data_series_name'],
+                # Passing the picking type ID allows for a redirection after clicking
+                'picking_type_id': None if empty else picking_type.id,
                 'values': [
-                    dict(v, value=picking_type_summary[k])
-                    for k, v in mapping.items()
+                    dict(v, value=picking_type_summary[k], type='sample' if empty else v['type'])
+                    for k, v in data_category_mapping.items()
                 ],
             }]
-        else:
-            # Provide random sample data
-            graph_data = [{
-                'key': _('Sample data'),
-                'values': [
-                    dict(v, type='sample', value=random.randint(1, 10))
-                    for k, v in mapping.items()
-                ],
-            }]
-        return graph_data
+            picking_type.kanban_dashboard_graph = json.dumps(graph_data)
 
 
 class Picking(models.Model):
@@ -564,7 +566,7 @@ class Picking(models.Model):
 
     move_type = fields.Selection([
         ('direct', 'As soon as possible'), ('one', 'When all products are ready')], 'Shipping Policy',
-        default='direct', required=True,
+        compute='_compute_move_type', store=True, required=True, readonly=False, precompute=True,
         help="It specifies goods to be deliver partially or all at once")
     state = fields.Selection([
         ('draft', 'Draft'),
@@ -667,7 +669,7 @@ class Picking(models.Model):
     weight_bulk = fields.Float(
         'Bulk Weight', compute='_compute_bulk_weight', help="Total weight of products which are not in a package.")
     shipping_weight = fields.Float(
-        "Weight for Shipping", compute='_compute_shipping_weight',
+        "Weight for Shipping", compute='_compute_shipping_weight', readonly=False,
         help="Total weight of packages and products not in a package. "
         "Packages with no shipping weight specified will default to their products' total weight. "
         "This is the weight used to compute the cost of the shipping.")
@@ -696,6 +698,16 @@ class Picking(models.Model):
         definition='picking_type_id.picking_properties_definition',
         copy=True)
     show_next_pickings = fields.Boolean(compute='_compute_show_next_pickings')
+    search_date_category = fields.Selection([
+        ('before', 'Before'),
+        ('yesterday', 'Yesterday'),
+        ('today', 'Today'),
+        ('day_1', 'Tomorrow'),
+        ('day_2', 'The day after tomorrow'),
+        ('after', 'After')],
+        string='Date Category', store=False,
+        search='_search_date_category', readonly=True
+    )
 
     _sql_constraints = [
         ('name_uniq', 'unique(name, company_id)', 'Reference must be unique per company!'),
@@ -705,10 +717,24 @@ class Picking(models.Model):
         for picking in self:
             picking.has_tracking = any(m.has_tracking != 'none' for m in picking.move_ids)
 
+    @api.depends('picking_type_id')
+    def _compute_move_type(self):
+        for record in self:
+            if not record.group_id.move_type:
+                record.move_type = record.picking_type_id.move_type
+
     @api.depends('date_deadline', 'scheduled_date')
     def _compute_has_deadline_issue(self):
         for picking in self:
             picking.has_deadline_issue = picking.date_deadline and picking.date_deadline < picking.scheduled_date or False
+
+    def _search_date_category(self, operator, value):
+        if operator != '=':
+            raise NotImplementedError(_('Operation not supported'))
+        search_domain = self.date_category_to_domain(value)
+        return expression.AND([
+            [('scheduled_date', operator, value)] for operator, value in search_domain
+        ])
 
     @api.depends('move_ids.delay_alert_date')
     def _compute_delay_alert_date(self):
@@ -927,22 +953,20 @@ class Picking(models.Model):
                 continue
             picking = picking.with_company(picking.company_id)
             if picking.picking_type_id:
+                # To be removed in 17.3+, as default location src/dest are now required.
+                location_dest, location_src = self.env['stock.warehouse']._get_partner_locations()
                 if picking.picking_type_id.default_location_src_id:
-                    location_id = picking.picking_type_id.default_location_src_id.id
-                elif picking.partner_id:
-                    location_id = picking.partner_id.property_stock_supplier.id
-                else:
-                    _customerloc, location_id = self.env['stock.warehouse']._get_partner_locations()
+                    location_src = picking.picking_type_id.default_location_src_id
+                if location_src.usage == 'supplier' and picking.partner_id:
+                    location_src = picking.partner_id.property_stock_supplier
 
                 if picking.picking_type_id.default_location_dest_id:
-                    location_dest_id = picking.picking_type_id.default_location_dest_id.id
-                elif picking.partner_id:
-                    location_dest_id = picking.partner_id.property_stock_customer.id
-                else:
-                    location_dest_id, _supplierloc = self.env['stock.warehouse']._get_partner_locations()
+                    location_dest = picking.picking_type_id.default_location_dest_id
+                if location_dest.usage == 'customer' and picking.partner_id:
+                    location_dest = picking.partner_id.property_stock_customer
 
-                picking.location_id = location_id
-                picking.location_dest_id = location_dest_id
+                picking.location_id = location_src.id
+                picking.location_dest_id = location_dest.id
 
     @api.depends('return_ids')
     def _compute_return_count(self):
@@ -1057,6 +1081,10 @@ class Picking(models.Model):
                 if picking_type.sequence_id:
                     vals['name'] = picking_type.sequence_id.next_by_id()
 
+            if 'move_type' not in vals and vals.get('group_id'):
+                procurement_group = self.env['procurement.group'].browse(vals.get('group_id'))
+                if procurement_group.move_type:
+                    vals['move_type'] = procurement_group.move_type
             # make sure to write `schedule_date` *after* the `stock.move` creation in
             # order to get a determinist execution of `_set_scheduled_date`
             scheduled_dates.append(vals.pop('scheduled_date', False))
@@ -1166,10 +1194,10 @@ class Picking(models.Model):
         view_id = self.env.ref('stock.view_stock_move_line_detailed_operation_tree').id
         return {
             'name': _('Detailed Operations'),
-            'view_mode': 'tree',
+            'view_mode': 'list',
             'type': 'ir.actions.act_window',
             'res_model': 'stock.move.line',
-            'views': [(view_id, 'tree')],
+            'views': [(view_id, 'list')],
             'domain': [('id', 'in', self.move_line_ids.ids)],
             'context': {
                 'default_picking_id': self.id,
@@ -1196,7 +1224,7 @@ class Picking(models.Model):
             'name': _('Next Transfers'),
             "type": "ir.actions.act_window",
             "res_model": "stock.picking",
-            "views": [[False, "tree"], [False, "form"]],
+            "views": [[False, "list"], [False, "form"]],
             "domain": [('id', 'in', next_transfers.ids)],
         }
 
@@ -1799,9 +1827,15 @@ class Picking(models.Model):
                 return res
             raise UserError(_("There is nothing eligible to put in a pack. Either there are no quantities to put in a pack or all products are already in a pack."))
 
+    @api.model
+    def get_action_click_graph(self):
+        return self._get_action("stock.action_picking_tree_graph")
+
     def _get_action(self, action_xmlid):
         action = self.env["ir.actions.actions"]._for_xml_id(action_xmlid)
-        context = literal_eval(action['context'])
+        context = self.env.context
+        context.update(literal_eval(action['context']))
+        action['context'] = context
 
         action['help'] = self.env['ir.ui.view']._render_template(
             'stock.help_message_template', {
@@ -1822,6 +1856,94 @@ class Picking(models.Model):
     @api.model
     def get_action_picking_tree_internal(self):
         return self._get_action('stock.action_picking_tree_internal')
+
+    @api.model
+    def calculate_date_category(self, datetime):
+        """
+        Assigns given datetime to one of the following categories:
+        - "before"
+        - "yesterday"
+        - "today"
+        - "day_1" (tomorrow)
+        - "day_2" (the day after tomorrow)
+        - "after"
+
+        The categories are based on current user's timezone (e.g. "today" will last
+        between 00:00 and 23:59 local time). The datetime itself is assumed to be
+        in UTC. If the datetime is falsy, this function returns "none".
+        """
+        start_today = fields.Datetime.context_timestamp(
+            self.env.user, fields.Datetime.now()
+        ).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        start_yesterday = start_today + timedelta(days=-1)
+        start_day_1 = start_today + timedelta(days=1)
+        start_day_2 = start_today + timedelta(days=2)
+        start_day_3 = start_today + timedelta(days=3)
+
+        date_category = "none"
+
+        if datetime:
+            datetime = datetime.astimezone(pytz.UTC)
+            if datetime < start_yesterday:
+                date_category = "before"
+            elif datetime >= start_yesterday and datetime < start_today:
+                date_category = "yesterday"
+            elif datetime >= start_today and datetime < start_day_1:
+                date_category = "today"
+            elif datetime >= start_day_1 and datetime < start_day_2:
+                date_category = "day_1"
+            elif datetime >= start_day_2 and datetime < start_day_3:
+                date_category = "day_2"
+            else:
+                date_category = "after"
+
+        return date_category
+
+    @api.model
+    def date_category_to_domain(self, date_category):
+        """
+        Given a date category, returns a list of tuples of operator and value
+        that can be used in a domain to filter records based on their scheduled date.
+
+        Args:
+            date_category (str): The date category to use for the computation.
+                Allowed values are:
+                * "before"
+                * "yesterday"
+                * "today"
+                * "day_1"
+                * "day_2"
+                * "after"
+
+        Returns:
+            a list of tuples:
+                each tuple consists of an operator and a value that can be used in
+                a domain to filter records based on their scheduled date.
+                The operator can be "<" or ">=". The value is a datetime object.
+                If an incorrect date category is passed, this method returns None.
+        """
+        start_today = fields.Datetime.context_timestamp(
+            self.env.user, fields.Datetime.now()
+        ).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        start_today = start_today.astimezone(pytz.UTC)
+
+        start_yesterday = start_today + timedelta(days=-1)
+        start_day_1 = start_today + timedelta(days=1)
+        start_day_2 = start_today + timedelta(days=2)
+        start_day_3 = start_today + timedelta(days=3)
+
+        date_category_to_search_domain = {
+            "before": [("<", start_yesterday)],
+            "yesterday": [(">=", start_yesterday), ("<", start_today)],
+            "today": [(">=", start_today), ("<", start_day_1)],
+            "day_1": [(">=", start_day_1), ("<", start_day_2)],
+            "day_2": [(">=", start_day_2), ("<", start_day_3)],
+            "after": [(">=", start_day_3)],
+        }
+
+        return date_category_to_search_domain.get(date_category)
 
     def button_scrap(self):
         self.ensure_one()
@@ -1860,7 +1982,7 @@ class Picking(models.Model):
     def action_picking_move_tree(self):
         action = self.env["ir.actions.actions"]._for_xml_id("stock.stock_move_action")
         action['views'] = [
-            (self.env.ref('stock.view_picking_move_tree').id, 'tree'),
+            (self.env.ref('stock.view_picking_move_tree').id, 'list'),
         ]
         action['context'] = self.env.context
         action['domain'] = [('picking_id', 'in', self.ids)]
@@ -1924,7 +2046,7 @@ class Picking(models.Model):
             'name': _('Returns'),
             "type": "ir.actions.act_window",
             "res_model": "stock.picking",
-            "views": [[False, "tree"], [False, "form"]],
+            "views": [[False, "list"], [False, "form"]],
             "domain": [('id', 'in', self.return_ids.ids)],
         }
 

@@ -115,13 +115,14 @@ class HrEmployeePrivate(models.Model):
     emergency_contact = fields.Char("Contact Name", groups="hr.group_hr_user", tracking=True)
     emergency_phone = fields.Char("Contact Phone", groups="hr.group_hr_user", tracking=True)
     distance_home_work = fields.Integer(string="Home-Work Distance", groups="hr.group_hr_user", tracking=True)
-    km_home_work = fields.Integer(string="Home-Work Distance in Km", groups="hr.group_hr_user", compute="_compute_km_home_work", store=True)
+    km_home_work = fields.Integer(string="Home-Work Distance in Km", groups="hr.group_hr_user", compute="_compute_km_home_work", inverse="_inverse_km_home_work", store=True)
     distance_home_work_unit = fields.Selection([
         ('kilometers', 'km'),
         ('miles', 'mi'),
     ], 'Home-Work Distance unit', tracking=True, groups="hr.group_hr_user", default='kilometers', required=True)
     employee_type = fields.Selection([
             ('employee', 'Employee'),
+            ('worker', 'Worker'),
             ('student', 'Student'),
             ('trainee', 'Trainee'),
             ('contractor', 'Contractor'),
@@ -134,7 +135,7 @@ class HrEmployeePrivate(models.Model):
     child_ids = fields.One2many('hr.employee', 'parent_id', string='Direct subordinates')
     category_ids = fields.Many2many(
         'hr.employee.category', 'employee_category_rel',
-        'emp_id', 'category_id', groups="hr.group_hr_user",
+        'employee_id', 'category_id', groups="hr.group_hr_user",
         string='Tags')
     # misc
     notes = fields.Text('Notes', groups="hr.group_hr_user")
@@ -239,6 +240,10 @@ class HrEmployeePrivate(models.Model):
         for employee in self:
             employee.km_home_work = employee.distance_home_work * 1.609 if employee.distance_home_work_unit == "miles" else employee.distance_home_work
 
+    def _inverse_km_home_work(self):
+        for employee in self:
+            employee.distance_home_work = employee.km_home_work / 1.609 if employee.distance_home_work_unit == "miles" else employee.distance_home_work
+
     def _get_partner_count_depends(self):
         return ['user_id']
 
@@ -258,7 +263,7 @@ class HrEmployeePrivate(models.Model):
             'view_mode': 'form',
         }
         if len(related_partners) > 1:
-            action['view_mode'] = 'kanban,tree,form'
+            action['view_mode'] = 'kanban,list,form'
             action['domain'] = [('id', 'in', related_partners.ids)]
             return action
         else:
@@ -287,13 +292,13 @@ class HrEmployeePrivate(models.Model):
         }
 
     def _compute_display_name(self):
-        if self.check_access_rights('read', raise_exception=False):
+        if self.browse().has_access('read'):
             return super()._compute_display_name()
         for employee_private, employee_public in zip(self, self.env['hr.employee.public'].browse(self.ids)):
             employee_private.display_name = employee_public.display_name
 
     def search_fetch(self, domain, field_names, offset=0, limit=None, order=None):
-        if self.check_access_rights('read', raise_exception=False):
+        if self.browse().has_access('read'):
             return super().search_fetch(domain, field_names, offset, limit, order)
 
         # HACK: retrieve publicly available values from hr.employee.public and
@@ -307,7 +312,7 @@ class HrEmployeePrivate(models.Model):
         return employees
 
     def fetch(self, field_names):
-        if self.check_access_rights('read', raise_exception=False):
+        if self.browse().has_access('read'):
             return super().fetch(field_names)
 
         # HACK: retrieve publicly available values from hr.employee.public and
@@ -359,13 +364,13 @@ class HrEmployeePrivate(models.Model):
 
     @api.model
     def get_view(self, view_id=None, view_type='form', **options):
-        if self.check_access_rights('read', raise_exception=False):
+        if self.browse().has_access('read'):
             return super().get_view(view_id, view_type, **options)
         return self.env['hr.employee.public'].get_view(view_id, view_type, **options)
 
     @api.model
     def get_views(self, views, options=None):
-        if self.check_access_rights('read', raise_exception=False):
+        if self.browse().has_access('read'):
             return super().get_views(views, options)
         res = self.env['hr.employee.public'].get_views(views, options)
         res['models'].update({'hr.employee': res['models']['hr.employee.public']})
@@ -381,7 +386,7 @@ class HrEmployeePrivate(models.Model):
             browsed on the hr.employee model. This can be trusted as the ids of the public
             employees exactly match the ids of the related hr.employee.
         """
-        if self.check_access_rights('read', raise_exception=False):
+        if self.browse().has_access('read'):
             return super()._search(domain, offset, limit, order)
         try:
             ids = self.env['hr.employee.public']._search(domain, offset, limit, order)
@@ -397,7 +402,7 @@ class HrEmployeePrivate(models.Model):
         else:
             self_sudo = self
 
-        if self_sudo.check_access_rights('read', raise_exception=False):
+        if self_sudo.browse().has_access('read'):
             return super(HrEmployeePrivate, self).get_formview_id(access_uid=access_uid)
         # Hardcode the form view for public employee
         return self.env.ref('hr.hr_employee_public_view_form').id
@@ -410,7 +415,7 @@ class HrEmployeePrivate(models.Model):
         else:
             self_sudo = self
 
-        if not self_sudo.check_access_rights('read', raise_exception=False):
+        if not self_sudo.browse().has_access('read'):
             res['res_model'] = 'hr.employee.public'
 
         return res
@@ -650,7 +655,7 @@ class HrEmployeePrivate(models.Model):
         ]
 
     def _load_scenario(self):
-        demo_tag = self.env.ref('hr_appraisal.employee_category_demo', raise_if_not_found=False)
+        demo_tag = self.env.ref('hr.employee_category_demo', raise_if_not_found=False)
         if demo_tag:
             return
         convert.convert_file(self.env, 'hr', 'data/scenarios/hr_scenario.xml', None, mode='init', kind='data')

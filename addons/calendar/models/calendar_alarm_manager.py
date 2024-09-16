@@ -102,7 +102,7 @@ class AlarmManager(models.AbstractModel):
         events = self.env['calendar.event'].browse(result)
         result = {
             key: result[key]
-            for key in set(events._filter_access_rules('read').ids)
+            for key in events._filtered_access('read').ids
         }
         return result
 
@@ -186,7 +186,8 @@ class AlarmManager(models.AbstractModel):
         for alarm in alarms:
             alarm_attendees = attendees.filtered(lambda attendee: attendee.event_id.id in events_by_alarm[alarm.id])
             alarm_attendees.with_context(
-                calendar_template_ignore_recurrence=True
+                calendar_template_ignore_recurrence=True,
+                mail_notify_author=True,
             )._send_mail_to_attendees(
                 alarm.mail_template_id,
                 force_send=len(attendees) <= force_send_limit

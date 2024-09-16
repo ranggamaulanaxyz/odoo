@@ -13,7 +13,6 @@ from odoo.addons.rating.models.rating_data import OPERATOR_MAPPING
 PROJECT_TASK_READABLE_FIELDS = {
     'allow_timesheets',
     'analytic_account_active',
-    'analytic_account_id',  # To compute `analytic_account_active`
     'effective_hours',
     'encode_uom_in_days',
     'allocated_hours',
@@ -31,7 +30,7 @@ class Task(models.Model):
     _inherit = "project.task"
 
     project_id = fields.Many2one(domain="['|', ('company_id', '=', False), ('company_id', '=?',  company_id), ('is_internal_project', '=', False)]")
-    analytic_account_active = fields.Boolean("Active Analytic Account", compute='_compute_analytic_account_active', compute_sudo=True, recursive=True, export_string_translation=False)
+    analytic_account_active = fields.Boolean("Active Analytic Account", related='project_id.analytic_account_active', export_string_translation=False)
     allow_timesheets = fields.Boolean(
         "Allow timesheets",
         compute='_compute_allow_timesheets', search='_search_allow_timesheets',
@@ -78,12 +77,6 @@ class Task(models.Model):
             ('allow_timesheets', operator, value),
         ])
         return [('project_id', 'in', query)]
-
-    @api.depends('analytic_account_id.active', 'project_id.analytic_account_id.active')
-    def _compute_analytic_account_active(self):
-        """ Overridden in sale_timesheet """
-        for task in self:
-            task.analytic_account_active = task._get_task_analytic_account_id().active
 
     @api.depends('timesheet_ids.unit_amount')
     def _compute_effective_hours(self):
@@ -172,10 +165,10 @@ class Task(models.Model):
         new_views = []
         for view in action['views']:
             if not is_internal_user:
-                if view[1] == 'tree':
+                if view[1] == 'list':
                     tree_view_id = self.env['ir.model.data']._xmlid_to_res_id('hr_timesheet.hr_timesheet_line_portal_tree')
                     if tree_view_id:
-                        new_views.insert(0, (tree_view_id, 'tree'))
+                        new_views.insert(0, (tree_view_id, 'list'))
                         continue
                 elif view[1] == 'form':
                     form_view_id = self.env['ir.model.data']._xmlid_to_res_id('hr_timesheet.timesheet_view_form_portal_user')
@@ -189,7 +182,7 @@ class Task(models.Model):
                         continue
             if view[1] == 'graph':
                 view = (graph_view_id, 'graph')
-            new_views.insert(0, view) if view[1] == 'tree' else new_views.append(view)
+            new_views.insert(0, view) if view[1] == 'list' else new_views.append(view)
 
         action.update({
             'display_name': _('Timesheets'),

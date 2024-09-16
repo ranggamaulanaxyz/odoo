@@ -331,7 +331,11 @@ export class ListController extends Component {
 
     onPageChangeScroll() {
         if (this.rootRef && this.rootRef.el) {
-            this.rootRef.el.querySelector(".o_content").scrollTop = 0;
+            if (this.env.isSmall) {
+                this.rootRef.el.scrollTop = 0;
+            } else {
+                this.rootRef.el.querySelector(".o_content .o_list_renderer").scrollTop = 0;
+            }
         }
     }
 
@@ -433,6 +437,10 @@ export class ListController extends Component {
         return this.props.className;
     }
 
+    get hasSelectedRecords() {
+        return this.nbSelected || this.isDomainSelected;
+    }
+
     get nbSelected() {
         return this.model.root.selection.length;
     }
@@ -470,7 +478,7 @@ export class ListController extends Component {
             ...this.props.display,
             controlPanel: {
                 ...controlPanel,
-                layoutActions: !this.nbSelected,
+                layoutActions: !this.hasSelectedRecords,
             },
         };
     }

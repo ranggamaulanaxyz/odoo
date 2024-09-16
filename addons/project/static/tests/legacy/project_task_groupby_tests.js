@@ -49,14 +49,14 @@ QUnit.module("Project", (hooks) => {
         assert.expect(1);
 
         const views = {
-            "project.task,false,list": `<tree js_class="project_task_list"/>`,
+            "project.task,false,list": `<list js_class="project_task_list"/>`,
         };
         const { openView } = await start({
             serverData: { views },
         });
         await openView({
             res_model: "project.task",
-            views: [[false, "tree"]],
+            views: [[false, "list"]],
             context: { group_by: ["project_id"] },
         });
 
@@ -66,14 +66,14 @@ QUnit.module("Project", (hooks) => {
         assert.expect(1);
 
         const views = {
-            "project.task,false,list": `<tree js_class="project_task_list"/>`,
+            "project.task,false,list": `<list js_class="project_task_list"/>`,
         };
         const { openView } = await start({
             serverData: { views },
         });
         await openView({
             res_model: "project.task",
-            views: [[false, "tree"]],
+            views: [[false, "list"]],
             context: { group_by: ["user_ids"] },
         });
 
@@ -84,14 +84,14 @@ QUnit.module("Project", (hooks) => {
         assert.expect(1);
 
         const views = {
-            "project.task,false,list": `<tree js_class="project_task_list"/>`,
+            "project.task,false,list": `<list js_class="project_task_list"/>`,
         };
         const { openView } = await start({
             serverData: { views },
         });
         await openView({
             res_model: "project.task",
-            views: [[false, "tree"]],
+            views: [[false, "list"]],
             context: { group_by: ["date_deadline"] },
         });
 
@@ -104,7 +104,7 @@ QUnit.module("Project", (hooks) => {
         const views = {
             "project.task,false,kanban": `<kanban js_class="project_task_kanban" default_group_by="project_id">
                     <templates>
-                        <t t-name="kanban-box"/>
+                        <t t-name="kanban-card"/>
                     </templates>
                 </kanban>`,
         };
@@ -116,7 +116,7 @@ QUnit.module("Project", (hooks) => {
             views: [[false, "kanban"]],
         });
 
-        assert.strictEqual(target.querySelector(".o_column_title").innerText, "🔒 Private\n1");
+        assert.strictEqual(target.querySelector(".o_column_title").innerText, "🔒 Private\n(1)");
     });
 
     QUnit.test("Test group label for empty assignees in kanban", async function (assert) {
@@ -125,7 +125,7 @@ QUnit.module("Project", (hooks) => {
         const views = {
             "project.task,false,kanban": `<kanban js_class="project_task_kanban" default_group_by="user_ids">
                     <templates>
-                        <t t-name="kanban-box"/>
+                        <t t-name="kanban-card"/>
                     </templates>
                 </kanban>`,
         };
@@ -137,7 +137,7 @@ QUnit.module("Project", (hooks) => {
             views: [[false, "kanban"]],
         });
 
-        assert.strictEqual(target.querySelector(".o_column_title").innerText, "👤 Unassigned\n1");
+        assert.strictEqual(target.querySelector(".o_column_title").innerText, "👤 Unassigned\n(1)");
     });
 
     QUnit.test("Test group label for empty deadline in kanban", async function (assert) {
@@ -146,7 +146,7 @@ QUnit.module("Project", (hooks) => {
         const views = {
             "project.task,false,kanban": `<kanban js_class="project_task_kanban" default_group_by="date_deadline">
                     <templates>
-                        <t t-name="kanban-box"/>
+                        <t t-name="kanban-card"/>
                     </templates>
                 </kanban>`,
         };
@@ -158,7 +158,7 @@ QUnit.module("Project", (hooks) => {
             views: [[false, "kanban"]],
         });
 
-        assert.strictEqual(target.querySelector(".o_column_title").innerText, "None");
+        assert.strictEqual(target.querySelector(".o_column_title").innerText, "None\n(1)");
     });
 
     QUnit.test("Test group label for empty project in pivot", async function (assert) {

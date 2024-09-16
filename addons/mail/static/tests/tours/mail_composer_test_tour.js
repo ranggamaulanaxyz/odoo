@@ -1,5 +1,5 @@
 import { registry } from "@web/core/registry";
-import { contains, createFile, inputFiles } from "@web/../tests/utils";
+import { contains, inputFiles } from "@web/../tests/utils";
 
 /**
  * This tour depends on data created by python test in charge of launching it.
@@ -36,13 +36,8 @@ registry.category("web_tour.tours").add("mail/static/tests/tours/mail_composer_t
             content: "Add one file in composer",
             trigger: ".o-mail-Composer button[aria-label='Attach files']",
             async run() {
-                await inputFiles(".o-mail-Composer-coreMain .o_input_file", [
-                    await createFile({
-                        content: "hello, world",
-                        contentType: "text/plain",
-                        name: "text.txt",
-                    }),
-                ]);
+                const text = new File(["hello, world"], "text.txt", { type: "text/plain" });
+                await inputFiles(".o-mail-Composer-coreMain .o_input_file", [text]);
             },
         },
         {
@@ -60,7 +55,7 @@ registry.category("web_tour.tours").add("mail/static/tests/tours/mail_composer_t
         },
         {
             content: "Check the earlier provided attachment is listed",
-            trigger: '.o_attachment[title="text.txt"]',
+            trigger: ".o_field_mail_composer_attachment_list a:contains(text.txt)",
         },
         {
             content: "Check subject is autofilled",
@@ -97,16 +92,13 @@ registry.category("web_tour.tours").add("mail/static/tests/tours/mail_composer_t
             },
         },
         {
-            content: "Open templates",
-            trigger: '.o_field_widget[name="template_id"] input',
-            run(helpers) {
-                this.anchor.value = "test";
-                this.anchor.dispatchEvent(new InputEvent("input", { bubbles: true }));
-            },
+            content: "Click on the mail template selector",
+            trigger: ".mail-composer-template-dropdown-btn",
+            run: "click"
         },
         {
             content: "Check a template is listed",
-            trigger: '.ui-autocomplete .ui-menu-item a:contains("Test template")',
+            trigger: '.mail-composer-template-dropdown.popover .o-dropdown-item:contains("Test template")',
         },
         {
             content: "Send message",

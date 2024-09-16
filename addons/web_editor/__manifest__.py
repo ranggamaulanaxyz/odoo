@@ -37,8 +37,6 @@ Odoo Web Editor widget.
 
             'web/static/src/libs/fontawesome/css/font-awesome.css',
             'web/static/lib/odoo_ui_icons/*',
-            'web/static/lib/select2/select2.css',
-            'web/static/lib/select2-bootstrap-css/select2-bootstrap.css',
             'web/static/src/webclient/navbar/navbar.scss',
             'web/static/src/scss/animation.scss',
             'web/static/src/core/colorpicker/colorpicker.scss',
@@ -80,7 +78,6 @@ Odoo Web Editor widget.
             'web/static/lib/bootstrap/js/dist/scrollspy.js',
             'web/static/lib/bootstrap/js/dist/tab.js',
             'web/static/lib/bootstrap/js/dist/toast.js',
-            'web/static/lib/select2/select2.js',
             'web/static/src/libs/bootstrap.js',
             'web/static/src/legacy/js/libs/jquery.js',
             'web/static/src/core/utils/scrolling.js',
@@ -131,10 +128,8 @@ Odoo Web Editor widget.
         'web_editor.assets_wysiwyg': [
             # legacy stuff that are no longer in assets_backend
             'web/static/src/legacy/js/core/class.js',
-            'web/static/src/legacy/js/core/dom.js',
-            'web/static/src/legacy/js/core/mixins.js',
-            'web/static/src/legacy/js/core/service_mixins.js',
-            'web_editor/static/src/js/core/widget.js',
+            'web/static/src/legacy/js/public/minimal_dom.js',
+            'web/static/src/legacy/js/public/public_widget.js',
 
             # lib
             'web_editor/static/lib/cropperjs/cropper.css',
@@ -142,7 +137,7 @@ Odoo Web Editor widget.
             'web_editor/static/lib/jquery-cropper/jquery-cropper.js',
             'web_editor/static/lib/jQuery.transfo.js',
             'web_editor/static/lib/webgl-image-filter/webgl-image-filter.js',
-            'web_editor/static/lib/DOMPurify.js',
+            'html_editor/static/lib/DOMpurify.js',
 
             # odoo-editor
             'web_editor/static/src/js/editor/odoo-editor/src/OdooEditor.js',
@@ -295,6 +290,8 @@ Odoo Web Editor widget.
             'web_editor/static/src/js/editor/odoo-editor/src/**/*js',
             'web_editor/static/src/js/editor/odoo-editor/test/spec/*js',
             'web_editor/static/src/js/editor/odoo-editor/test/*js',
+
+            'html_editor/static/lib/DOMpurify.js',
         ],
     },
     'auto_install': True,

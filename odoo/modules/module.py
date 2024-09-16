@@ -11,6 +11,7 @@ import os
 import pkg_resources
 import re
 import sys
+import traceback
 import warnings
 from os.path import join as opj, normpath
 
@@ -60,6 +61,17 @@ _DEFAULT_MANIFEST = {
     'web': False,
     'website': '',
 }
+
+# matches field definitions like
+#     partner_id: base.ResPartner = fields.Many2one
+#     partner_id = fields.Many2one[base.ResPartner]
+TYPED_FIELD_DEFINITION_RE = re.compile(r'''
+    \b (?P<field_name>\w+) \s*
+    (:\s*(?P<field_type>[^ ]*))? \s*
+    = \s*
+    fields\.(?P<field_class>Many2one|One2many|Many2many)
+    (\[(?P<type_param>[^\]]+)\])?
+''', re.VERBOSE)
 
 _logger = logging.getLogger(__name__)
 
@@ -338,11 +350,6 @@ def get_manifest(module, mod_path=None):
 def _get_manifest_cached(module, mod_path=None):
     return load_manifest(module, mod_path)
 
-def load_information_from_description_file(module, mod_path=None):
-    warnings.warn(
-        'load_information_from_description_file() is a deprecated '
-        'alias to get_manifest()', DeprecationWarning, stacklevel=2)
-    return get_manifest(module, mod_path)
 
 def load_openerp_module(module_name):
     """ Load an OpenERP module, if not already loaded.
@@ -367,6 +374,24 @@ def load_openerp_module(module_name):
         if info['post_load']:
             getattr(sys.modules[qualname], info['post_load'])()
 
+    except AttributeError as err:
+        _logger.critical("Couldn't load module %s", module_name)
+        trace = traceback.format_exc()
+        match = TYPED_FIELD_DEFINITION_RE.search(trace)
+        if match and "most likely due to a circular import" in trace:
+            field_name = match['field_name']
+            field_class = match['field_class']
+            field_type = match['field_type'] or match['type_param']
+            if "." not in field_type:
+                field_type = f"{module_name}.{field_type}"
+            raise AttributeError(
+                f"{err}\n"
+                "To avoid circular import for the the comodel use the annotation syntax:\n"
+                f"    {field_name}: {field_type} = fields.{field_class}(...)\n"
+                "and add at the beggining of the file:\n"
+                "    from __future__ import annotations"
+            ).with_traceback(err.__traceback__) from None
+        raise
     except Exception:
         _logger.critical("Couldn't load module %s", module_name)
         raise

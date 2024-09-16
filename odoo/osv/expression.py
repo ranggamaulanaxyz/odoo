@@ -748,7 +748,7 @@ def get_unaccent_wrapper(cr):
         "Since 18.0, deprecated method, use env.registry.unaccent instead",
         DeprecationWarning, 2,
     )
-    return odoo.registry(cr.dbname).unaccent
+    return odoo.modules.registry.Registry(cr.dbname).unaccent
 
 
 class expression(object):
@@ -863,7 +863,7 @@ class expression(object):
                 return list({
                     rid
                     for name in names
-                    for rid in comodel._name_search(name, [], 'ilike')
+                    for rid in comodel._search([('display_name', 'ilike', name)])
                 })
             return list(value)
 
@@ -1039,12 +1039,6 @@ class expression(object):
                     ))
 
                 else:
-                    if operator in ('ilike', 'not ilike'):
-                        right = f'%{right}%'
-                        unaccent = self._unaccent
-                    else:
-                        unaccent = lambda x: x
-
                     sql_field = model._field_to_sql(alias, field.name, self.query)
 
                     if operator in ('in', 'not in'):
@@ -1054,10 +1048,15 @@ class expression(object):
                         sql_right = SQL("%s", json.dumps(right))
                         push_result(SQL(
                             "(%s (%s) %s (%s))",
-                            sql_not, unaccent(sql_left), sql_operator, unaccent(sql_right),
+                            sql_not, sql_left, sql_operator, sql_right,
                         ))
 
                     elif isinstance(right, str):
+                        if operator in ('ilike', 'not ilike'):
+                            right = f'%{right}%'
+                            unaccent = self._unaccent
+                        else:
+                            unaccent = lambda x: x  # noqa: E731
                         sql_left = SQL("%s ->> %s", sql_field, property_name)  # JSONified value
                         sql_operator = SQL_OPERATORS[operator]
                         sql_right = SQL("%s", right)
@@ -1072,7 +1071,7 @@ class expression(object):
                         sql_right = SQL("%s", json.dumps(right))
                         push_result(SQL(
                             "((%s) %s (%s))",
-                            unaccent(sql_left), sql_operator, unaccent(sql_right),
+                            sql_left, sql_operator, sql_right,
                         ))
             elif field.type in ('datetime', 'date') and len(path) == 2:
                 if path[1] not in READ_GROUP_NUMBER_GRANULARITY:
@@ -1186,7 +1185,7 @@ class expression(object):
                     if isinstance(right, str):
                         op2 = (TERM_OPERATORS_NEGATION[operator]
                                if operator in NEGATIVE_TERM_OPERATORS else operator)
-                        ids2 = comodel._name_search(right, domain or [], op2)
+                        ids2 = comodel._search(AND([domain or [], [('display_name', op2, right)]]))
                     elif isinstance(right, collections.abc.Iterable):
                         ids2 = right
                     else:
@@ -1264,7 +1263,7 @@ class expression(object):
                         domain = field.get_domain_list(model)
                         op2 = (TERM_OPERATORS_NEGATION[operator]
                                if operator in NEGATIVE_TERM_OPERATORS else operator)
-                        ids2 = comodel._name_search(right, domain or [], op2)
+                        ids2 = comodel._search(AND([domain or [], [('display_name', op2, right)]]))
                     elif isinstance(right, collections.abc.Iterable):
                         ids2 = right
                     else:
@@ -1336,11 +1335,11 @@ class expression(object):
                     elif isinstance(right, list) and operator in ('!=', '='):  # for domain (FIELD,'=',['value1','value2'])
                         operator = dict_op[operator]
                     if operator in NEGATIVE_TERM_OPERATORS:
-                        res_ids = comodel._name_search(right, [], TERM_OPERATORS_NEGATION[operator])
+                        res_ids = comodel._search([('display_name', TERM_OPERATORS_NEGATION[operator], right)])
                         for dom_leaf in ('|', (left, 'not in', res_ids), (left, '=', False)):
                             push(dom_leaf, model, alias)
                     else:
-                        res_ids = comodel._name_search(right, [], operator)
+                        res_ids = comodel._search([('display_name', operator, right)])
                         push((left, 'in', res_ids), model, alias)
 
                 else:
@@ -1389,88 +1388,34 @@ class expression(object):
                     else:
                         push_result(model._condition_to_sql(alias, left, operator, right, self.query))
 
-                elif field.translate and (isinstance(right, str) or right is False) and left == field.name:
+                elif field.translate and (isinstance(right, str) or right is False) and left == field.name and \
+                    self._has_trigram and field.index == 'trigram' and operator in ('=', 'like', 'ilike', '=like', '=ilike'):
                     right = right or ''
-                    model_raw_trans = model.with_context(prefetch_langs=True)
-                    sql_field = model_raw_trans._field_to_sql(alias, field.name, self.query)
                     sql_operator = SQL_OPERATORS[operator]
-                    sql_exprs = []
-
                     need_wildcard = operator in WILDCARD_OPERATORS
 
                     if need_wildcard and not right:
                         push_result(SQL("FALSE") if operator in NEGATIVE_TERM_OPERATORS else SQL("TRUE"))
                         continue
+                    push_result(model._condition_to_sql(alias, left, operator, right, self.query))
 
                     if not need_wildcard:
                         right = field.convert_to_column(right, model, validate=False).adapted['en_US']
 
-                    if (
-                        (need_wildcard and not right)
-                        or (right and operator in NEGATIVE_TERM_OPERATORS)
-                        or (operator == '=' and right == '')  # noqa: PLC1901
-                    ):
-                        sql_exprs.append(SQL("%s IS NULL OR", sql_field))
-
-                    if self._has_trigram and field.index == 'trigram' and operator in ('=', 'like', 'ilike', '=like', '=ilike'):
-                        # a prefilter using trigram index to speed up '=', 'like', 'ilike'
-                        # '!=', '<=', '<', '>', '>=', 'in', 'not in', 'not like', 'not ilike' cannot use this trick
-                        if operator == '=':
-                            _right = value_to_translated_trigram_pattern(right)
-                        else:
-                            _right = pattern_to_translated_trigram_pattern(right)
-
-                        if _right != '%':
-                            _left = SQL("jsonb_path_query_array(%s, '$.*')::text", sql_field)
-                            _sql_operator = SQL('LIKE') if operator == '=' else sql_operator
-                            sql_exprs.append(SQL(
-                                "%s %s %s AND",
-                                self._unaccent(_left),
-                                _sql_operator,
-                                self._unaccent(SQL("%s", _right))
-                            ))
-
-                    unaccent = self._unaccent if operator.endswith('ilike') else lambda x: x
-                    sql_left = model._field_to_sql(alias, field.name, self.query)
-
-                    if need_wildcard:
-                        right = f'%{right}%'
-
-                    sql_exprs.append(SQL(
-                        "%s %s %s",
-                        unaccent(sql_left),
-                        sql_operator,
-                        unaccent(SQL("%s", right)),
-                    ))
-                    push_result(SQL("(%s)", SQL(" ").join(sql_exprs)))
-
-                elif field.translate and operator in ['in', 'not in'] and isinstance(right, (list, tuple)) and left == field.name:
-                    model_raw_trans = model.with_context(prefetch_langs=True)
-                    sql_field = model_raw_trans._field_to_sql(alias, field.name, self.query)
-                    sql_operator = SQL_OPERATORS[operator]
-                    params = [it for it in right if it is not False and it is not None]
-                    check_null = len(params) < len(right)
-                    if check_null and '' not in params:
-                        params.append('')
-                    check_null = check_null or ('' in params)
-                    if params:
-                        params = [field.convert_to_column(p, model, validate=False).adapted['en_US'] for p in params]
-                        langs = field.get_translation_fallback_langs(model.env)
-                        sql_left_langs = [SQL("%s->>%s", sql_field, lang) for lang in langs]
-                        if len(sql_left_langs) == 1:
-                            sql_left = sql_left_langs[0]
-                        else:
-                            sql_left = SQL('COALESCE(%s)', SQL(', ').join(sql_left_langs))
-                        sql = SQL("%s %s %s", sql_left, sql_operator, tuple(params))
+                    # a prefilter using trigram index to speed up '=', 'like', 'ilike'
+                    # '!=', '<=', '<', '>', '>=', 'in', 'not in', 'not like', 'not ilike' cannot use this trick
+                    if operator == '=':
+                        _right = value_to_translated_trigram_pattern(right)
                     else:
-                        # The case for (left, 'in', []) or (left, 'not in', []).
-                        sql = SQL("FALSE") if operator == 'in' else SQL("TRUE")
-                    if (operator == 'in' and check_null) or (operator == 'not in' and not check_null):
-                        sql = SQL("(%s OR %s IS NULL)", sql, sql_field)
-                    elif operator == 'not in' and check_null:
-                        sql = SQL("(%s AND %s IS NOT NULL)", sql, sql_field)  # needed only for TRUE.
-                    push_result(sql)
+                        _right = pattern_to_translated_trigram_pattern(right)
 
+                    if _right != '%':
+                        # combine both generated SQL expressions (above and below) with an AND
+                        push('&', model, alias)
+                        sql_column = SQL('%s.%s', SQL.identifier(alias), SQL.identifier(field.name))
+                        indexed_value = self._unaccent(SQL("jsonb_path_query_array(%s, '$.*')::text", sql_column))
+                        _sql_operator = SQL('LIKE') if operator == '=' else sql_operator
+                        push_result(SQL("%s %s %s", indexed_value, _sql_operator, self._unaccent(SQL("%s", _right))))
                 else:
                     push_result(model._condition_to_sql(alias, left, operator, right, self.query))
 

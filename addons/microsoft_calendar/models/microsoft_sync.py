@@ -8,8 +8,8 @@ import pytz
 from dateutil.parser import parse
 from datetime import timedelta
 
-from odoo import api, fields, models, registry
-from odoo.exceptions import UserError
+from odoo import api, fields, models
+from odoo.modules.registry import Registry
 from odoo.osv import expression
 
 from odoo.addons.microsoft_calendar.utils.microsoft_event import MicrosoftEvent
@@ -36,7 +36,7 @@ def after_commit(func):
 
         @self.env.cr.postcommit.add
         def called_after():
-            db_registry = registry(dbname)
+            db_registry = Registry(dbname)
             with db_registry.cursor() as cr:
                 env = api.Environment(cr, uid, context)
                 try:
@@ -506,3 +506,11 @@ class MicrosoftSync(models.AbstractModel):
         the appropriate user accordingly.
         """
         raise NotImplementedError()
+
+    def _need_video_call(self):
+        """
+        Implement this method to return True if the event needs a video call
+        :return: bool
+        """
+        self.ensure_one()
+        return True

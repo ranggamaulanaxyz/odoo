@@ -18,7 +18,7 @@ from odoo.exceptions import ValidationError
 from odoo.osv import expression
 from odoo.tools.float_utils import float_round
 
-from odoo.tools import date_utils, float_utils
+from odoo.tools import date_utils, ormcache
 from .utils import Intervals, float_to_time, make_aware, datetime_to_string, string_to_datetime
 
 
@@ -134,7 +134,7 @@ class ResourceCalendar(models.Model):
 
     def copy_data(self, default=None):
         vals_list = super().copy_data(default=default)
-        return [dict(vals, name=_("%s (copy)", calendar.name)) for calendar, vals in zip(self, vals_list)]
+        return [dict(vals, name=self.env._("%s (copy)", calendar.name)) for calendar, vals in zip(self, vals_list)]
 
     @api.constrains('attendance_ids')
     def _check_attendance_ids(self):
@@ -212,7 +212,7 @@ class ResourceCalendar(models.Model):
             ]
 
             self.two_weeks_calendar = True
-            default_attendance = self.default_get('attendance_ids')['attendance_ids']
+            default_attendance = self.default_get(['attendance_ids'])['attendance_ids']
             for idx, att in enumerate(default_attendance):
                 att[2]["week_type"] = '0'
                 att[2]["sequence"] = idx + 1
@@ -224,7 +224,7 @@ class ResourceCalendar(models.Model):
         else:
             self.two_weeks_calendar = False
             self.attendance_ids.unlink()
-            self.attendance_ids = self.default_get('attendance_ids')['attendance_ids']
+            self.attendance_ids = self.default_get(['attendance_ids'])['attendance_ids']
 
     @api.onchange('attendance_ids')
     def _onchange_attendance_ids(self):
@@ -748,3 +748,22 @@ class ResourceCalendar(models.Model):
         for attendance in self.attendance_ids.filtered(lambda a: a.day_period != 'lunch' and ((not a.date_from or not a.date_to) or (a.date_from <= end.date() and a.date_to >= start.date()))):
             mapped_data[(attendance.week_type, attendance.dayofweek)] += attendance.hour_to - attendance.hour_from
         return max(mapped_data.values())
+
+    def _works_on_date(self, date):
+        self.ensure_one()
+
+        working_days = self._get_working_hours()
+        dayofweek = str(date.weekday())
+        if self.two_weeks_calendar:
+            weektype = str(self.env['resource.calendar.attendance'].get_week_type(date))
+            return working_days[weektype][dayofweek]
+        return working_days[False][dayofweek]
+
+    @ormcache('self.id')
+    def _get_working_hours(self):
+        self.ensure_one()
+
+        working_days = defaultdict(lambda: defaultdict(lambda: False))
+        for attendance in self.attendance_ids:
+            working_days[attendance.week_type][attendance.dayofweek] = True
+        return working_days

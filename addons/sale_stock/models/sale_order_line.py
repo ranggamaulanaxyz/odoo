@@ -14,7 +14,7 @@ class SaleOrderLine(models.Model):
     _inherit = 'sale.order.line'
 
     qty_delivered_method = fields.Selection(selection_add=[('stock_move', 'Stock Moves')])
-    route_id = fields.Many2one('stock.route', string='Route', domain=[('sale_selectable', '=', True)], ondelete='restrict', check_company=True)
+    route_id = fields.Many2one('stock.route', string='Route', domain=[('sale_selectable', '=', True)], ondelete='restrict')
     move_ids = fields.One2many('stock.move', 'sale_line_id', string='Stock Moves')
     virtual_available_at_date = fields.Float(compute='_compute_qty_at_date', digits='Product Unit of Measure')
     scheduled_date = fields.Datetime(compute='_compute_qty_at_date')
@@ -80,7 +80,7 @@ class SaleOrderLine(models.Model):
             move.id
             for line in self
             if line.state == 'sale'
-            for move in line.move_ids
+            for move in line.move_ids | self.env['stock.move'].browse(line.move_ids._rollup_move_origs())
             if move.product_id == line.product_id
         }
         all_moves = self.env['stock.move'].browse(all_move_ids)
@@ -90,7 +90,9 @@ class SaleOrderLine(models.Model):
         for line in self.filtered(lambda l: l.state == 'sale'):
             if not line.display_qty_widget:
                 continue
-            moves = line.move_ids.filtered(lambda m: m.product_id == line.product_id)
+            moves = line.move_ids | self.env['stock.move'].browse(line.move_ids._rollup_move_origs())
+            moves = moves.filtered(
+                lambda m: m.product_id == line.product_id and m.state not in ('cancel', 'done'))
             line.forecast_expected_date = max(
                 (
                     forecast_expected_date_per_move[move.id]
@@ -270,6 +272,7 @@ class SaleOrderLine(models.Model):
             'company_id': self.order_id.company_id,
             'product_packaging_id': self.product_packaging_id,
             'sequence': self.sequence,
+            'never_product_template_attribute_value_ids': self.product_no_variant_attribute_value_ids,
         })
         return values
 

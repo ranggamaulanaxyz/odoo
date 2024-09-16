@@ -13,6 +13,7 @@ import {
     isRelation,
     modelRegistry,
 } from "./misc";
+import { serializeDate, serializeDateTime } from "@web/core/l10n/dates";
 
 /** @typedef {import("./misc").FieldDefinition} FieldDefinition */
 /** @typedef {import("./misc").RecordField} RecordField */
@@ -84,7 +85,11 @@ export class Record {
                     }
                 }
                 // relational field (note: optional when OR)
-                return `(${data[expr]?.localId})`;
+                if (isRecord(data[expr])) {
+                    return `(${data[expr]?.localId})`;
+                }
+                const TargetModelName = Model._.fieldsTargetModel.get(expr);
+                return `(${Model.store[TargetModelName].get(data[expr])?.localId})`;
             }
             return data[expr];
         }
@@ -175,27 +180,12 @@ export class Record {
      *
      * @returns {Record}
      */
-    static new(data) {
+    static new(data, ids) {
         const Model = toRaw(this);
         const store = Model._rawStore;
         return store.MAKE_UPDATE(function RecordNew() {
             const recordProxy = new Model.Class();
             const record = toRaw(recordProxy)._raw;
-            const ids = Model._retrieveIdFromData(data);
-            for (const name in ids) {
-                if (
-                    ids[name] &&
-                    !isRecord(ids[name]) &&
-                    !isCommand(ids[name]) &&
-                    isRelation(Model, name)
-                ) {
-                    // preinsert that record in relational field,
-                    // as it is required to make current local id
-                    ids[name] = Model._rawStore[Model._.fieldsTargetModel.get(name)].preinsert(
-                        ids[name]
-                    );
-                }
-            }
             Object.assign(record._, { localId: Model.localId(ids) });
             Object.assign(recordProxy, { ...ids });
             Model.records[record.localId] = recordProxy;
@@ -319,13 +309,26 @@ export class Record {
         record.update.call(record._proxy, data);
         return recordFullProxy;
     }
-    /**
-     * @returns {Record}
-     */
+    /** @returns {Record} */
     static preinsert(data) {
         const ModelFullProxy = this;
         const Model = toRaw(ModelFullProxy);
-        return Model.get.call(ModelFullProxy, data) ?? Model.new(data);
+        const ids = Model._retrieveIdFromData(data);
+        for (const name in ids) {
+            if (
+                ids[name] &&
+                !isRecord(ids[name]) &&
+                !isCommand(ids[name]) &&
+                isRelation(Model, name)
+            ) {
+                // preinsert that record in relational field,
+                // as it is required to make current local id
+                ids[name] = Model._rawStore[Model._.fieldsTargetModel.get(name)].preinsert(
+                    ids[name]
+                );
+            }
+        }
+        return Model.get.call(ModelFullProxy, data) ?? Model.new(data, ids);
     }
 
     /** @returns {import("models").Store} */
@@ -425,9 +428,17 @@ export class Record {
                 });
             } else if (isOne(Model, name)) {
                 const otherRecord = toRaw(record._proxyInternal[name])?._raw;
-                data[name] = otherRecord?.toIdData.call(record._proxyInternal);
+                data[name] = otherRecord?.toIdData.call(otherRecord._proxyInternal);
             } else {
-                data[name] = recordProxy[name]; // Record.attr()
+                // Record.attr()
+                const value = recordProxy[name];
+                if (Model._.fieldsType.get(name) === "datetime" && value) {
+                    data[name] = serializeDateTime(value);
+                } else if (Model._.fieldsType.get(name) === "date" && value) {
+                    data[name] = serializeDate(value);
+                } else {
+                    data[name] = value;
+                }
             }
         }
         delete data._;

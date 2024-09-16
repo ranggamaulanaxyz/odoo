@@ -166,7 +166,7 @@ class TestExpenses(TestExpenseCommon):
             {'balance':   208.70, 'account_id': tax_account_id,             'name': '15%',                                'date': date(2021, 10, 31),           'invoice_date': date(2021, 10, 10)},
             {'balance':    18.46, 'account_id': tax_account_id,             'name': '15%',                                'date': date(2021, 10, 31),           'invoice_date': date(2021, 10, 10)},
             {'balance':    18.46, 'account_id': tax_account_id,             'name': '15% (Copy)',                         'date': date(2021, 10, 31),           'invoice_date': date(2021, 10, 10)},
-            {'balance': -1760.00, 'account_id': default_account_payable_id, 'name': False,                                'date': date(2021, 10, 31),           'invoice_date': date(2021, 10, 10)},
+            {'balance': -1760.00, 'account_id': default_account_payable_id, 'name': '',                                   'date': date(2021, 10, 31),           'invoice_date': date(2021, 10, 10)},
 
             # company_account expense 2 move
             {'balance':  123.08, 'account_id': product_b_account_id,        'name': 'expense_employee: PB 160 + 2*15% 2', 'date': date(2021, 10, 12),           'invoice_date': False},
@@ -828,7 +828,7 @@ class TestExpenses(TestExpenseCommon):
         expense = expense_form.save()
         self.assertEqual(expense.name, product.display_name)
         self.assertEqual(expense.product_uom_id, product.uom_id)
-        self.assertEqual(expense.tax_ids, product.supplier_taxes_id)
+        self.assertEqual(expense.tax_ids, product.supplier_taxes_id.filtered(lambda t: t.company_id == expense.company_id))
         self.assertEqual(expense.account_id, product._get_product_accounts()['expense'])
 
     def test_attachments_in_move_from_own_expense(self):
@@ -1558,6 +1558,10 @@ class TestExpenses(TestExpenseCommon):
     def test_expense_by_company_with_caba_tax(self):
         """When using cash basis tax in an expense paid by the company, the transition account should not be used."""
 
+        caba_tag = self.env['account.account.tag'].create({
+            'name': 'Cash Basis Tag Final Account',
+            'applicability': 'taxes',
+        })
         caba_transition_account = self.env['account.account'].create({
             'name': 'Cash Basis Tax Transition Account',
             'account_type': 'asset_current',
@@ -1568,6 +1572,17 @@ class TestExpenses(TestExpenseCommon):
             'tax_exigibility': 'on_payment',
             'amount': 15,
             'cash_basis_transition_account_id': caba_transition_account.id,
+            'invoice_repartition_line_ids': [
+                Command.create({
+                    'factor_percent': 100,
+                    'repartition_type': 'base',
+                }),
+                Command.create({
+                    'factor_percent': 100,
+                    'repartition_type': 'tax',
+                    'tag_ids': caba_tag.ids,
+                }),
+            ]
         })
 
         expense_sheet = self.env['hr.expense.sheet'].create({
@@ -1588,6 +1603,7 @@ class TestExpenses(TestExpenseCommon):
         moves = expense_sheet.account_move_ids
         tax_lines = moves.line_ids.filtered(lambda line: line.tax_line_id == caba_tax)
         self.assertNotEqual(tax_lines.account_id, caba_transition_account, "The tax should not be on the transition account")
+        self.assertEqual(tax_lines.tax_tag_ids, caba_tag, "The tax should still retrieve its tags")
 
     def test_expense_mandatory_analytic_plan_product_category(self):
         """
@@ -1620,3 +1636,91 @@ class TestExpenses(TestExpenseCommon):
 
         expense_sheet.expense_line_ids.analytic_distribution = {self.analytic_account_1.id: 100.00}
         expense_sheet.with_context(validate_analytic=True).action_approve_expense_sheets()
+
+    def test_expense_sheet_with_line_ids(self):
+        """
+        Test to create an expense sheet with no account date and having multiple expenses
+        in which one of the expense doesn't have date to get the account date from the max date of expenses.
+        """
+        expense_sheet = self.env['hr.expense.sheet'].create({
+            'name': 'Expense for John Smith',
+            'employee_id': self.expense_employee.id,
+            'payment_method_line_id': self.outbound_payment_method_line.id,
+            'expense_line_ids': [
+                Command.create({
+                    'name': 'Car Travel Expenses',
+                    'employee_id': self.expense_employee.id,
+                    'product_id': self.product_c.id,
+                    'total_amount': 350.00,
+                    'date': False,
+                }),
+                Command.create({
+                    'name': 'Lunch expense',
+                    'employee_id': self.expense_employee.id,
+                    'product_id': self.product_c.id,
+                    'total_amount': 90.00,
+                    'date': '2024-04-30',
+                }),
+            ]
+        })
+        # Validate the values before submitting and approving
+        self.assertRecordValues(expense_sheet, [
+            {'total_amount': 440.00, 'accounting_date': False, 'state': 'draft', 'employee_id': self.expense_employee.id}
+        ])
+        self.assertRecordValues(expense_sheet.expense_line_ids, [
+            {'name': 'Car Travel Expenses', 'total_amount': 350.00, 'date': False},
+            {'name': 'Lunch expense', 'total_amount': 90.00, 'date': date(2024, 4, 30)},
+        ])
+        expense_sheet.action_submit_sheet()
+        expense_sheet.action_approve_expense_sheets()
+        expense_sheet.action_sheet_move_post()
+
+        # Validate the record values after submitting and approving
+        self.assertRecordValues(expense_sheet, [
+            {'total_amount': 440.00, 'accounting_date': date(2024, 4, 30), 'state': 'post', 'employee_id': self.expense_employee.id}
+        ])
+        self.assertRecordValues(expense_sheet.expense_line_ids, [
+            {'name': 'Car Travel Expenses', 'total_amount': 350.00, 'date': False},
+            {'name': 'Lunch expense', 'total_amount': 90.00, 'date': date(2024, 4, 30)},
+        ])
+
+        # Reset to draft to make the accounting_date to False and then recompute it
+        expense_sheet.action_reset_expense_sheets()
+
+        # Validate the accounting_date value to be false
+        self.assertFalse(expense_sheet.accounting_date)
+
+        # Update one of the expense sheet line date
+        expense_sheet.expense_line_ids[1].write({'date': '2024-05-30'})
+
+        expense_sheet.action_submit_sheet()
+        expense_sheet.action_approve_expense_sheets()
+        expense_sheet.action_sheet_move_post()
+
+        # Validate the acction_date value after subitting and approving
+        self.assertTrue(expense_sheet.accounting_date, date(2024, 5, 30))
+
+    def test_expense_set_total_amount_to_0(self):
+        """Checks that amount fields are correctly updating when setting total_amount to 0"""
+        expense = self.env['hr.expense'].create({
+            'name': 'Expense with amount',
+            'employee_id': self.expense_employee.id,
+            'product_id': self.product_c.id,
+            'total_amount_currency': 100.0,
+            'tax_ids': self.tax_purchase_a.ids,
+        })
+        expense.total_amount_currency = 0.0
+        self.assertTrue(expense.currency_id.is_zero(expense.tax_amount))
+        self.assertTrue(expense.company_currency_id.is_zero(expense.total_amount))
+
+    def test_expense_set_quantity_to_0(self):
+        """Checks that amount fields except for unit_amount are correctly updating when setting quantity to 0"""
+        expense = self.env['hr.expense'].create({
+            'name': 'Expense with amount',
+            'employee_id': self.expense_employee.id,
+            'product_id': self.product_b.id,
+            'quantity': 10
+        })
+        expense.quantity = 0
+        self.assertTrue(expense.currency_id.is_zero(expense.total_amount_currency))
+        self.assertEqual(expense.company_currency_id.compare_amounts(expense.price_unit, self.product_b.standard_price), 0)

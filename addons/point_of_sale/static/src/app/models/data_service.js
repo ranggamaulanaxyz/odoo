@@ -7,6 +7,8 @@ import { batched } from "@web/core/utils/timing";
 import IndexedDB from "./utils/indexed_db";
 import { DataServiceOptions } from "./data_service_options";
 import { uuidv4 } from "@point_of_sale/utils";
+import { browser } from "@web/core/browser/browser";
+import { ConnectionLostError } from "@web/core/network/rpc";
 
 const { DateTime } = luxon;
 const INDEXED_DB_VERSION = 1;
@@ -45,6 +47,14 @@ export class PosData extends Reactive {
             }),
             [this.records]
         );
+
+        browser.addEventListener("online", () => {
+            this.setOnline();
+        });
+
+        browser.addEventListener("offline", () => {
+            this.setOffline();
+        });
     }
 
     async resetIndexedDB() {
@@ -57,8 +67,8 @@ export class PosData extends Reactive {
 
     initIndexedDB() {
         // In web tests info is not defined
-        const models = this.opts.databaseTable.map((m) => {
-            return [m.key, m.name];
+        const models = Object.entries(this.opts.databaseTable).map(([name, data]) => {
+            return [data.key, name];
         });
         this.indexedDB = new IndexedDB(this.databaseName, INDEXED_DB_VERSION, models);
     }
@@ -95,25 +105,25 @@ export class PosData extends Reactive {
             return { ...serializedData, JSONuiState: JSON.stringify(uiState), id: record.id };
         };
 
-        for (const model of this.opts.databaseTable) {
-            const nbrRecords = Object.values(records[model.name]).length;
+        for (const [model, params] of Object.entries(this.opts.databaseTable)) {
+            const nbrRecords = records[model].size;
 
             if (!nbrRecords) {
                 continue;
             }
 
-            const data = dataSorter(this.models[model.name].getAll(), model.condition, model.key);
-            this.indexedDB.create(model.name, data.put);
-            this.indexedDB.delete(model.name, data.remove);
+            const data = dataSorter(this.models[model].getAll(), params.condition, params.key);
+            this.indexedDB.create(model, data.put);
+            this.indexedDB.delete(model, data.remove);
         }
 
-        this.indexedDB.readAll(this.opts.databaseTable.map((db) => db.name)).then((data) => {
+        this.indexedDB.readAll(Object.keys(this.opts.databaseTable)).then((data) => {
             if (!data) {
                 return;
             }
 
             for (const [model, records] of Object.entries(data)) {
-                const key = this.opts.databaseTable.find((db) => db.name === model).key;
+                const key = this.opts.databaseTable[model].key;
                 for (const record of records) {
                     const localRecord = this.models[model].get(record.id);
 
@@ -137,11 +147,11 @@ export class PosData extends Reactive {
         }
 
         const newData = {};
-        for (const model of this.opts.databaseTable) {
-            const rawRec = data[model.name];
+        for (const model of Object.keys(this.opts.databaseTable)) {
+            const rawRec = data[model];
 
             if (rawRec) {
-                newData[model.name] = rawRec.filter((r) => !this.models[model.name].get(r.id));
+                newData[model] = rawRec.filter((r) => !this.models[model].get(r.id));
             }
         }
 
@@ -221,7 +231,7 @@ export class PosData extends Reactive {
         const { models, records, indexedRecords } = createRelatedModels(
             relations,
             modelClasses,
-            this.opts.databaseIndex
+            this.opts
         );
 
         this.records = records;
@@ -259,6 +269,10 @@ export class PosData extends Reactive {
         this.network.loading = true;
 
         try {
+            if (this.network.offline) {
+                throw new ConnectionLostError();
+            }
+
             let result = true;
             let limitedFields = false;
             if (fields.length === 0) {
@@ -358,7 +372,6 @@ export class PosData extends Reactive {
                 result = results[model];
             }
 
-            this.setOnline();
             return result;
         } catch (error) {
             const uuids = this.network.unsyncData.map((d) => d.uuid);

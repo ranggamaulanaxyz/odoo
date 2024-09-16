@@ -280,7 +280,7 @@ class MassMailing(models.Model):
 
     def _compute_total(self):
         for mass_mailing in self:
-            total = self.env[mass_mailing.mailing_model_real].search_count(mass_mailing._parse_mailing_domain())
+            total = self.env[mass_mailing.mailing_model_real].search_count(mass_mailing._get_recipients_domain())
             if total and mass_mailing.ab_testing_enabled and mass_mailing.ab_testing_pc < 100:
                 total = max(int(total / 100.0 * mass_mailing.ab_testing_pc), 1)
             mass_mailing.total = total
@@ -680,7 +680,7 @@ class MassMailing(models.Model):
         return {
             'name': model_name,
             'type': 'ir.actions.act_window',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'res_model': 'link.tracker',
             'domain': [('mass_mailing_id', '=', self.id)],
             'help': Markup('<p class="o_view_nocontent_smiling_face">%s</p><p>%s</p>') % (
@@ -711,7 +711,7 @@ class MassMailing(models.Model):
         filter_key = 'search_default_filter_%s' % (view_filter)
         action['context'][filter_key] = True
         action['views'] = [
-            (self.env.ref('mass_mailing.mailing_trace_view_tree_mail').id, 'tree'),
+            (self.env.ref('mass_mailing.mailing_trace_view_tree_mail').id, 'list'),
             (self.env.ref('mass_mailing.mailing_trace_view_form').id, 'form')
         ]
         return action
@@ -774,7 +774,7 @@ class MassMailing(models.Model):
         action = {
             'name': model_name,
             'type': 'ir.actions.act_window',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'res_model': self.mailing_model_real,
             'domain': [('id', 'in', res_ids)],
             'context': dict(self._context, create=False),
@@ -839,7 +839,7 @@ class MassMailing(models.Model):
         return {
             'name': _('A/B Tests'),
             'type': 'ir.actions.act_window',
-            'view_mode': 'tree,kanban,form,calendar,graph',
+            'view_mode': 'list,kanban,form,calendar,graph',
             'res_model': 'mailing.mailing',
             'domain': expression.AND([
                 [('campaign_id', '=', self.campaign_id.id)],
@@ -996,7 +996,7 @@ class MassMailing(models.Model):
         }
 
     def _get_recipients(self):
-        mailing_domain = self._parse_mailing_domain()
+        mailing_domain = self._get_recipients_domain()
         res_ids = self.env[self.mailing_model_real].search(mailing_domain).ids
 
         # randomly choose a fragment
@@ -1014,6 +1014,10 @@ class MassMailing(models.Model):
                 topick = len(remaining)
             res_ids = random.sample(sorted(remaining), topick)
         return res_ids
+
+    def _get_recipients_domain(self):
+        """Overridable getter used to get the domain of the recipients at the time of sending."""
+        return self._parse_mailing_domain()
 
     def _get_remaining_recipients(self):
         res_ids = self._get_recipients()
@@ -1069,6 +1073,9 @@ class MassMailing(models.Model):
         return url
 
     def action_send_mail(self, res_ids=None):
+        return self._action_send_mail(res_ids)
+
+    def _action_send_mail(self, res_ids=None):
         author_id = self.env.user.partner_id.id
 
         for mailing in self:
@@ -1148,7 +1155,7 @@ class MassMailing(models.Model):
             )
             if len(mass_mailing._get_remaining_recipients()) > 0:
                 mass_mailing.state = 'sending'
-                mass_mailing.action_send_mail()
+                mass_mailing._action_send_mail()
             else:
                 mass_mailing.write({
                     'state': 'done',
@@ -1325,7 +1332,7 @@ class MassMailing(models.Model):
         root = lxml.html.fromstring(html_content)
         did_modify_body = False
 
-        conversion_info = []  # list of tuples (image: base64 image, node: lxml node, old_url: string or None))
+        conversion_info = []  # list of tuples (image: base64 image, node: lxml node, old_url: string or None, original_id))
         with requests.Session() as session:
             for node in root.iter(lxml.etree.Element, lxml.etree.Comment):
                 if node.tag == 'img':
@@ -1333,12 +1340,12 @@ class MassMailing(models.Model):
                     match = image_re.match(node.attrib.get('src', ''))
                     if match:
                         image = match.group(2).encode()  # base64 image as bytes
-                        conversion_info.append((image, node, None))
+                        conversion_info.append((image, node, None, int(node.attrib.get('data-original-id') or "0")))
                 elif 'base64' in (node.attrib.get('style') or ''):
                     # Convert base64 images in inline styles to attachments.
                     for match in re.findall(r'data:image/[A-Za-z]+;base64,.+?(?=&\#34;|\"|\'|&quot;|\))', node.attrib.get('style')):
                         image = re.sub(r'data:image/[A-Za-z]+;base64,', '', match).encode()  # base64 image as bytes
-                        conversion_info.append((image, node, match))
+                        conversion_info.append((image, node, match, int(node.attrib.get('data-original-id') or "0")))
                 elif mso_re.match(node.text or ''):
                     # Convert base64 images (in img tags or inline styles) in mso comments to attachments.
                     base64_in_element_regex = re.compile(r"""
@@ -1346,7 +1353,7 @@ class MassMailing(models.Model):
                     """, re.VERBOSE)
                     for match in re.findall(base64_in_element_regex, node.text):
                         image = re.sub(r'data:image/[A-Za-z]+;base64,', '', match).encode()  # base64 image as bytes
-                        conversion_info.append((image, node, match))
+                        conversion_info.append((image, node, match, int(node.attrib.get('data-original-id') or "0")))
                     # Crop VML images.
                     for match in re.findall(r'<v:image[^>]*>', node.text):
                         url = re.search(r'src=\s*\"([^\"]+)\"', match)[1]
@@ -1368,11 +1375,11 @@ class MassMailing(models.Model):
                             else:
                                 image_processor = ImageProcess(image)
                                 image = image_processor.crop_resize(target_width, target_height, 0, 0)
-                                conversion_info.append((base64.b64encode(image.source), node, url))
+                                conversion_info.append((base64.b64encode(image.source), node, url, int(node.attrib.get('data-original-id') or "0")))
 
         # Apply the changes.
-        urls = self._create_attachments_from_inline_images([image for (image, _, _) in conversion_info])
-        for ((image, node, old_url), new_url) in zip(conversion_info, urls):
+        urls = self._create_attachments_from_inline_images([(image, original_id) for (image, _, _, original_id) in conversion_info])
+        for ((image, node, old_url, original_id), new_url) in zip(conversion_info, urls):
             did_modify_body = True
             if node.tag == 'img':
                 node.attrib['src'] = new_url
@@ -1395,27 +1402,47 @@ class MassMailing(models.Model):
             ('res_id', '=', self.id),
         ]).mapped(lambda record: (record.checksum, record)))
 
-        attachments, vals_for_attachs = [], []
+        attachments, vals_for_attachs, checksums = [], [], []
+        checksums_set, checksum_original_id, new_attachment_by_checksum = set(), {}, {}
         next_img_id = len(existing_attachments)
-        for b64image in b64images:
+        for (b64image, original_id) in b64images:
             checksum = IrAttachment._compute_checksum(base64.b64decode(b64image))
+            checksums.append(checksum)
             existing_attach = existing_attachments.get(checksum)
             # Existing_attach can be None, in which case it acts as placeholder
             # for attachment to be created.
             attachments.append(existing_attach)
-            if not existing_attach:
+            if original_id:
+                checksum_original_id[checksum] = original_id
+            if not existing_attach and not checksum in checksums_set:
+                # We create only one attachment per checksum
                 vals_for_attachs.append({
                     'datas': b64image,
                     'name': f"image_mailing_{self.id}_{next_img_id}",
                     'type': 'binary',
                     'res_id': self.id,
-                    'res_model': 'mailing.mailing'
+                    'res_model': 'mailing.mailing',
+                    'checksum': checksum,
                 })
+                checksums_set.add(checksum)
                 next_img_id += 1
+        for vals in vals_for_attachs:
+            if vals['checksum'] in checksum_original_id:
+                vals['original_id'] = checksum_original_id[vals['checksum']]
+            del vals['checksum']
 
         new_attachments = iter(IrAttachment.create(vals_for_attachs))
+        checksum_iter = iter(checksums)
         # Replace None entries by newly created attachments.
-        attachments = [(attach or next(new_attachments)) for attach in attachments]
+        for i in range(len(attachments)):
+            checksum = next(checksum_iter)
+            if attachments[i]:
+                continue
+            if checksum in new_attachment_by_checksum:
+                attachments[i] = new_attachment_by_checksum[checksum]
+            else:
+                attachments[i] = next(new_attachments)
+                new_attachment_by_checksum[checksum] = attachments[i]
 
         urls = []
         for attachment in attachments:

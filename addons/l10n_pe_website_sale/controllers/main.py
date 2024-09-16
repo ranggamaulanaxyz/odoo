@@ -1,9 +1,7 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import _lt
-from odoo.http import request, route
-
 from odoo.addons.website_sale.controllers.main import WebsiteSale
+from odoo.http import request, route
 
 
 class L10nPEWebsiteSale(WebsiteSale):
@@ -23,7 +21,7 @@ class L10nPEWebsiteSale(WebsiteSale):
         return mandatory_fields
 
     def _get_mandatory_delivery_address_fields(self, country_sudo):
-        mandatory_fields = super()._get_mandatory_billing_address_fields(country_sudo)
+        mandatory_fields = super()._get_mandatory_delivery_address_fields(country_sudo)
         if request.website.sudo().company_id.country_id.code != 'PE':
             return mandatory_fields
 
@@ -46,7 +44,7 @@ class L10nPEWebsiteSale(WebsiteSale):
                 'identification_types': LatamIdentificationType.search([
                     '|', ('country_id', '=', False), ('country_id.code', '=', 'PE')
                 ]) if can_edit_vat else LatamIdentificationType,
-                'vat_label': _lt("Identification Number"),
+                'vat_label': request.env._("Identification Number"),
             })
 
         state = request.env['res.country.state'].browse(rendering_values['state_id'])

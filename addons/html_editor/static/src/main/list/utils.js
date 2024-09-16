@@ -1,13 +1,13 @@
 export function getListMode(pnode) {
-    if (pnode.tagName == "OL") {
+    if (pnode.tagName === "OL") {
         return "OL";
     }
     return pnode.classList.contains("o_checklist") ? "CL" : "UL";
 }
 
 export function createList(document, mode) {
-    const node = document.createElement(mode == "OL" ? "OL" : "UL");
-    if (mode == "CL") {
+    const node = document.createElement(mode === "OL" ? "OL" : "UL");
+    if (mode === "CL") {
         node.classList.add("o_checklist");
     }
     return node;
@@ -48,16 +48,6 @@ export function compareListTypes(a, b) {
         return compareListTypes(a.firstElementChild, b.firstElementChild);
     }
     return true;
-}
-
-export function applyToTree(root, func) {
-    const modifiedRoot = func(root);
-    let next = modifiedRoot.firstElementChild;
-    while (next) {
-        const modifiedNext = applyToTree(next, func);
-        next = modifiedNext.nextElementSibling;
-    }
-    return modifiedRoot;
 }
 
 export function isListItem(node) {

@@ -25,7 +25,7 @@ test("add livechat in the sidebar on visitor sending first message", async () =>
     const livechatChannelId = pyEnv["im_livechat.channel"].create({
         user_ids: [serverState.userId],
     });
-    const guestId = pyEnv["mail.guest"].create({ name: "Visitor (Belgium)" });
+    const guestId = pyEnv["mail.guest"].create({ name: "Visitor" });
     const channelId = pyEnv["discuss.channel"].create({
         anonymous_name: "Visitor (Belgium)",
         channel_member_ids: [
@@ -75,7 +75,7 @@ test("invite button should be present on livechat", async () => {
     });
     await start();
     await openDiscuss(channelId);
-    await contains(".o-mail-Discuss button[title='Add Users']");
+    await contains(".o-mail-Discuss button[title='Invite People']");
 });
 
 test("livechats are sorted by last activity time in the sidebar: most recent at the top", async () => {

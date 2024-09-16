@@ -1414,7 +1414,7 @@ class MailThread(models.AbstractModel):
             data = custom_values.copy()
         model_fields = self.fields_get()
         name_field = self._rec_name or 'name'
-        if name_field in model_fields and not data.get('name'):
+        if name_field in model_fields and not data.get(name_field):
             data[name_field] = msg_dict.get('subject', '')
 
         primary_email = self._mail_get_primary_email_field()
@@ -2873,6 +2873,14 @@ class MailThread(models.AbstractModel):
     def _message_create(self, values_list):
         """ Low-level helper to create mail.message records. It is mainly used
         to hide the cleanup of given values, for mail gateway or helpers."""
+        values_list = [
+            {
+                key: val
+                for key, val in values.items()
+                if key not in self._get_message_create_ignore_field_names()
+            }
+            for values in values_list
+        ]
         create_values_list = []
 
         # preliminary value safety check
@@ -2928,6 +2936,12 @@ class MailThread(models.AbstractModel):
             'subtype_id',
             'tracking_value_ids',
         }
+
+    def _get_message_create_ignore_field_names(self):
+        """Some fields should be silently ignored when creating a mail.message,
+        without raising an exception. Those fields are generally handled in
+        _message_post_after_hook, which also receives message values."""
+        return set()
 
     def _get_source_from_ref(self, source_ref):
         """ From a source_reference, return either a mail template, either
@@ -3080,7 +3094,7 @@ class MailThread(models.AbstractModel):
         """
         if not self.env.user._is_internal():
             raise exceptions.AccessError(_("Access Denied"))
-        self.check_access_rights('read')
+        self.browse().check_access('read')
 
         if notification_type == 'email':
             self._notify_cancel_by_type_generic('email')
@@ -3495,7 +3509,7 @@ class MailThread(models.AbstractModel):
         tracking = []
         if check_tracking:
             tracking_values = self.env['mail.tracking.value'].sudo().search(
-                [('mail_message_id', '=', message.id)]
+                [('mail_message_id', 'in', message.ids)]
             )._filter_has_field_access(self.env)
             if tracking_values and hasattr(record_wlang, '_track_filter_for_display'):
                 tracking_values = record_wlang._track_filter_for_display(tracking_values)
@@ -4101,7 +4115,7 @@ class MailThread(models.AbstractModel):
         author_id = [msg_vals.get('author_id')] if 'author_id' in msg_vals else msg_sudo.author_id.ids
         # never send to author and to people outside Odoo (email), except comments
         pids = set()
-        if msg_type == 'comment':
+        if msg_type in {'comment', 'whatsapp_message'}:
             pids = set(notif_pids) - set(author_id)
         elif msg_type in ('notification', 'user_notification', 'email'):
             pids = (set(notif_pids) - set(author_id) - set(no_inbox_pids))
@@ -4184,13 +4198,11 @@ class MailThread(models.AbstractModel):
 
         if partner_ids and adding_current:
             try:
-                self.check_access_rights('read')
-                self.check_access_rule('read')
+                self.check_access('read')
             except exceptions.AccessError:
                 return False
         else:
-            self.check_access_rights('write')
-            self.check_access_rule('write')
+            self.check_access('write')
 
         # filter inactive and private addresses
         if partner_ids and not adding_current:
@@ -4236,11 +4248,9 @@ class MailThread(models.AbstractModel):
         # company, we allow internal users to unsubscribe themselves without
         # checking any rights.
         if set(partner_ids) != {self.env.user.partner_id.id}:
-            self.check_access_rights('write')
-            self.check_access_rule('write')
+            self.check_access('write')
         elif not self.env.user._is_internal():
-            self.check_access_rights('read')
-            self.check_access_rule('read')
+            self.check_access('read')
         self.env['mail.followers'].sudo().search([
             ('res_model', '=', self._name),
             ('res_id', 'in', self.ids),
@@ -4385,6 +4395,7 @@ class MailThread(models.AbstractModel):
 
         return True
 
+    @api.readonly
     def message_get_followers(self, after=None, limit=100, filter_recipients=False):
         self.ensure_one()
         store = Store()
@@ -4457,11 +4468,11 @@ class MailThread(models.AbstractModel):
         msg_vals = {"res_id": new_thread.id, "model": new_thread._name}
         if new_parent_message:
             msg_vals["parent_id"] = new_parent_message.id
-        msg_comment.write(msg_vals)
+        msg_comment.sudo().write(msg_vals)
 
         # other than comment: reset subtype
         msg_vals["subtype_id"] = None
-        msg_not_comment.write(msg_vals)
+        msg_not_comment.sudo().write(msg_vals)
         return True
 
     def _message_update_content(self, message, body, attachment_ids=None, partner_ids=None,
@@ -4528,7 +4539,7 @@ class MailThread(models.AbstractModel):
         empty_messages._cleanup_side_records()
         empty_messages.write({'pinned_at': None})
         res = {
-            "attachments": Store.many(message.attachment_ids.sorted("id")),
+            "attachment_ids": Store.many(message.attachment_ids.sorted("id")),
             "body": message.body,
             "pinned_at": message.pinned_at,
             "recipients": Store.many(message.partner_ids, fields=["name", "write_date"]),
@@ -4546,7 +4557,15 @@ class MailThread(models.AbstractModel):
 
     def _get_mail_thread_data_attachments(self):
         self.ensure_one()
-        return self.env['ir.attachment'].search([('res_id', '=', self.id), ('res_model', '=', self._name)], order='id desc')
+        res = self.env['ir.attachment'].search([('res_id', '=', self.id), ('res_model', '=', self._name)], order='id desc')
+        if 'original_id' in self.env['ir.attachment']._fields:
+            # If the image is SVG: We take the png version if exist otherwise we take the svg
+            # If the image is not SVG: We take the original one if exist otherwise we take it
+            svg_ids = res.filtered(lambda attachment: attachment.mimetype == 'image/svg+xml')
+            non_svg_ids = res - svg_ids
+            original_ids = res.mapped('original_id')
+            res = res.filtered(lambda attachment: (attachment in svg_ids and attachment not in original_ids) or (attachment in non_svg_ids and attachment.original_id not in non_svg_ids))
+        return res
 
     def _thread_to_store(self, store: Store, /, *, fields=None, request_list=None):
         if fields is None:
@@ -4561,8 +4580,7 @@ class MailThread(models.AbstractModel):
                 res["hasWriteAccess"] = False
                 res["canPostOnReadonly"] = self._mail_post_access == "read"
             try:
-                thread.check_access_rights("write")
-                thread.check_access_rule("write")
+                thread.check_access("write")
                 if request_list:
                     res["hasWriteAccess"] = True
             except AccessError:
@@ -4618,10 +4636,7 @@ class MailThread(models.AbstractModel):
 
     @api.model
     def _get_thread_with_access(self, thread_id, mode="read", **kwargs):
-        try:
-            thread = self.with_context(active_test=False).search([("id", "=", thread_id)])
-            thread.check_access_rights(mode)
-            thread.check_access_rule(mode)
-            return thread.with_context(active_test=True)
-        except AccessError:
-            return self.browse()
+        thread = self.browse(thread_id)
+        if thread.exists() and thread.sudo(False).has_access(mode):
+            return thread
+        return self.browse()

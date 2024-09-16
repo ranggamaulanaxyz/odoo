@@ -53,15 +53,24 @@ class OdooBaseChecker(BaseChecker):
 
     @only_required_for_messages('gettext-variable', 'gettext-placeholders', 'gettext-repr')
     def visit_call(self, node):
-        if isinstance(node.func, astroid.Name) and node.func.name in ('_', '_lt'):
-            first_arg = node.args[0]
-            if isinstance(first_arg.value, str):
-                if not isinstance(first_arg, astroid.Const):
-                    self.add_message('gettext-variable', node=node)
-                elif len(PLACEHOLDER_REGEXP.findall(str(first_arg.value))) >= 2:
-                    self.add_message('gettext-placeholders', node=node)
-                elif re.search(REPR_REGEXP, first_arg.value):
-                    self.add_message('gettext-repr', node=node)
+        if isinstance(node.func, astroid.Name):
+            # direct function call to _
+            node_name = node.func.name
+        elif isinstance(node.func, astroid.Attribute):
+            # method call to env._
+            node_name = node.func.attrname
+        else:
+            return
+        if node_name not in ("_", "_lt"):
+            return
+        first_arg = node.args[0]
+        if not (isinstance(first_arg, astroid.Const) and isinstance(first_arg.value, str)):
+            self.add_message("gettext-variable", node=node)
+            return
+        if len(PLACEHOLDER_REGEXP.findall(first_arg.value)) >= 2:
+            self.add_message("gettext-placeholders", node=node)
+        if re.search(REPR_REGEXP, first_arg.value):
+            self.add_message("gettext-repr", node=node)
 
 
 def register(linter):

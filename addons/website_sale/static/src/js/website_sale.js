@@ -76,8 +76,15 @@ export const WebsiteSale = publicWidget.Widget.extend(VariantMixin, cartHandlerM
         this._startZoom();
 
         // This allows conditional styling for the filmstrip
-        if (isBrowserFirefox() || hasTouch()) {
-            this.el.querySelector('.o_wsale_filmstip_container')?.classList.add('o_wsale_filmstip_fancy_disabled');
+        const filmstripContainer = this.el.querySelector('.o_wsale_filmstip_container');
+        const filmstripContainerWidth = filmstripContainer
+            ? filmstripContainer.getBoundingClientRect().width : 0;
+        const filmstripWrapper = this.el.querySelector('.o_wsale_filmstip_wrapper');
+        const filmstripWrapperWidth = filmstripWrapper
+            ? filmstripWrapper.getBoundingClientRect().width : 0;
+        const isFilmstripScrollable = filmstripWrapperWidth < filmstripContainerWidth
+        if (isBrowserFirefox() || hasTouch() || isFilmstripScrollable) {
+            filmstripContainer?.classList.add('o_wsale_filmstip_fancy_disabled');
         }
 
         this.getRedirectOption();
@@ -495,7 +502,7 @@ export const WebsiteSale = publicWidget.Widget.extend(VariantMixin, cartHandlerM
             return;
         }
         var $aSubmit = $(ev.currentTarget);
-        if (!ev.isDefaultPrevented() && !$aSubmit.is(".disabled")) {
+        if (!ev.defaultPrevented && !$aSubmit.is(".disabled")) {
             ev.preventDefault();
             $aSubmit.closest('form').submit();
         }
@@ -517,7 +524,7 @@ export const WebsiteSale = publicWidget.Widget.extend(VariantMixin, cartHandlerM
      * @param {Event} ev
      */
     _onChangeAttribute: function (ev) {
-        if (!ev.isDefaultPrevented()) {
+        if (!ev.defaultPrevented) {
             ev.preventDefault();
             const productGrid = this.el.querySelector(".o_wsale_products_grid_table_wrapper");
             if (productGrid) {
@@ -550,7 +557,7 @@ export const WebsiteSale = publicWidget.Widget.extend(VariantMixin, cartHandlerM
             return;
         }
         var $this = $(ev.currentTarget);
-        if (!ev.isDefaultPrevented() && !$this.is(".disabled")) {
+        if (!ev.defaultPrevented && !$this.is(".disabled")) {
             ev.preventDefault();
             var oldurl = $this.attr('action');
             oldurl += (oldurl.indexOf("?")===-1) ? "?" : "";
@@ -692,6 +699,32 @@ publicWidget.registry.WebsiteSaleLayout = publicWidget.Widget.extend({
     },
 });
 
+publicWidget.registry.WebsiteSaleAccordionProduct = publicWidget.Widget.extend({
+    selector: "#product_accordion",
+
+    /**
+     * @override
+     */
+    async start() {
+        await this._super(...arguments);
+        this._updateAccordionActiveItem();
+    },
+
+    /**
+     * Replace the .SCSS styling applied awaiting Js for the default bootstrap classes,
+     * opening the first accordion entry and restoring flush behavior.
+     *
+     * @private
+     */
+    _updateAccordionActiveItem() {
+        const firstAccordionItemEl = this.el.querySelector('.accordion-item');
+        const firstAccordionItemButtonEl = firstAccordionItemEl.querySelector('.accordion-button');
+        firstAccordionItemButtonEl.classList.remove('collapsed');
+        firstAccordionItemButtonEl.setAttribute('aria-expanded', 'true');
+        firstAccordionItemEl.querySelector('.accordion-collapse').classList.add('show');
+        this.target.classList.remove('o_accordion_not_initialized');
+    },
+});
 
 publicWidget.registry.websiteSaleCarouselProduct = publicWidget.Widget.extend({
     selector: '#o-carousel-product',
@@ -836,6 +869,7 @@ publicWidget.registry.websiteSaleProductPageReviews = publicWidget.Widget.extend
 export default {
     WebsiteSale: publicWidget.registry.WebsiteSale,
     WebsiteSaleLayout: publicWidget.registry.WebsiteSaleLayout,
+    WebsiteSaleProductPage: publicWidget.registry.WebsiteSaleAccordionProduct,
     WebsiteSaleCarouselProduct: publicWidget.registry.websiteSaleCarouselProduct,
     WebsiteSaleProductPageReviews: publicWidget.registry.websiteSaleProductPageReviews,
 };

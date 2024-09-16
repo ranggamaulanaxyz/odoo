@@ -1,5 +1,5 @@
 import { registry } from "@web/core/registry";
-import { click, contains, createFile, inputFiles } from "@web/../tests/utils";
+import { click, contains, inputFiles } from "@web/../tests/utils";
 
 registry.category("web_tour.tours").add("discuss_channel_public_tour.js", {
     test: true,
@@ -39,24 +39,57 @@ registry.category("web_tour.tours").add("discuss_channel_public_tour.js", {
             run: "edit cheese",
         },
         {
-            content: "Add one file in composer",
+            content: "Add a text file in composer",
             trigger: ".o-mail-Composer button[aria-label='Attach files']",
             async run() {
-                await inputFiles(".o-mail-Composer-coreMain .o_input_file", [
-                    await createFile({
-                        content: "hello, world",
-                        contentType: "text/plain",
-                        name: "text.txt",
-                    }),
-                ]);
+                const text = new File(["hello, world"], "text.txt", { type: "text/plain" });
+                await inputFiles(".o-mail-Composer-coreMain .o_input_file", [text]);
             },
         },
         {
             trigger: ".o-mail-AttachmentCard:not(.o-isUploading)", // waiting the attachment to be uploaded
         },
         {
-            content: "Check the earlier provided attachment is listed",
+            content: "Check the text attachment is listed",
             trigger: '.o-mail-AttachmentCard[title="text.txt"]',
+        },
+        {
+            content: "Add an image file in composer",
+            trigger: ".o-mail-Composer button[aria-label='Attach files']",
+            async run() {
+                await inputFiles(".o-mail-Composer-coreMain .o_input_file", [
+                    new File(
+                        [
+                            await (
+                                await fetch(
+                                    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIW2P4v5ThPwAG7wKklwQ/bwAAAABJRU5ErkJggg=="
+                                )
+                            ).blob(),
+                        ],
+                        "image.png",
+                        { type: "image/png" }
+                    ),
+                ]);
+            },
+        },
+        {
+            trigger: ".o-mail-AttachmentImage:not(.o-isUploading)",
+        },
+        {
+            content: "Check the image attachment is listed",
+            trigger: '.o-mail-AttachmentImage[title="image.png"]',
+            async run() {
+                const store = odoo.__WOWL_DEBUG__.root.env.services["mail.store"];
+                if (store.self.type === "guest") {
+                    const src = this.anchor.querySelector("img").src;
+                    const token = store.Attachment.get(
+                        (src.match("/web/image/([0-9]+)") || []).at(-1)
+                    )?.access_token;
+                    if (!(token && src.includes(`access_token=${token}`))) {
+                        throw new Error("Access token of the attachment isn't correct.");
+                    }
+                }
+            },
         },
         {
             content: "Send message",
@@ -120,12 +153,9 @@ registry.category("web_tour.tours").add("discuss_channel_public_tour.js", {
             content: "Add one more file in composer",
             trigger: ".o-mail-Message .o-mail-Composer button[aria-label='Attach files']",
             async run() {
-                inputFiles(".o-mail-Message .o-mail-Composer-coreMain .o_input_file", [
-                    await createFile({
-                        content: "hello 2",
-                        contentType: "text/plain",
-                        name: "extra.txt",
-                    }),
+                const extratxt = new File(["hello 2"], "extra.txt", { type: "text/plain" });
+                await inputFiles(".o-mail-Message .o-mail-Composer-coreMain .o_input_file", [
+                    extratxt,
                 ]);
             },
         },

@@ -87,7 +87,7 @@ class Action(Controller):
                             display_names.append(act['display_name'])
                     else:
                         if act['res_model'] and act['type'] != 'ir.actions.client':
-                            request.env[act['res_model']].check_access_rights('read')
+                            request.env[act['res_model']].check_access('read')
                             # action shouldn't be available on its own if it doesn't have multi-record views
                             name = act['display_name'] if any(view[1] != 'form' and view[1] != 'search' for view in act['views']) else None
                         else:
@@ -96,7 +96,10 @@ class Action(Controller):
                 elif action.get('model'):
                     Model = request.env[action.get('model')]
                     if record_id:
-                        display_names.append(Model.browse(record_id).display_name)
+                        if record_id == 'new':
+                            display_names.append(_("New"))
+                        else:
+                            display_names.append(Model.browse(record_id).display_name)
                     else:
                         # This case cannot be produced by the web client
                         raise BadRequest('Actions with a model should also have a resId')

@@ -89,7 +89,7 @@ class PrinterDriver(Driver):
 
         if any(cmd in device['device-id'] for cmd in ['CMD:STAR;', 'CMD:ESC/POS;']):
             self.device_subtype = "receipt_printer"
-        elif "COMMAND SET:ZPL;" in device['device-id']:
+        elif any(cmd in device['device-id'] for cmd in ['COMMAND SET:ZPL;', 'CMD:ESCLABEL;']):
             self.device_subtype = "label_printer"
         else:
             self.device_subtype = "office_printer"
@@ -180,11 +180,25 @@ class PrinterDriver(Driver):
         }
         event_manager.device_changed(self)
 
-    def print_raw(self, data):
-        process = subprocess.Popen(["lp", "-d", self.device_identifier], stdin=subprocess.PIPE)
+    def print_raw(self, data, landscape=False, duplex=True):
+        """
+        Print raw data to the printer
+        :param data: The data to print
+        :param landscape: Print in landscape mode (Default: False)
+        :param duplex: Print in duplex mode (recto-verso) (Default: True)
+        """
+        options = []
+        if landscape:
+            options.extend(['-o', 'orientation-requested=4'])
+        if not duplex:
+            options.extend(['-o', 'sides=one-sided'])
+        cmd = ["lp", "-d", self.device_identifier, *options]
+
+        _logger.debug("Printing using command: %s", cmd)
+        process = subprocess.Popen(cmd, stdin=subprocess.PIPE)
         process.communicate(data)
         if process.returncode != 0:
-            # The stderr isn't meaningful so we don't log it ('No such file or directory')
+            # The stderr isn't meaningful, so we don't log it ('No such file or directory')
             _logger.error('Printing failed: printer with the identifier "%s" could not be found',
                           self.device_identifier)
 

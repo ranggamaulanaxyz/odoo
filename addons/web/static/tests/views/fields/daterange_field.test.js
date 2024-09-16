@@ -802,9 +802,9 @@ test("list daterange with start date and empty end date", async () => {
         type: "list",
         resModel: "partner",
         arch: /* xml */ `
-            <tree>
+            <list>
                 <field name="date" widget="daterange" options="{'end_date_field': 'date_end'}" />
-            </tree>`,
+            </list>`,
     });
 
     const arrowIcon = queryFirst(".fa-long-arrow-right");
@@ -832,9 +832,9 @@ test("list daterange with empty start date and end date", async () => {
         type: "list",
         resModel: "partner",
         arch: /* xml */ `
-            <tree>
+            <list>
                 <field name="date" widget="daterange" options="{'end_date_field': 'date_end'}" />
-            </tree>`,
+            </list>`,
     });
 
     const arrowIcon = queryFirst(".fa-long-arrow-right");
@@ -865,11 +865,11 @@ test("list daterange: column widths", async () => {
         type: "list",
         resModel: "partner",
         arch: /* xml */ `
-            <tree>
+            <list>
                 <field name="date" widget="daterange" options="{'end_date_field': 'date_end'}" />
                 <field name="datetime" widget="daterange" options="{'end_date_field': 'datetime_end'}" />
                 <field name="char_field" />
-            </tree>`,
+            </list>`,
     });
 
     expect(".o_data_row").toHaveCount(1);
@@ -888,11 +888,11 @@ test("list daterange: column widths (no record)", async () => {
         type: "list",
         resModel: "partner",
         arch: /* xml */ `
-            <tree>
+            <list>
                 <field name="date" widget="daterange" options="{'end_date_field': 'date_end'}" />
                 <field name="datetime" widget="daterange" options="{'end_date_field': 'datetime_end'}" />
                 <field name="char_field" />
-            </tree>`,
+            </list>`,
     });
 
     expect(".o_data_row").toHaveCount(0);
@@ -1065,4 +1065,25 @@ test("update the selected input date after removing the existing date", async ()
     await contains(getPickerCell("12")).click();
 
     expect("input[data-field=date]").toHaveValue("02/12/2017");
+});
+
+test("daterange field in kanban with show_time option", async () => {
+    mockTimeZone(+2);
+    Partner._records[0].datetime_end = "2017-03-13 00:00:00";
+
+    await mountView({
+        type: "kanban",
+        resModel: "partner",
+        arch: `
+            <kanban>
+                <templates>
+                    <t t-name="kanban-card">
+                        <field name="datetime" widget="daterange" options="{'show_time': false, 'end_date_field': 'datetime_end'}"/>
+                    </t>
+                </templates>
+            </kanban>`,
+        resId: 1,
+    });
+
+    expect(queryAllTexts(".o_field_daterange span")).toEqual(["02/08/2017", "03/13/2017"]);
 });

@@ -45,7 +45,7 @@ class TestSnippets(HttpCase):
                 'name': 'My Mail Group',
                 'alias_name': 'my_mail_group',
             })
-        self.start_tour(f"/odoo/action-website.website_preview?{path}", "snippets_all_drag_and_drop", login='admin', timeout=300)
+        self.start_tour(f"/odoo/action-website.website_preview?{path}", "snippets_all_drag_and_drop", login='admin', timeout=600)
 
     def test_04_countdown_preview(self):
         self.start_tour(self.env['website'].get_client_action_url('/'), 'snippet_countdown', login='admin')
@@ -95,7 +95,7 @@ class TestSnippets(HttpCase):
         website = self.env.ref('website.default_website')
         website.cookies_bar = True
         self.start_tour(self.env['website'].get_client_action_url('/'), 'snippet_popup_and_scrollbar', login='admin')
-        self.start_tour(self.env['website'].get_client_action_url('/'), 'snippet_popup_and_animations', login='admin')
+        self.start_tour(self.env['website'].get_client_action_url('/'), 'snippet_popup_and_animations', login='admin', timeout=90)
 
     def test_drag_and_drop_on_non_editable(self):
         self.start_tour(self.env['website'].get_client_action_url('/'), 'test_drag_and_drop_on_non_editable', login='admin')

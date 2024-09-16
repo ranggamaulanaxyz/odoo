@@ -4,13 +4,13 @@
 import datetime
 import logging
 
+from odoo import Command, api, fields, models
+from odoo.exceptions import AccessError, ValidationError
 from odoo.tools import SQL
 from odoo.tools.float_utils import float_round
-_logger = logging.getLogger('precompute_setter')
-
-from odoo import models, fields, api, _, Command
-from odoo.exceptions import AccessError, ValidationError
 from odoo.tools.translate import html_translate
+
+_logger = logging.getLogger('precompute_setter')
 
 
 class Category(models.Model):
@@ -26,8 +26,12 @@ class Category(models.Model):
     parent_path = fields.Char(index=True)
     depth = fields.Integer(compute="_compute_depth")
     root_categ = fields.Many2one(_name, compute='_compute_root_categ')
-    display_name = fields.Char(compute='_compute_display_name', recursive=True,
-                               inverse='_inverse_display_name')
+    display_name = fields.Char(
+        compute='_compute_display_name',
+        inverse='_inverse_display_name',
+        search='_search_display_name',
+        recursive=True,
+    )
     dummy = fields.Char(store=False)
     discussions = fields.Many2many('test_new_api.discussion', 'test_new_api_discussion_category',
                                    'category', 'discussion')
@@ -168,7 +172,7 @@ class Message(models.Model):
     def _check_author(self):
         for message in self.with_context(active_test=False):
             if message.discussion and message.author not in message.discussion.sudo().participants:
-                raise ValidationError(_("Author must be among the discussion participants."))
+                raise ValidationError(self.env._("Author must be among the discussion participants."))
 
     @api.depends('author.name', 'discussion.name')
     def _compute_name(self):
@@ -307,7 +311,6 @@ class MultiTag(models.Model):
     _description = 'Test New API Multi Tag'
 
     name = fields.Char()
-    display_name = fields.Char(compute='_compute_display_name')
 
     @api.depends('name')
     @api.depends_context('special_tag')
@@ -852,7 +855,7 @@ class ComputeOnchange(models.Model):
 
     def copy_data(self, default=None):
         vals_list = super().copy_data(default=default)
-        return [dict(vals, foo=_("%s (copy)", record.foo)) for record, vals in zip(self, vals_list)]
+        return [dict(vals, foo=self.env._("%s (copy)", record.foo)) for record, vals in zip(self, vals_list)]
 
 
 class ComputeOnchangeLine(models.Model):

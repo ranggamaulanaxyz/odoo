@@ -65,9 +65,8 @@ export class LinkSelectionPlugin extends Plugin {
             case "NORMALIZE":
                 this.normalize(payload.node || this.editable);
                 break;
-            case "CLEAN":
-                // TODO @phoenix: evaluate if this should be cleanforsave instead
-                this.clean(payload.root);
+            case "CLEAN_FOR_SAVE":
+                this.cleanForSave(payload);
                 break;
         }
     }
@@ -83,8 +82,8 @@ export class LinkSelectionPlugin extends Plugin {
     /**
      * @param {Element} root
      */
-    clean(root) {
-        this.removeFEFFs(root);
+    cleanForSave({ root, preserveSelection = false }) {
+        this.removeFEFFs(root, { preserveSelection });
         this.clearLinkInSelectionClass(root);
     }
 
@@ -106,7 +105,7 @@ export class LinkSelectionPlugin extends Plugin {
      * @param {Object} [options]
      * @param {Function} [options.exclude]
      */
-    removeFEFFs(root, { exclude = () => false } = {}) {
+    removeFEFFs(root, { exclude = () => false, preserveSelection = true } = {}) {
         const defaultFilter = (node) =>
             node.nodeType === Node.TEXT_NODE &&
             node.textContent.includes("\uFEFF") &&
@@ -117,7 +116,7 @@ export class LinkSelectionPlugin extends Plugin {
         const combinedFilter = (node) => defaultFilter(node) && !exclude(node);
         const nodes = descendants(root).filter(combinedFilter);
         if (nodes.length > 0) {
-            const cursors = this.shared.preserveSelection();
+            const cursors = preserveSelection ? this.shared.preserveSelection() : null;
             for (const node of nodes) {
                 // Remove all FEFF within a `prepareUpdate` to make sure to make <br>
                 // nodes visible if needed.
@@ -125,7 +124,7 @@ export class LinkSelectionPlugin extends Plugin {
                 cleanTextNode(node, "\uFEFF", cursors);
                 restoreSpaces();
             }
-            cursors.restore();
+            cursors?.restore();
         }
 
         // Comment in the original code:
@@ -190,12 +189,12 @@ export class LinkSelectionPlugin extends Plugin {
      * Apply the o_link_in_selection class if the selection is in a single link,
      * remove it otherwise.
      *
-     * @param {EditorSelection} [selection]
+     * @param {SelectionData} [selectionData]
      */
-    resetLinkInSelection(selection = this.shared.getEditableSelection()) {
+    resetLinkInSelection(selectionData = this.shared.getSelectionData()) {
         this.clearLinkInSelectionClass(this.editable);
 
-        const { anchorNode, focusNode } = selection;
+        const { anchorNode, focusNode } = selectionData.editableSelection;
         const [anchorLink, focusLink] = [anchorNode, focusNode].map((node) =>
             closestElement(node, "a")
         );

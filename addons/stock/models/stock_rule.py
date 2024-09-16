@@ -5,8 +5,9 @@ import logging
 from collections import defaultdict, namedtuple
 from dateutil.relativedelta import relativedelta
 
-from odoo import SUPERUSER_ID, _, api, fields, models, registry
+from odoo import SUPERUSER_ID, _, api, fields, models
 from odoo.exceptions import UserError, ValidationError
+from odoo.modules.registry import Registry
 from odoo.osv import expression
 from odoo.tools import float_compare, float_is_zero
 from odoo.tools.misc import split_every
@@ -262,7 +263,6 @@ class StockRule(models.Model):
     @api.model
     def _run_pull(self, procurements):
         moves_values_by_company = defaultdict(list)
-        mtso_products_by_locations = defaultdict(list)
 
         # To handle the `mts_else_mto` procure method, we do a preliminary loop to
         # isolate the products we would need to read the forecasted quantity,
@@ -273,34 +273,12 @@ class StockRule(models.Model):
                 msg = _('No source location defined on stock rule: %s!', rule.name)
                 raise ProcurementException([(procurement, msg)])
 
-            if rule.procure_method == 'mts_else_mto':
-                mtso_products_by_locations[rule.location_src_id].append(procurement.product_id.id)
-
-        # Get the forecasted quantity for the `mts_else_mto` procurement.
-        forecasted_qties_by_loc = {}
-        for location, product_ids in mtso_products_by_locations.items():
-            products = self.env['product.product'].browse(product_ids).with_context(location=location.id)
-            forecasted_qties_by_loc[location] = {product.id: product.free_qty for product in products}
-
         # Prepare the move values, adapt the `procure_method` if needed.
         procurements = sorted(procurements, key=lambda proc: float_compare(proc[0].product_qty, 0.0, precision_rounding=proc[0].product_uom.rounding) > 0)
         for procurement, rule in procurements:
             procure_method = rule.procure_method
             if rule.procure_method == 'mts_else_mto':
-                qty_needed = procurement.product_uom._compute_quantity(procurement.product_qty, procurement.product_id.uom_id)
-                if float_compare(qty_needed, 0, precision_rounding=procurement.product_id.uom_id.rounding) <= 0:
-                    procure_method = 'make_to_order'
-                    for move in procurement.values.get('group_id', self.env['procurement.group']).stock_move_ids:
-                        if move.rule_id == rule and float_compare(move.product_uom_qty, 0, precision_rounding=move.product_uom.rounding) > 0:
-                            procure_method = move.procure_method
-                            break
-                    forecasted_qties_by_loc[rule.location_src_id][procurement.product_id.id] -= qty_needed
-                elif float_compare(qty_needed, forecasted_qties_by_loc[rule.location_src_id][procurement.product_id.id],
-                                   precision_rounding=procurement.product_id.uom_id.rounding) > 0:
-                    procure_method = 'make_to_order'
-                else:
-                    forecasted_qties_by_loc[rule.location_src_id][procurement.product_id.id] -= qty_needed
-                    procure_method = 'make_to_stock'
+                procure_method = 'make_to_stock'
 
             move_values = rule._get_stock_move_values(*procurement)
             move_values['procure_method'] = procure_method
@@ -379,6 +357,7 @@ class StockRule(models.Model):
             'picking_type_id': self.picking_type_id.id,
             'group_id': group_id,
             'route_ids': [(4, route.id) for route in values.get('route_ids', [])],
+            'never_product_template_attribute_value_ids': values.get('never_product_template_attribute_value_ids'),
             'warehouse_id': self.warehouse_id.id,
             'date': date_scheduled,
             'date_deadline': False if self.group_propagation_option == 'fixed' else date_deadline,
@@ -404,6 +383,7 @@ class StockRule(models.Model):
         :return: the cumulative delay and cumulative delay's description
         :rtype: tuple[defaultdict(float), list[str, str]]
         """
+        _ = self.env._
         delays = defaultdict(float)
         delay = sum(self.filtered(lambda r: r.action in ['pull', 'pull_push']).mapped('delay'))
         delays['total_delay'] += delay
@@ -457,10 +437,10 @@ class ProcurementGroup(models.Model):
         'Reference',
         default=lambda self: self.env['ir.sequence'].next_by_code('procurement.group') or '',
         required=True)
-    move_type = fields.Selection([
-        ('direct', 'Partial'),
-        ('one', 'All at once')], string='Delivery Type', default='direct',
-        required=True)
+    move_type = fields.Selection(
+        [('direct', 'Partial'), ('one', 'All at once')],
+        string='Delivery Type'
+    )
     stock_move_ids = fields.One2many('stock.move', 'group_id', string="Related Stock Moves")
 
     @api.model
@@ -578,7 +558,10 @@ class ProcurementGroup(models.Model):
         # ones of the company. This is not useful as a regular user since there is a record
         # rule to filter out the rules based on the company.
         if self.env.su and values.get('company_id'):
-            domain_company = ['|', ('company_id', '=', False), ('company_id', 'child_of', values['company_id'].ids)]
+            company_ids = set(values.get('company_id').ids)
+            if values.get('route_ids'):
+                company_ids |= set(values['route_ids'].company_id.ids)
+            domain_company = ['|', ('company_id', '=', False), ('company_id', 'child_of', list(company_ids))]
             domain = expression.AND([domain, domain_company])
         return domain
 
@@ -587,7 +570,9 @@ class ProcurementGroup(models.Model):
         moves_domain = [
             ('state', 'in', ['confirmed', 'partially_available']),
             ('product_uom_qty', '!=', 0.0),
-            ('reservation_date', '<=', fields.Date.today())
+            '|',
+                ('reservation_date', '<=', fields.Date.today()),
+                ('picking_type_id.reservation_method', '=', 'at_confirm'),
         ]
         if company_id:
             moves_domain = expression.AND([[('company_id', '=', company_id)], moves_domain])
@@ -626,7 +611,7 @@ class ProcurementGroup(models.Model):
         we run functions as SUPERUSER to avoid intercompanies and access rights issues. """
         try:
             if use_new_cursor:
-                cr = registry(self._cr.dbname).cursor()
+                cr = Registry(self._cr.dbname).cursor()
                 self = self.with_env(self.env(cr=cr))  # TDE FIXME
 
             self._run_scheduler_tasks(use_new_cursor=use_new_cursor, company_id=company_id)

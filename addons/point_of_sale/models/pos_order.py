@@ -8,10 +8,9 @@ from collections import defaultdict
 
 import psycopg2
 import pytz
-import re
 
 from odoo import api, fields, models, tools, _
-from odoo.tools import float_is_zero, float_round, float_repr, float_compare
+from odoo.tools import float_is_zero, float_round, float_repr, float_compare, formatLang
 from odoo.exceptions import ValidationError, UserError
 from odoo.osv.expression import AND
 import base64
@@ -54,6 +53,7 @@ class PosOrder(models.Model):
         ], limit=1)
         if rescue_session:
             _logger.warning('reusing recovery session %s for saving order %s', rescue_session.name, order['name'])
+            rescue_session.write({'state': 'opened'})
             return rescue_session
 
         _logger.warning('attempting to create recovery session for saving order %s', order['name'])
@@ -110,6 +110,13 @@ class PosOrder(models.Model):
             pos_order = pos_order.with_company(pos_order.company_id)
         else:
             pos_order = self.env['pos.order'].browse(order.get('id'))
+
+            # Save line before to avoid exception if a line is deleted
+            # when vals change the state to 'paid'
+            if order.get('lines'):
+                pos_order.write({'lines': order.get('lines')})
+                order['lines'] = []
+
             pos_order.write(order)
 
         pos_order._link_combo_items(combo_child_uuids_by_parent_uuid)
@@ -267,6 +274,7 @@ class PosOrder(models.Model):
         help="Employee who uses the cash register.",
         default=lambda self: self.env.uid,
     )
+    amount_difference = fields.Float(string='Difference', digits=0, readonly=True)
     amount_tax = fields.Float(string='Taxes', digits=0, readonly=True, required=True)
     amount_total = fields.Float(string='Total', digits=0, readonly=True, required=True)
     amount_paid = fields.Float(string='Paid', digits=0, required=True)
@@ -309,7 +317,7 @@ class PosOrder(models.Model):
         comodel_name='account.fiscal.position', string='Fiscal Position',
         readonly=False,
     )
-    payment_ids = fields.One2many('pos.payment', 'pos_order_id', string='Payments', readonly=True)
+    payment_ids = fields.One2many('pos.payment', 'pos_order_id', string='Payments')
     session_move_id = fields.Many2one('account.move', string='Session Journal Entry', related='session_id.move_id', readonly=True, copy=False)
     to_invoice = fields.Boolean('To invoice', copy=False)
     shipping_date = fields.Date('Shipping Date')
@@ -327,6 +335,7 @@ class PosOrder(models.Model):
     is_edited = fields.Boolean(string='Edited', compute='_compute_is_edited')
     has_deleted_line = fields.Boolean(string='Has Deleted Line')
     order_edit_tracking = fields.Boolean(related="config_id.order_edit_tracking", readonly=True)
+    available_payment_method_ids = fields.Many2many('pos.payment.method', related='config_id.payment_method_ids', string='Available Payment Methods', readonly=True, store=False)
 
     def _search_tracking_number(self, operator, value):
         #search is made over the pos_reference field
@@ -416,6 +425,9 @@ class PosOrder(models.Model):
 
     @api.onchange('payment_ids', 'lines')
     def _onchange_amount_all(self):
+        self._compute_prices()
+
+    def _compute_prices(self):
         for order in self:
             if not order.currency_id:
                 raise UserError(_("You can't: create a pos order from the backend interface, or unset the pricelist, or create a pos.order in a python test with Form tool, or edit the form view in studio if no PoS order exist"))
@@ -423,8 +435,8 @@ class PosOrder(models.Model):
             order.amount_paid = sum(payment.amount for payment in order.payment_ids)
             order.amount_return = sum(payment.amount < 0 and payment.amount or 0 for payment in order.payment_ids)
             order.amount_tax = currency.round(sum(self._amount_line_tax(line, order.fiscal_position_id) for line in order.lines))
-            amount_untaxed = currency.round(sum(line.price_subtotal for line in order.lines))
-            order.amount_total = order.amount_tax + amount_untaxed
+            order.amount_total = order.amount_tax + currency.round(sum(line.price_subtotal for line in order.lines))
+            order.amount_difference = order.amount_paid - order.amount_total
 
     def _compute_batch_amount_all(self):
         """
@@ -489,7 +501,87 @@ class PosOrder(models.Model):
                         country=order.partner_id.country_id or self.env.company.country_id)
             if vals.get('has_deleted_line') is not None and self.has_deleted_line:
                 del vals['has_deleted_line']
-        return super(PosOrder, self).write(vals)
+
+        list_line = self._create_pm_change_log(vals)
+        res = super().write(vals)
+        for order in self:
+            if vals.get('payment_ids'):
+                order._compute_prices()
+                totally_paid_or_more = float_compare(order.amount_paid, order.amount_total, precision_rounding=order.currency_id.rounding)
+                if totally_paid_or_more < 0 and order.state in ['paid', 'done', 'invoiced']:
+                    raise UserError(_('The paid amount is different from the total amount of the order.'))
+                elif totally_paid_or_more > 0 and order.state == 'paid':
+                    list_line.append(_("Warning, the paid amount is higher than the total amount. (Difference: %s)", formatLang(self.env, order.amount_paid - order.amount_total, currency_obj=order.currency_id)))
+
+        if len(list_line) > 0:
+            body = _("Payment changes:")
+            body += self._markup_list_message(list_line)
+            for order in self:
+                if vals.get('payment_ids'):
+                    order.message_post(body=body)
+
+        return res
+
+    def _create_pm_change_log(self, vals):
+        if not vals.get('payment_ids'):
+            return []
+
+        message_list = []
+        new_pms = vals.get('payment_ids', [])
+        for new_pm in new_pms:
+            orm_command = new_pm[0]
+
+            if orm_command == 0:
+                payment_method_id = self.env['pos.payment.method'].browse(new_pm[2].get('payment_method_id'))
+                amount = formatLang(self.env, new_pm[2].get('amount'), currency_obj=self.currency_id)
+                message_list.append(_("Added %(payment_method)s with %(amount)s",
+                    payment_method=payment_method_id.name,
+                    amount=amount))
+            elif orm_command == 1:
+                pm_id = self.env['pos.payment'].browse(new_pm[1])
+                old_pm = pm_id.payment_method_id.name
+                old_amount = formatLang(self.env, pm_id.amount, currency_obj=pm_id.currency_id)
+                new_amount = False
+                new_payment_method = False
+
+                if new_pm[2].get('payment_method_id'):
+                    new_payment_method = self.env['pos.payment.method'].browse(new_pm[2].get('payment_method_id'))
+                if new_pm[2].get('amount'):
+                    new_amount = formatLang(self.env, new_pm[2].get('amount'), currency_obj=pm_id.currency_id)
+
+                if new_payment_method and new_amount:
+                    message_list.append(_("%(old_pm)s changed to %(new_pm)s and from %(old_amount)s to %(new_amount)s",
+                        old_pm=old_pm,
+                        new_pm=new_payment_method.name,
+                        old_amount=old_amount,
+                        new_amount=new_amount))
+                elif new_payment_method:
+                    message_list.append(_("%(old_pm)s changed to %(new_pm)s for %(old_amount)s",
+                        old_pm=old_pm,
+                        new_pm=new_payment_method.name,
+                        old_amount=old_amount))
+                elif new_amount:
+                    message_list.append(_("Amount for %(old_pm)s changed from %(old_amount)s to %(new_amount)s",
+                        old_amount=old_amount,
+                        new_amount=new_amount,
+                        old_pm=old_pm))
+            elif orm_command == 2:
+                pm_id = self.env['pos.payment'].browse(new_pm[1])
+                amount = formatLang(self.env, pm_id.amount, currency_obj=pm_id.currency_id)
+                message_list.append(_("Removed %(payment_method)s with %(amount)s",
+                    payment_method=pm_id.payment_method_id.name,
+                    amount=amount))
+
+        return message_list
+
+    def _markup_list_message(self, message):
+        body = Markup("<ul>")
+        for line in message:
+            body += Markup("<li>")
+            body += line
+            body += Markup("</li>")
+        body += Markup("</ul>")
+        return body
 
     def _compute_order_name(self):
         if self.refunded_order_id.exists():
@@ -531,7 +623,7 @@ class PosOrder(models.Model):
     def action_view_refund_orders(self):
         return {
             'name': _('Refund Orders'),
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'res_model': 'pos.order',
             'type': 'ir.actions.act_window',
             'domain': [('id', 'in', self.mapped('lines.refund_orderline_ids.order_id').ids)],
@@ -916,7 +1008,7 @@ class PosOrder(models.Model):
 
     def action_pos_order_cancel(self):
         cancellable_orders = self.filtered(lambda order: order.state == 'draft')
-        return cancellable_orders.write({'state': 'cancel'})
+        cancellable_orders.write({'state': 'cancel'})
 
     def _apply_invoice_payments(self, is_reverse=False):
         receivable_account = self.env["res.partner"]._find_accounting_partner(self.partner_id).with_company(self.company_id).property_account_receivable_id
@@ -943,6 +1035,7 @@ class PosOrder(models.Model):
         :Returns: list -- list of db-ids for the created and updated orders.
         """
         order_ids = []
+        session_ids = set({order.get('session_id') for order in orders})
         for order in orders:
             existing_draft_order = self.env["pos.order"].search(
                 ['&', ('id', '=', order.get('id', False)), ('state', '=', 'draft')], limit=1) if isinstance(order.get('id'), int) else False
@@ -953,42 +1046,27 @@ class PosOrder(models.Model):
             if existing_draft_order:
                 order_ids.append(self._process_order(order, existing_draft_order))
             else:
-                existing_orders = self.env['pos.order'].search([('pos_reference', '=', order.get('name', False))])
-                if all(not self._is_the_same_order(order, existing_order) for existing_order in existing_orders):
+                existing_paid_orders = self.env['pos.order'].search([('uuid', '=', order['uuid'])])
+                if not existing_paid_orders:
                     order_ids.append(self._process_order(order, False))
 
         # Sometime pos_orders_ids can be empty.
         pos_order_ids = self.env['pos.order'].browse(order_ids)
         config_id = pos_order_ids[0].config_id.id if pos_order_ids else False
+
+        for order in pos_order_ids:
+            order._ensure_access_token()
+
+        # If the previous session is closed, the order will get a new session_id due to _get_valid_session in _process_order
+        is_rescue_session = any(order.get('session_id') not in session_ids for order in orders)
         return {
             'pos.order': pos_order_ids.read(pos_order_ids._load_pos_data_fields(config_id), load=False) if config_id else [],
+            'pos.session': pos_order_ids.session_id._load_pos_data({})['data'] if config_id and is_rescue_session else [],
             'pos.payment': pos_order_ids.payment_ids.read(pos_order_ids.payment_ids._load_pos_data_fields(config_id), load=False) if config_id else [],
             'pos.order.line': pos_order_ids.lines.read(pos_order_ids.lines._load_pos_data_fields(config_id), load=False) if config_id else [],
             'pos.pack.operation.lot': pos_order_ids.lines.pack_lot_ids.read(pos_order_ids.lines.pack_lot_ids._load_pos_data_fields(config_id), load=False) if config_id else [],
             "product.attribute.custom.value": pos_order_ids.lines.custom_attribute_value_ids.read(pos_order_ids.lines.custom_attribute_value_ids._load_pos_data_fields(config_id), load=False) if config_id else [],
         }
-
-    def _is_the_same_order(self, data, existing_order):
-        received_payments = [(p[2]['amount'], p[2]['payment_method_id']) for p in data['payment_ids']]
-        existing_payments = [(p.amount, p.payment_method_id.id) for p in existing_order.payment_ids]
-
-        for amount, payment_method in received_payments:
-            if not any(
-                float_is_zero(amount - ex_amount, precision_rounding=existing_order.currency_id.rounding) and payment_method == ex_payment_method
-                for ex_amount, ex_payment_method in existing_payments
-            ):
-                return False
-
-        if len(data['lines']) != len(existing_order.lines):
-            return False
-
-        received_lines = sorted([(l[2]['product_id'], l[2]['price_unit']) for l in data['lines']])
-        existing_lines = sorted([(l.product_id.id, l.price_unit) for l in existing_order.lines])
-
-        if received_lines != existing_lines:
-            return False
-
-        return True
 
     @api.model
     def _get_refunded_orders(self, order):
@@ -1303,7 +1381,7 @@ class PosOrderLine(models.Model):
                 if pl[2].get('server_id'):
                     pl[2]['id'] = pl[2]['server_id']
                     del pl[2]['server_id']
-        if self.order_id.config_id.order_edit_tracking and values.get('qty') and values.get('qty') < self.qty:
+        if self.order_id.config_id.order_edit_tracking and values.get('qty') is not None and values.get('qty') < self.qty:
             self.is_edited = True
             body = _("%(product_name)s: Ordered quantity: %(old_qty)s", product_name=self.full_product_name, old_qty=self.qty)
             body += Markup("&rarr;") + str(values.get('qty'))
@@ -1312,8 +1390,7 @@ class PosOrderLine(models.Model):
 
     @api.model
     def get_existing_lots(self, company_id, product_id):
-        self.check_access_rights('read')
-        self.check_access_rule('read')
+        self.check_access('read')
         existing_lots_sudo = self.sudo().env['stock.lot'].search([
             '|',
             ('company_id', '=', False),
@@ -1509,10 +1586,7 @@ class PosOrderLine(models.Model):
             product_name = line.product_id\
                 .with_context(lang=line.order_id.partner_id.lang or self.env.user.lang)\
                 .get_product_multiline_description_sale()
-            if line.product_id.display_name:
-                product_name = re.sub(re.escape(line.product_id.display_name), '', product_name)
-                product_name = re.sub(r'^\n', '', product_name)
-                product_name = re.sub(r'(?<=\n) ', '', product_name)
+
             base_line_vals_list.append(
                 {
                     **self.env['account.tax']._convert_to_tax_base_line_dict(

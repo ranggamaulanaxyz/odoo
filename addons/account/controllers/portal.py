@@ -3,7 +3,7 @@
 
 from collections import OrderedDict
 
-from odoo import http, _
+from odoo import fields, http, _
 from odoo.osv import expression
 from odoo.addons.portal.controllers.portal import CustomerPortal, pager as portal_pager
 from odoo.addons.account.controllers.download_docs import _get_headers, _build_zip_from_data
@@ -15,19 +15,26 @@ class PortalAccount(CustomerPortal):
 
     def _prepare_home_portal_values(self, counters):
         values = super()._prepare_home_portal_values(counters)
+        if 'overdue_invoice_count' in counters:
+            values['overdue_invoice_count'] = self._get_overdue_invoice_count()
         if 'invoice_count' in counters:
             invoice_count = request.env['account.move'].search_count(self._get_invoices_domain('out'), limit=1) \
-                if request.env['account.move'].check_access_rights('read', raise_exception=False) else 0
+                if request.env['account.move'].has_access('read') else 0
             values['invoice_count'] = invoice_count
         if 'bill_count' in counters:
             bill_count = request.env['account.move'].search_count(self._get_invoices_domain('in'), limit=1) \
-                if request.env['account.move'].check_access_rights('read', raise_exception=False) else 0
+                if request.env['account.move'].has_access('read') else 0
             values['bill_count'] = bill_count
         return values
 
     # ------------------------------------------------------------
     # My Invoices
     # ------------------------------------------------------------
+
+    def _get_overdue_invoice_count(self):
+        overdue_invoice_count = request.env['account.move'].search_count(self._get_overdue_invoices_domain()) \
+            if request.env['account.move'].has_access('read') else 0
+        return overdue_invoice_count
 
     def _invoice_get_page_view_values(self, invoice, access_token, **kwargs):
         values = {
@@ -43,6 +50,15 @@ class PortalAccount(CustomerPortal):
             move_type = ('out_invoice', 'out_refund', 'in_invoice', 'in_refund', 'out_receipt', 'in_receipt')
         return [('state', 'not in', ('cancel', 'draft')), ('move_type', 'in', move_type)]
 
+    def _get_overdue_invoices_domain(self, partner_id=None):
+        return [
+            ('state', 'not in', ('cancel', 'draft')),
+            ('move_type', 'in', ('out_invoice', 'out_receipt')),
+            ('payment_state', 'not in', ('in_payment', 'paid')),
+            ('invoice_date_due', '<', fields.Date.today()),
+            ('partner_id', '=', partner_id or request.env.user.partner_id.id),
+        ]
+
     def _get_account_searchbar_sortings(self):
         return {
             'date': {'label': _('Date'), 'order': 'invoice_date desc'},
@@ -54,6 +70,7 @@ class PortalAccount(CustomerPortal):
     def _get_account_searchbar_filters(self):
         return {
             'all': {'label': _('All'), 'domain': []},
+            'overdue_invoices': {'label': _('Overdue invoices'), 'domain': self._get_overdue_invoices_domain()},
             'invoices': {'label': _('Invoices'), 'domain': [('move_type', 'in', ('out_invoice', 'out_refund', 'out_receipt'))]},
             'bills': {'label': _('Bills'), 'domain': [('move_type', 'in', ('in_invoice', 'in_refund', 'in_receipt'))]},
         }
@@ -110,14 +127,14 @@ class PortalAccount(CustomerPortal):
                         domain, order=order, limit=self._items_per_page, offset=pager_offset
                     )
                 ]
-                if AccountInvoice.check_access_rights('read', raise_exception=False) else
+                if AccountInvoice.has_access('read') else
                 AccountInvoice
             ),
             'page_name': 'invoice',
             'pager': {  # vals to define the pager.
                 "url": url,
                 "url_args": {'date_begin': date_begin, 'date_end': date_end, 'sortby': sortby},
-                "total": AccountInvoice.search_count(domain) if AccountInvoice.check_access_rights('read', raise_exception=False) else 0,
+                "total": AccountInvoice.search_count(domain) if AccountInvoice.has_access('read') else 0,
                 "page": page,
                 "step": self._items_per_page,
             },
@@ -126,6 +143,7 @@ class PortalAccount(CustomerPortal):
             'sortby': sortby,
             'searchbar_filters': OrderedDict(sorted(searchbar_filters.items())),
             'filterby': filterby,
+            'overdue_invoice_count': self._get_overdue_invoice_count(),
         })
         return values
 

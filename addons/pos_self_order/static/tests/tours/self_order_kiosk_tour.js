@@ -12,6 +12,7 @@ registry.category("web_tour.tours").add("self_kiosk_each_table_takeaway_in", {
         Utils.checkIsNoBtn("My Order"),
         Utils.clickBtn("Order Now"),
         LandingPage.selectLocation("Eat In"),
+        ProductPage.checkReferenceNotInProductName("Coca-Cola", "12345"),
         ProductPage.clickProduct("Coca-Cola"),
         Utils.clickBtn("Order"),
         CartPage.checkProduct("Coca-Cola", "2.53", "1"),
@@ -124,5 +125,15 @@ registry.category("web_tour.tours").add("self_order_price_null", {
         Utils.clickBtn("Pay"),
         ConfirmationPage.orderNumberShown(),
         Utils.checkBtn("Close"),
+    ],
+});
+
+registry.category("web_tour.tours").add("self_order_language_changes", {
+    test: true,
+    steps: () => [
+        LandingPage.checkLanguageSelected("English"),
+        LandingPage.checkCountryFlagShown("us"),
+        Utils.openLanguageSelector(),
+        Utils.checkLanguageIsAvailable("French"),
     ],
 });

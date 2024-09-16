@@ -1,9 +1,11 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo.exceptions import UserError
+from odoo.exceptions import UserError, ValidationError
 
 from odoo import api, fields, models, _
 from odoo.osv import expression
+from odoo.tools import format_list
+from odoo.tools.misc import unquote
 
 TIMESHEET_INVOICE_TYPES = [
     ('billable_time', 'Billed on Timesheets'),
@@ -13,22 +15,30 @@ TIMESHEET_INVOICE_TYPES = [
     ('non_billable', 'Non-Billable'),
     ('timesheet_revenues', 'Timesheet Revenues'),
     ('service_revenues', 'Service Revenues'),
-    ('other_revenues', 'Materials'),
-    ('other_costs', 'Materials'),
+    ('other_revenues', 'Other revenues'),
+    ('other_costs', 'Other costs'),
 ]
 
 class AccountAnalyticLine(models.Model):
     _inherit = 'account.analytic.line'
+
+    def _domain_so_line(self):
+        domain = expression.AND([
+            self.env['sale.order.line']._sellable_lines_domain(),
+            self.env['sale.order.line']._domain_sale_line_service(),
+            [
+                ('qty_delivered_method', 'in', ['analytic', 'timesheet']),
+                ('order_partner_id.commercial_partner_id', '=', unquote('commercial_partner_id')),
+            ],
+        ])
+        return str(domain)
 
     timesheet_invoice_type = fields.Selection(TIMESHEET_INVOICE_TYPES, string="Billable Type",
             compute='_compute_timesheet_invoice_type', compute_sudo=True, store=True, readonly=True)
     commercial_partner_id = fields.Many2one('res.partner', compute="_compute_commercial_partner")
     timesheet_invoice_id = fields.Many2one('account.move', string="Invoice", readonly=True, copy=False, help="Invoice created from the timesheet", index='btree_not_null')
     so_line = fields.Many2one(compute="_compute_so_line", store=True, readonly=False,
-        domain=lambda self: self.env['sale.order.line']._domain_sale_line_service_str("""[
-            ('qty_delivered_method', 'in', ['analytic', 'timesheet']),
-            ('order_partner_id.commercial_partner_id', '=', commercial_partner_id)
-        ]""", check_is_downpayment=False),
+        domain=_domain_so_line,
         help="Sales order item to which the time spent will be added in order to be invoiced to your customer. Remove the sales order item for the timesheet entry to be non-billable.")
     # we needed to store it only in order to be able to groupby in the portal
     order_id = fields.Many2one(related='so_line.order_id', store=True, readonly=True, index=True)
@@ -51,7 +61,7 @@ class AccountAnalyticLine(models.Model):
                 elif timesheet.so_line.product_id.type == 'service':
                     if timesheet.so_line.product_id.invoice_policy == 'delivery':
                         if timesheet.so_line.product_id.service_type == 'timesheet':
-                            invoice_type = 'timesheet_revenues' if timesheet.amount > 0 else 'billable_time'
+                            invoice_type = 'timesheet_revenues' if timesheet.amount > 0 and timesheet.unit_amount > 0 else 'billable_time'
                         else:
                             service_type = timesheet.so_line.product_id.service_type
                             invoice_type = f'billable_{service_type}' if service_type in ['milestones', 'manual'] else 'billable_fixed'
@@ -59,7 +69,7 @@ class AccountAnalyticLine(models.Model):
                         invoice_type = 'billable_fixed'
                 timesheet.timesheet_invoice_type = invoice_type
             else:
-                if timesheet.amount >= 0:
+                if timesheet.amount >= 0 and timesheet.unit_amount >= 0:
                     if timesheet.so_line and timesheet.so_line.product_id.type == 'service':
                         timesheet.timesheet_invoice_type = 'service_revenues'
                     else:
@@ -132,7 +142,7 @@ class AccountAnalyticLine(models.Model):
             thus there is no meaning of showing invoice with ordered quantity.
         """
         domain = super()._timesheet_get_portal_domain()
-        return expression.AND([domain, [('timesheet_invoice_type', 'in', ['billable_time', 'non_billable', 'billable_fixed'])]])
+        return expression.AND([domain, [('timesheet_invoice_type', 'in', ['billable_time', 'non_billable', 'billable_fixed', 'billable_manual', 'billable_milestones'])]])
 
     @api.model
     def _timesheet_get_sale_domain(self, order_lines_ids, invoice_ids):
@@ -200,3 +210,28 @@ class AccountAnalyticLine(models.Model):
 
     def _is_updatable_timesheet(self):
         return super()._is_updatable_timesheet and self._is_not_billed()
+
+    def _timesheet_preprocess_get_accounts(self, vals):
+        so_line = self.env['sale.order.line'].browse(vals.get('so_line'))
+        if not (so_line and (distribution := so_line.analytic_distribution)):
+            return super()._timesheet_preprocess_get_accounts(vals)
+
+        company = self.env['res.company'].browse(vals.get('company_id'))
+        accounts = self.env['account.analytic.account'].browse([
+            int(account_id) for account_id in next(iter(distribution)).split(',')
+        ])
+
+        plan_column_names = {account.root_plan_id._column_name() for account in accounts}
+        mandatory_plans = self._get_mandatory_plans(company, business_domain='timesheet')
+        missing_plan_names = [plan['name'] for plan in mandatory_plans if plan['column_name'] not in plan_column_names]
+        if missing_plan_names:
+            raise ValidationError(_(
+                "'%(missing_plan_names)s' analytic plan(s) required on the analytic distribution of the sale order item '%(so_line_name)s' linked to the timesheet.",
+                missing_plan_names=format_list(self.env, missing_plan_names),
+                so_line_name=so_line.name,
+            ))
+
+        account_id_per_fname = dict.fromkeys(self._get_plan_fnames(), False)
+        for account in accounts:
+            account_id_per_fname[account.root_plan_id._column_name()] = account.id
+        return account_id_per_fname

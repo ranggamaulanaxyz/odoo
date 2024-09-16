@@ -183,6 +183,8 @@ class MailComposer(models.TransientModel):
              "In mass mail mode: if sent, send emails after that date. "
              "This date is considered as being in UTC timezone.")
     use_exclusion_list = fields.Boolean('Check Exclusion List', default=True)
+    # template generation
+    template_name = fields.Char('Template Name')
 
     @api.constrains('res_ids')
     def _check_res_ids(self):
@@ -389,7 +391,7 @@ class MailComposer(models.TransientModel):
             if composer.parent_id and composer.composition_mode == 'comment':
                 composer.res_ids = f"{[composer.parent_id.res_id]}"
             else:
-                active_res_ids = parse_res_ids(self.env.context.get('active_ids'))
+                active_res_ids = parse_res_ids(self.env.context.get('active_ids'), self.env)
                 # beware, field is limited in storage, usage of active_ids in context still required
                 if active_res_ids and len(active_res_ids) <= self._batch_size:
                     composer.res_ids = f"{self.env.context['active_ids']}"
@@ -666,8 +668,7 @@ class MailComposer(models.TransientModel):
         for wizard in self:
             if wizard.res_domain:
                 search_domain = wizard._evaluate_res_domain()
-                search_user = wizard.res_domain_user_id or self.env.user
-                res_ids = self.env[wizard.model].with_user(search_user).search(search_domain).ids
+                res_ids = self.env[wizard.model].search(search_domain).ids
             else:
                 res_ids = wizard._evaluate_res_ids()
             # in comment mode: raise here as anyway message_post will raise.
@@ -734,18 +735,24 @@ class MailComposer(models.TransientModel):
             if records:
                 records._message_mail_after_hook(iter_mails_sudo)
 
-            if not self.force_send:
-                continue
-            # as 'send' does not filter out scheduled mails (only 'process_email_queue'
-            # does) we need to do it manually
-            iter_mails_sudo_tosend = iter_mails_sudo.filtered(
-                lambda mail: (
-                    not mail.scheduled_date or
-                    mail.scheduled_date <= datetime.datetime.utcnow()
+            if self.force_send:
+                # as 'send' does not filter out scheduled mails (only 'process_email_queue'
+                # does) we need to do it manually
+                iter_mails_sudo_tosend = iter_mails_sudo.filtered(
+                    lambda mail: (
+                        not mail.scheduled_date or
+                        mail.scheduled_date <= datetime.datetime.utcnow()
+                    )
                 )
-            )
-            if iter_mails_sudo_tosend:
-                iter_mails_sudo_tosend.send(auto_commit=auto_commit)
+                if iter_mails_sudo_tosend:
+                    iter_mails_sudo_tosend.send(auto_commit=auto_commit)
+                    continue
+            # sending emails will commit and invalidate cache; in case we do not force
+            # send better void the cache and commit what is already generated to avoid
+            # running several times on same records in case of issue
+            if auto_commit is True:
+                self._cr.commit()
+            self.env.invalidate_all()
 
         return mails_sudo
 
@@ -754,15 +761,13 @@ class MailComposer(models.TransientModel):
             `create_mail_template` is called when saving the new wizard. """
 
         self.ensure_one()
-        saved_subject = self.subject
-        self.subject = False
         return {
             'type': 'ir.actions.act_window',
             'view_mode': 'form',
             'view_id': self.env.ref('mail.mail_compose_message_view_form_template_save').id,
-            'name': _('Create a new Mail Template'),
+            'name': _('Create a Mail Template'),
             'res_model': 'mail.compose.message',
-            'context': {'dialog_size': 'medium', 'mail_composer_saved_subject': saved_subject},
+            'context': {'dialog_size': 'medium'},
             'target': 'new',
             'res_id': self.id,
         }
@@ -774,7 +779,7 @@ class MailComposer(models.TransientModel):
             raise UserError(_('Template creation from composer requires a valid model.'))
         model_id = self.env['ir.model']._get_id(self.model)
         values = {
-            'name': self.subject,
+            'name': self.template_name or self.subject,
             'subject': self.subject,
             'body_html': self.body,
             'model_id': model_id,
@@ -798,7 +803,6 @@ class MailComposer(models.TransientModel):
         """ Restore old subject when canceling the 'save as template' action
             as it was erased to let user give a more custom input. """
         self.ensure_one()
-        self.subject = self.env.context.get('mail_composer_saved_subject')
         return _reopen(self, self.id, self.model, context={**self.env.context, 'dialog_size': 'large'})
 
     # ------------------------------------------------------------
@@ -1387,7 +1391,8 @@ class MailComposer(models.TransientModel):
         return parse_res_ids(
             self.env.context.get('composer_force_res_ids') or
             self.res_ids or
-            self.env.context.get('active_ids')
+            self.env.context.get('active_ids'),
+            self.env,
         ) or []
 
     def _set_value_from_template(self, template_fname, composer_fname=False):

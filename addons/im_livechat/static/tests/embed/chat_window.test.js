@@ -10,7 +10,6 @@ import {
     assertSteps,
     click,
     contains,
-    createFile,
     inputFiles,
     insertText,
     onRpcBefore,
@@ -61,15 +60,21 @@ test("internal users can upload file to temporary thread", async () => {
     await start({ authenticateAs: partnerUser });
     await mountWithCleanup(LivechatButton);
     await click(".o-livechat-LivechatButton");
-    const file = await createFile({
-        content: "hello, world",
-        contentType: "text/plain",
-        name: "text.txt",
-    });
+    const file = new File(["hello, world"], "text.txt", { type: "text/plain" });
     await contains(".o-mail-Composer");
     await contains("button[title='Attach files']");
     await inputFiles(".o-mail-Composer-coreMain .o_input_file", [file]);
     await contains(".o-mail-AttachmentCard", { text: "text.txt", contains: [".fa-check"] });
     await triggerHotkey("Enter");
     await contains(".o-mail-Message .o-mail-AttachmentCard", { text: "text.txt" });
+});
+
+test("Conversation name is operator livechat user name", async () => {
+    const pyEnv = await startServer();
+    await loadDefaultEmbedConfig();
+    pyEnv["res.partner"].write(serverState.partnerId, { user_livechat_username: "MitchellOp" });
+    await start({ authenticateAs: false });
+    await mountWithCleanup(LivechatButton);
+    await click(".o-livechat-LivechatButton");
+    await contains(".o-mail-ChatWindow-header", { text: "MitchellOp" });
 });

@@ -6,7 +6,6 @@ from odoo.addons.web_editor.tools import handle_history_divergence
 
 
 class Job(models.Model):
-
     _name = "hr.job"
     _description = "Job Position"
     _inherit = ['mail.thread']
@@ -22,8 +21,7 @@ class Job(models.Model):
     no_of_recruitment = fields.Integer(string='Target', copy=False,
         help='Number of new employees you expect to recruit.', default=1)
     employee_ids = fields.One2many('hr.employee', 'job_id', string='Employees', groups='base.group_user')
-    description = fields.Html(string='Job Description', sanitize_attributes=False,
-                              default="Perform assigned responsibilities, collaborate with team members, and adhere to company policies. Strong communication, problem-solving, and work ethic required. Adaptability, initiative, and willingness to learn are valued.")
+    description = fields.Html(string='Job Description', sanitize_attributes=False)
     requirements = fields.Text('Requirements')
     department_id = fields.Many2one('hr.department', string='Department', check_company=True)
     company_id = fields.Many2one('res.company', string='Company', default=lambda self: self.env.company)
@@ -49,7 +47,7 @@ class Job(models.Model):
 
     def copy_data(self, default=None):
         vals_list = super().copy_data(default=default)
-        return [dict(vals, name=_("%s (copy)", job.name)) for job, vals in zip(self, vals_list)]
+        return [dict(vals, name=self.env._("%s (copy)", job.name)) for job, vals in zip(self, vals_list)]
 
     def write(self, vals):
         if len(self) == 1:

@@ -139,12 +139,6 @@
                             </setting>
                         </block>
                         <block id="product_and_category_block" title="Product &amp; PoS categories">
-                            <setting help="Start selling from a default product PoS category">
-                                <field name="pos_start_category"/>
-                                <div class="content-group mt16" invisible="not pos_start_category">
-                                    <field name="pos_iface_start_categ_id" domain="[('id', 'in', pos_selectable_categ_ids)]"/>
-                                </div>
-                            </setting>
                             <setting help="Pick which product PoS categories are available">
                                 <field name="pos_limit_categories" readonly="pos_has_active_session"/>
                                 <div class="content-group mt16" invisible="not pos_limit_categories">
@@ -156,6 +150,9 @@
                             </setting>
                             <setting id="margin_and_cost" string="Show margins &amp; costs" help="Show margins &amp; costs on product information">
                                 <field name="pos_is_margins_costs_accessible_to_every_user"/>
+                            </setting>
+                            <setting id="orderlines_seq_cart" string="Sort cart by category" help="Group items in the cart according to their category">
+                                <field name="pos_orderlines_sequence_in_cart_by_category"/>
                             </setting>
                         </block>
                         <block title="Accounting" id="pos_accounting_section">
@@ -216,6 +213,9 @@
                             </setting>
                             <setting string="Closing Entry by product" id="pos_closeing_entry_by_product" help="Display the breakdown of sales lines by product in the automatically generated closing entry.">
                                 <field name="pos_is_closing_entry_by_product"/>
+                            </setting>
+                            <setting id="pos-avatax" help="Use automatic taxes mapping with Avatax">
+                                <field name="pos_module_pos_avatax" />
                             </setting>
                         </block>
 

@@ -36,7 +36,7 @@ import re
 import uuid
 import warnings
 from collections import defaultdict, deque
-from collections.abc import MutableMapping, Iterable
+from collections.abc import MutableMapping, Callable
 from contextlib import closing
 from inspect import getmembers
 from operator import attrgetter, itemgetter
@@ -52,6 +52,7 @@ import odoo
 from . import SUPERUSER_ID
 from . import api
 from . import tools
+from .api import NewId
 from .exceptions import AccessError, MissingError, ValidationError, UserError
 from .tools import (
     clean_context, config, date_utils, discardattr,
@@ -61,9 +62,17 @@ from .tools import (
     SQL, sql,
 )
 from .tools.lru import LRU
-from .tools.misc import CountingStream, LastOrderedSet, ReversedIterable, unquote
-from .tools.translate import _, _lt
+from .tools.misc import LastOrderedSet, ReversedIterable, unquote
+from .tools.translate import _, LazyTranslate
 
+import typing
+if typing.TYPE_CHECKING:
+    from collections.abc import Reversible
+    from .modules.registry import Registry
+    from odoo.api import Self, ValuesType, IdType
+
+
+_lt = LazyTranslate('base')
 _logger = logging.getLogger(__name__)
 _unlink = logging.getLogger(__name__ + '.unlink')
 
@@ -144,7 +153,7 @@ regex_private = re.compile(r'^(_.*|init)$')
 def check_method_name(name):
     """ Raise an ``AccessError`` if ``name`` is a private method name. """
     if regex_private.match(name):
-        raise AccessError(_('Private methods (such as %s) cannot be called remotely.', name))
+        raise AccessError(_lt('Private methods (such as %s) cannot be called remotely.', name))
 
 
 def check_property_field_value_name(property_name):
@@ -266,7 +275,10 @@ class MetaModel(api.Meta):
 
             add('id', fields.Id(automatic=True))
             add_default('display_name', fields.Char(
-                string='Display Name', automatic=True, compute='_compute_display_name'))
+                string='Display Name', automatic=True,
+                compute='_compute_display_name',
+                search='_search_display_name',
+            ))
 
             if attrs.get('_log_access', self._auto):
                 add_default('create_uid', fields.Many2one(
@@ -277,43 +289,6 @@ class MetaModel(api.Meta):
                     'res.users', string='Last Updated by', automatic=True, readonly=True))
                 add_default('write_date', fields.Datetime(
                     string='Last Updated on', automatic=True, readonly=True))
-
-
-class NewId(object):
-    """ Pseudo-ids for new records, encapsulating an optional origin id (actual
-        record id) and an optional reference (any value).
-    """
-    __slots__ = ['origin', 'ref']
-
-    def __init__(self, origin=None, ref=None):
-        self.origin = origin
-        self.ref = ref
-
-    def __bool__(self):
-        return False
-
-    def __eq__(self, other):
-        return isinstance(other, NewId) and (
-            (self.origin and other.origin and self.origin == other.origin)
-            or (self.ref and other.ref and self.ref == other.ref)
-        )
-
-    def __hash__(self):
-        return hash(self.origin or self.ref or id(self))
-
-    def __repr__(self):
-        return (
-            "<NewId origin=%r>" % self.origin if self.origin else
-            "<NewId ref=%r>" % self.ref if self.ref else
-            "<NewId 0x%x>" % id(self)
-        )
-
-    def __str__(self):
-        if self.origin or self.ref:
-            id_part = repr(self.origin or self.ref)
-        else:
-            id_part = hex(id(self))
-        return "NewId_%s" % id_part
 
 
 def origin_ids(ids):
@@ -348,9 +323,6 @@ def expand_ids(id0, ids):
         if id_ not in seen and bool(id_) == kind:
             yield id_
             seen.add(id_)
-
-
-IdType = (int, NewId)
 
 
 # maximum number of prefetched records
@@ -567,6 +539,11 @@ class BaseModel(metaclass=MetaModel):
     """
     __slots__ = ['env', '_ids', '_prefetch_ids']
 
+    env: api.Environment
+    id: IdType | typing.Literal[False]
+    display_name: str | typing.Literal[False]
+    pool: Registry
+
     _fields: dict[str, Field]
     _auto = False
     """Whether a database table should be created.
@@ -591,15 +568,15 @@ class BaseModel(metaclass=MetaModel):
     .. seealso:: :class:`TransientModel`
     """
 
-    _name = None                #: the model name (in dot-notation, module namespace)
-    _description = None         #: the model's informal name
-    _module = None              #: the model's module (in the Odoo sense)
-    _custom = False             #: should be True for custom models only
+    _name: str | None = None            #: the model name (in dot-notation, module namespace)
+    _description: str | None = None     #: the model's informal name
+    _module = None                      #: the model's module (in the Odoo sense)
+    _custom = False                     #: should be True for custom models only
 
-    _inherit = ()
+    _inherit: str | list[str] | tuple[str, ...] = ()
     """Python-inherited models:
 
-    :type: str or list(str)
+    :type: str or list(str) or tuple(str)
 
     .. note::
 
@@ -625,14 +602,14 @@ class BaseModel(metaclass=MetaModel):
       :attr:`~odoo.models.Model._inherits`-ed models, the inherited field will
       correspond to the last one (in the inherits list order).
     """
-    _table = None               #: SQL table name used by model if :attr:`_auto`
-    _table_query = None         #: SQL expression of the table's content (optional)
-    _sql_constraints = []       #: SQL constraints [(name, sql_def, message)]
+    _table = None                   #: SQL table name used by model if :attr:`_auto`
+    _table_query = None             #: SQL expression of the table's content (optional)
+    _sql_constraints: list[tuple[str, str, str]] = []   #: SQL constraints [(name, sql_def, message)]
 
-    _rec_name = None            #: field to use for labeling records, default: ``name``
-    _rec_names_search = None    #: fields to consider in ``name_search``
-    _order = 'id'               #: default order field for searching results
-    _parent_name = 'parent_id'  #: the many2one field used as parent field
+    _rec_name = None                #: field to use for labeling records, default: ``name``
+    _rec_names_search: list[str] | None = None    #: fields to consider in ``name_search``
+    _order = 'id'                   #: default order field for searching results
+    _parent_name = 'parent_id'      #: the many2one field used as parent field
     _parent_store = False
     """set to True to compute parent_path field.
 
@@ -1498,8 +1475,7 @@ class BaseModel(metaclass=MetaModel):
                 record.update(info)
             log(record)
 
-        stream = CountingStream(records)
-        for record, extras in stream:
+        for stream_index, (record, extras) in enumerate(records):
             # xid
             xid = record.get('id', False)
             # dbid
@@ -1513,14 +1489,14 @@ class BaseModel(metaclass=MetaModel):
                 if not self.search([('id', '=', dbid)]):
                     log(dict(extras,
                         type='error',
-                        record=stream.index,
+                        record=stream_index,
                         field='.id',
                         message=_(u"Unknown database identifier '%s'", dbid)))
                     dbid = False
 
-            converted = convert(record, functools.partial(_log, extras, stream.index))
+            converted = convert(record, functools.partial(_log, extras, stream_index))
 
-            yield dbid, xid, converted, dict(extras, record=stream.index)
+            yield dbid, xid, converted, dict(extras, record=stream_index)
 
     def _validate_fields(self, field_names, excluded_names=()):
         """ Invoke the constraint methods for which at least one field name is
@@ -1625,7 +1601,7 @@ class BaseModel(metaclass=MetaModel):
     @api.model
     @api.readonly
     @api.returns('self')
-    def search(self, domain, offset=0, limit=None, order=None):
+    def search(self, domain, offset=0, limit=None, order=None) -> Self:
         """ search(domain[, offset=0][, limit=None][, order=None])
 
         Search for the records that satisfy the given ``domain``
@@ -1698,7 +1674,28 @@ class BaseModel(metaclass=MetaModel):
                 record.display_name = f"{record._name},{record.id}"
 
     @api.model
-    def name_create(self, name):
+    def _search_display_name(self, operator, value):
+        """
+        Returns a domain that matches records whose display name matches the
+        given ``name`` pattern when compared with the given ``operator``.
+        This method is used to implement the search on the ``display_name``
+        field, and can be overridden to change the search criteria.
+        The default implementation searches the fields defined in `_rec_names_search`
+        or `_rec_name`.
+        """
+        search_fnames = self._rec_names_search or ([self._rec_name] if self._rec_name else [])
+        if not search_fnames:
+            _logger.warning("Cannot search on display_name, no _rec_name or _rec_names_search defined on %s", self._name)
+            return expression.FALSE_DOMAIN
+        if operator.endswith('like') and not value and '=' not in operator:
+            # optimize out the default criterion of ``like ''`` that matches everything
+            # return all when operator is positive
+            return expression.FALSE_DOMAIN if operator in expression.NEGATIVE_TERM_OPERATORS else expression.TRUE_DOMAIN
+        aggregator = expression.AND if operator in expression.NEGATIVE_TERM_OPERATORS else expression.OR
+        return aggregator([[(field_name, operator, value)] for field_name in search_fnames])
+
+    @api.model
+    def name_create(self, name) -> tuple[int, str] | typing.Literal[False]:
         """ name_create(name) -> record
 
         Create a new record by calling :meth:`~.create` with only one value
@@ -1721,8 +1718,8 @@ class BaseModel(metaclass=MetaModel):
 
     @api.model
     @api.readonly
-    def name_search(self, name='', args=None, operator='ilike', limit=100):
-        """ name_search(name='', args=None, operator='ilike', limit=100) -> records
+    def name_search(self, name='', args=None, operator='ilike', limit=100) -> list[tuple[int, str]]:
+        """ name_search(name='', args=None, operator='ilike', limit=100)
 
         Search for records that have a display name matching the given
         ``name`` pattern when compared with the given ``operator``, while also
@@ -1745,34 +1742,9 @@ class BaseModel(metaclass=MetaModel):
         :rtype: list
         :return: list of pairs ``(id, display_name)`` for all matching records.
         """
-        ids = self._name_search(name, args, operator, limit=limit, order=self._order)
-
-        if isinstance(ids, Query):
-            records = self._fetch_query(ids, self._determine_fields_to_fetch(['display_name']))
-        else:
-            # Some override of `_name_search` return list of ids.
-            records = self.browse(ids)
-            records.fetch(['display_name'])
-
+        domain = expression.AND([[('display_name', operator, name)], args or []])
+        records = self.search_fetch(domain, ['display_name'], limit=limit)
         return [(record.id, record.display_name) for record in records.sudo()]
-
-    @api.model
-    def _name_search(self, name, domain=None, operator='ilike', limit=None, order=None):
-        """ _name_search(name='', domain=None, operator='ilike', limit=None, order=None) -> ids
-
-        Private implementation of name_search, returning ids or a :class:`Query` object.
-
-        No default is applied for parameters ``limit`` and ``order``.
-        """
-        domain = list(domain or ())
-        search_fnames = self._rec_names_search or ([self._rec_name] if self._rec_name else [])
-        if not search_fnames:
-            _logger.warning("Cannot execute name_search, no _rec_name or _rec_names_search defined on %s", self._name)
-        # optimize out the default criterion of ``like ''`` that matches everything
-        elif not (name == '' and operator in ('like', 'ilike')):
-            aggregator = expression.AND if operator in expression.NEGATIVE_TERM_OPERATORS else expression.OR
-            domain += aggregator([[(field_name, operator, name)] for field_name in search_fnames])
-        return self._search(domain, limit=limit, order=order)
 
     @api.model
     def _add_missing_default_values(self, values):
@@ -1869,7 +1841,7 @@ class BaseModel(metaclass=MetaModel):
         :rtype: list
         :raise AccessError: if user is not allowed to access requested information
         """
-        self.check_access_rights('read')
+        self.browse().check_access('read')
 
         if expression.is_false(self, domain):
             if not groupby:
@@ -2886,12 +2858,16 @@ class BaseModel(metaclass=MetaModel):
         if field.type == 'properties' and property_name:
             return SQL("%s -> %s", self._field_to_sql(alias, fname, query, flush), property_name)
 
+        if property_name:
+            fname = f"{fname}.{property_name}"
+            raise ValueError(f"Invalid field {fname!r} on model {self._name!r}")
+
         self.check_field_access_rights('read', [field.name])
 
         field_to_flush = field if flush and fname != 'id' else None
         sql_field = SQL.identifier(alias, fname, to_flush=field_to_flush)
 
-        if field.translate and not self.env.context.get('prefetch_langs'):
+        if field.translate:
             langs = field.get_translation_fallback_langs(self.env)
             sql_field_langs = [SQL("%s->>%s", sql_field, lang) for lang in langs]
             if len(sql_field_langs) == 1:
@@ -3072,6 +3048,9 @@ class BaseModel(metaclass=MetaModel):
                 if params:
                     if fname != 'id':
                         params = [field.convert_to_column(p, self, validate=False) for p in params]
+                        if field.translate:
+                            # unwrap actual values from the Json values returned by convert_to_column()
+                            params = [p.adapted['en_US'] for p in params]
                     sql = SQL("(%s %s %s)", sql_field, sql_operator, tuple(params))
                 else:
                     # The case for (fname, 'in', []) or (fname, 'not in', []).
@@ -3094,6 +3073,7 @@ class BaseModel(metaclass=MetaModel):
                 return SQL("(%s IS NULL OR %s = FALSE)", sql_field, sql_field)
 
         if (field.relational or field.name == 'id') and operator in ('=', '!=') and isinstance(value, NewId):
+            _logger.warning("_condition_to_sql: ignored (%r, %r, NewId), did you mean (%r, 'in', recs.ids)?", fname, operator, fname)
             return SQL("TRUE") if operator in expression.NEGATIVE_TERM_OPERATORS else SQL("FALSE")
 
         # comparison with null
@@ -3119,12 +3099,16 @@ class BaseModel(metaclass=MetaModel):
             sql_value = value
         elif need_wildcard:
             sql_value = SQL("%s", f"%{value}%")
+        elif field.translate:
+            # convert_to_column returns psycopg2.extras.Json({'en_US': text_value})
+            # only take the text_value to compare with the result of field_to_sql
+            sql_value = SQL("%s", field.convert_to_column(value, self, validate=False).adapted['en_US'])
         else:
             sql_value = SQL("%s", field.convert_to_column(value, self, validate=False))
 
         sql_left = sql_field
-        if operator.endswith('like'):
-            sql_left = SQL("%s::text", sql_field)
+        if operator.endswith('like') and field.type not in ('char', 'text', 'html'):
+            sql_left = SQL("(%s)::text", sql_field)
         if operator.endswith('ilike'):
             sql_left = self.env.registry.unaccent(sql_left)
             sql_value = self.env.registry.unaccent(sql_value)
@@ -3159,7 +3143,7 @@ class BaseModel(metaclass=MetaModel):
         :param full_name: Name of the field / property
             (e.g. "property.integer")
         """
-        self.check_access_rights("read")
+        self.browse().check_access("read")
         field_name, property_name = full_name.split(".")
         check_property_field_value_name(property_name)
         if field_name not in self._fields:
@@ -3686,7 +3670,7 @@ class BaseModel(metaclass=MetaModel):
         return field_names
 
     @api.readonly
-    def read(self, fields=None, load='_classic_read'):
+    def read(self, fields=None, load='_classic_read') -> list[ValuesType]:
         """ read([fields])
 
         Read the requested fields for the records in ``self``, and return their
@@ -3741,9 +3725,8 @@ class BaseModel(metaclass=MetaModel):
         """
         self.ensure_one()
 
-        self.check_access_rights('write')
+        self.check_access('write')
         self.check_field_access_rights('write', [field_name])
-        self.check_access_rule('write')
 
         valid_langs = set(code for code, _ in self.env['res.lang'].get_installed()) | {'en_US'}
         source_lang = source_lang or 'en_US'
@@ -3984,34 +3967,21 @@ class BaseModel(metaclass=MetaModel):
 
         fields_to_fetch = self._determine_fields_to_fetch(field_names, ignore_when_in_cache=True)
 
-        if not fields_to_fetch:
-            # there is nothing to fetch, but we expect an error anyway in case
-            # self is not accessible
-            self.check_access_rights('read')
-            try:
-                self.check_access_rule('read')
-            except MissingError:
-                # Method fetch() should never raise a MissingError, but method
-                # check_access_rule() can, because it must read fields on self.
-                # So we restrict 'self' to existing records (to avoid an extra
-                # exists() at the end of the method).
-                self.exists().check_access_rule('read')
-            return
-
         # first determine a query that satisfies the domain and access rules
         if any(field.column_type for field in fields_to_fetch):
             query = self.with_context(active_test=False)._search([('id', 'in', self.ids)])
         else:
-            self.check_access_rights('read')
             try:
-                self.check_access_rule('read')
+                self.check_access('read')
             except MissingError:
                 # Method fetch() should never raise a MissingError, but method
-                # check_access_rule() can, because it must read fields on self.
+                # check_access() can, because it must read fields on self.
                 # So we restrict 'self' to existing records (to avoid an extra
                 # exists() at the end of the method).
                 self = self.exists()
-                self.check_access_rule('read')
+                self.check_access('read')
+            if not fields_to_fetch:
+                return
             query = self._as_query(ordered=False)
 
         # fetch the fields
@@ -4094,6 +4064,8 @@ class BaseModel(metaclass=MetaModel):
                     # PG 9.2 introduces conflicting pg_size_pretty(numeric) -> need ::cast
                     sql = self._field_to_sql(self._table, field.name, query)
                     sql = SQL("pg_size_pretty(length(%s)::bigint)", sql)
+                elif field.translate and self.env.context.get('prefetch_langs'):
+                    sql = SQL.identifier(self._table, field.name, to_flush=field)
                 else:
                     # flushing is necessary to retrieve the en_US value of fields without a translation
                     sql = self._field_to_sql(self._table, field.name, query, flush=field.translate)
@@ -4283,6 +4255,66 @@ class BaseModel(metaclass=MetaModel):
                 })
             raise UserError("\n".join(lines))
 
+    def check_access(self, operation: str) -> None:
+        """ Verify that the current user is allowed to perform ``operation`` on
+        all the records in ``self``. The method raises an :class:`AccessError`
+        if the operation is forbidden on the model in general, or on any record
+        in ``self``.
+
+        In particular, when ``self`` is empty, the method checks whether the
+        current user has some permission to perform ``operation`` on the model
+        in general::
+
+            # check that user has some minimal permission on the model
+            records.browse().check_access(operation)
+
+        """
+        if not self.env.su and (result := self._check_access(operation)):
+            raise result[1]()
+
+    def has_access(self, operation: str) -> bool:
+        """ Return whether the current user is allowed to perform ``operation``
+        on all the records in ``self``. The method is fully consistent with
+        method :meth:`check_access` but returns a boolean instead.
+        """
+        return self.env.su or not self._check_access(operation)
+
+    def _filtered_access(self, operation: str):
+        """ Return the subset of ``self`` for which the current user is allowed
+        to perform ``operation``. The method is fully equivalent to::
+
+            self.filtered(lambda record: record.has_access(operation))
+
+        """
+        if self and not self.env.su and (result := self._check_access(operation)):
+            return self - result[0]
+        return self
+
+    def _check_access(self, operation: str) -> tuple[Self, Callable] | None:
+        """ Return ``None`` if the current user has permission to perform
+        ``operation`` on the records ``self``. Otherwise, return a pair
+        ``(records, function)`` where ``records`` are the forbidden records, and
+        ``function`` can be used to create some corresponding exception.
+
+        This method provides the base implementation of
+        methods :meth:`check_access`, :meth:`has_access`
+        and :meth:`_filtered_access`. The method may be overridden in order to
+        restrict the access to ``self``.
+        """
+        Access = self.env['ir.model.access']
+        if not Access.check(self._name, operation, raise_exception=False):
+            return self, functools.partial(Access._make_access_error, self._name, operation)
+
+        # we only check access rules on real records, which should not be mixed
+        # with new records
+        if any(self._ids):
+            Rule = self.env['ir.rule']
+            domain = Rule._compute_domain(self._name, operation)
+            if domain and (forbidden := self - self.sudo().filtered_domain(domain)):
+                return forbidden, functools.partial(Rule._make_access_error, operation, forbidden)
+
+        return None
+
     @api.model
     def check_access_rights(self, operation, raise_exception=True):
         """ Verify that the given operation is allowed for the current user accord to ir.model.access.
@@ -4293,7 +4325,13 @@ class BaseModel(metaclass=MetaModel):
         :rtype: bool
         :raise AccessError: if the operation is forbidden and raise_exception is True
         """
-        return self.env['ir.model.access'].check(self._name, operation, raise_exception)
+        warnings.warn(
+            "check_access_rights() is deprecated since 18.0; use check_access() instead.",
+            DeprecationWarning, 1,
+        )
+        if raise_exception:
+            return self.browse().check_access(operation)
+        return self.browse().has_access(operation)
 
     def check_access_rule(self, operation):
         """ Verify that the given operation is allowed for the current user according to ir.rules.
@@ -4302,65 +4340,26 @@ class BaseModel(metaclass=MetaModel):
         :return: None if the operation is allowed
         :raise UserError: if current ``ir.rules`` do not permit this operation.
         """
-        if self.env.su:
-            return
-
-        # SQL Alternative if computing in-memory is too slow for large dataset
-        # invalid = self - self._filter_access_rules(operation)
-        invalid = self - self._filter_access_rules_python(operation)
-        if not invalid:
-            return
-
-        forbidden = invalid.exists()
-        if forbidden:
-            # the invalid records are (partially) hidden by access rules
-            raise self.env['ir.rule']._make_access_error(operation, forbidden)
-
-        # If we get here, the invalid records are not in the database.
-        if operation in ('read', 'unlink'):
-            # No need to warn about deleting an already deleted record.
-            # And no error when reading a record that was deleted, to prevent spurious
-            # errors for non-transactional search/read sequences coming from clients.
-            return
-        _logger.info('Failed operation on deleted record(s): %s, uid: %s, model: %s', operation, self._uid, self._name)
-        raise MissingError(
-            _(
-                'One of the documents you are trying to access has been deleted, please try again after refreshing.\n\n'
-                'Document type: %(document_type)s, Operation: %(operation)s, Records: %(records)s, User: %(user)s',
-                document_type=self._name,
-                operation=operation,
-                records=invalid.ids[:6],
-                user=self._uid,
-            )
+        warnings.warn(
+            "check_access_rule() is deprecated since 18.0; use check_access() instead.",
+            DeprecationWarning, 1,
         )
+        self.check_access(operation)
 
     def _filter_access_rules(self, operation):
         """ Return the subset of ``self`` for which ``operation`` is allowed. """
-        if self.env.su:
-            return self
-
-        if not self._ids:
-            return self
-
-        query = Query(self.env, self._table, self._table_sql)
-        self._apply_ir_rules(query, operation)
-        if not query.where_clause:
-            return self
-
-        # determine ids in database that satisfy ir.rules
-        query.add_where(SQL("%s IN %s", SQL.identifier(self._table, 'id'), tuple(self.ids)))
-        valid_ids = set(query)
-
-        # return new ids without origin and ids with origin in valid_ids
-        return self.browse([
-            it
-            for it in self._ids
-            if not (it or it.origin) or (it or it.origin) in valid_ids
-        ])
+        warnings.warn(
+            "_filter_access_rules() is deprecated since 18.0; use _filtered_access() instead.",
+            DeprecationWarning, 1,
+        )
+        return self._filtered_access(operation)
 
     def _filter_access_rules_python(self, operation):
-        dom = self.env['ir.rule']._compute_domain(self._name, operation)
-        return self.sudo().filtered_domain(dom or [])
+        warnings.warn(
+            "_filter_access_rules_python() is deprecated since 18.0; use _filtered_access() instead.",
+            DeprecationWarning, 1,
+        )
+        return self._filtered_access(operation)
 
     def unlink(self):
         """ unlink()
@@ -4373,8 +4372,7 @@ class BaseModel(metaclass=MetaModel):
         if not self:
             return True
 
-        self.check_access_rights('unlink')
-        self.check_access_rule('unlink')
+        self.check_access('unlink')
 
         from odoo.addons.base.models.ir_model import MODULE_UNINSTALL_FLAG
         for func in self._ondelete_methods:
@@ -4463,7 +4461,7 @@ class BaseModel(metaclass=MetaModel):
 
         return True
 
-    def write(self, vals):
+    def write(self, vals: ValuesType) -> typing.Literal[True]:
         """ write(vals)
 
         Updates all records in ``self`` with the provided values.
@@ -4509,9 +4507,8 @@ class BaseModel(metaclass=MetaModel):
         if not self:
             return True
 
-        self.check_access_rights('write')
+        self.check_access('write')
         self.check_field_access_rights('write', vals.keys())
-        self.check_access_rule('write')
         env = self.env
 
         bad_names = {'id', 'parent_path'}
@@ -4730,7 +4727,7 @@ class BaseModel(metaclass=MetaModel):
             parent_records._parent_store_update()
 
     @api.model_create_multi
-    def create(self, vals_list):
+    def create(self, vals_list: list[ValuesType]) -> Self:
         """ create(vals_list) -> records
 
         Creates new records for the model.
@@ -4760,7 +4757,7 @@ class BaseModel(metaclass=MetaModel):
             return self.browse()
 
         self = self.browse()
-        self.check_access_rights('create')
+        self.check_access('create')
 
         new_vals_list = self._prepare_create_values(vals_list)
 
@@ -4991,11 +4988,7 @@ class BaseModel(metaclass=MetaModel):
                     columns.append(fname)
                     for stored, row in zip(stored_list, rows):
                         if fname in stored:
-                            colval = field.convert_to_column(stored[fname], self, stored)
-                            if field.translate is True and colval:
-                                if 'en_US' not in colval.adapted:
-                                    colval.adapted['en_US'] = next(iter(colval.adapted.values()))
-                            row.append(colval)
+                            row.append(field.convert_to_column(stored[fname], self, stored))
                         else:
                             row.append(SQL_DEFAULT)
                 else:
@@ -5087,7 +5080,7 @@ class BaseModel(metaclass=MetaModel):
 
         # check Python constraints for stored fields
         records._validate_fields(name for data in data_list for name in data['stored'])
-        records.check_access_rule('create')
+        records.check_access('create')
         return records
 
     def _compute_field_value(self, field):
@@ -5411,13 +5404,18 @@ class BaseModel(metaclass=MetaModel):
         if field.type == 'many2one':
             seen = self.env.context.get('__m2o_order_seen', ())
             if field in seen:
-                return
+                return SQL()
             self = self.with_context(__m2o_order_seen=frozenset((field, *seen)))
 
             # figure out the applicable order_by for the m2o
+            # special case: ordering by "x_id.id" doesn't recurse on x_id's comodel
             comodel = self.env[field.comodel_name]
-            coorder = comodel._order
-            sql_field = self._field_to_sql(alias, field_name, query)
+            if field_name.endswith('.id'):
+                coorder = 'id'
+                sql_field = self._field_to_sql(alias, fname, query)
+            else:
+                coorder = comodel._order
+                sql_field = self._field_to_sql(alias, field_name, query)
 
             if coorder == 'id':
                 return SQL("%s %s %s", sql_field, direction, nulls)
@@ -5559,7 +5557,7 @@ class BaseModel(metaclass=MetaModel):
         default the returned query object is not actually executed, and it can
         be injected as a value in a domain in order to generate sub-queries.
         """
-        self.check_access_rights('read')
+        self.browse().check_access('read')
 
         if expression.is_false(self, domain):
             # optimization: no need to query, as no record satisfies the domain
@@ -5709,7 +5707,7 @@ class BaseModel(metaclass=MetaModel):
                     new.update_field_translations(name, translations)
 
     @api.returns('self')
-    def copy(self, default=None):
+    def copy(self, default: ValuesType | None = None) -> Self:
         """ copy(default=None)
 
         Duplicate record ``self`` updating it with default values
@@ -5726,7 +5724,7 @@ class BaseModel(metaclass=MetaModel):
         return new_records
 
     @api.returns('self')
-    def exists(self):
+    def exists(self) -> Self:
         """  exists() -> records
 
         Returns the subset of records in ``self`` that exist.
@@ -5957,7 +5955,7 @@ class BaseModel(metaclass=MetaModel):
     #  - the global cache is only an index to "resolve" a record 'id'.
     #
 
-    def __init__(self, env: api.Environment, ids: tuple[int | NewId], prefetch_ids: Iterable[int | NewId]):
+    def __init__(self, env: api.Environment, ids: tuple[IdType, ...], prefetch_ids: Reversible[IdType]):
         """ Create a recordset instance.
 
         :param env: an environment
@@ -5968,7 +5966,7 @@ class BaseModel(metaclass=MetaModel):
         self._ids = ids
         self._prefetch_ids = prefetch_ids
 
-    def browse(self, ids=None):
+    def browse(self, ids: int | typing.Iterable[IdType] = ()) -> Self:
         """ browse([ids]) -> records
 
         Returns a recordset for the ids provided as parameter in the current
@@ -5996,7 +5994,7 @@ class BaseModel(metaclass=MetaModel):
     #
 
     @property
-    def ids(self):
+    def ids(self) -> list[int]:
         """ Return the list of actual record ids corresponding to ``self``. """
         return list(origin_ids(self._ids))
 
@@ -6009,7 +6007,7 @@ class BaseModel(metaclass=MetaModel):
     # Conversion methods
     #
 
-    def ensure_one(self):
+    def ensure_one(self) -> Self:
         """Verify that the current recordset holds a single record.
 
         :raise odoo.exceptions.ValueError: ``len(self) != 1``
@@ -6022,7 +6020,7 @@ class BaseModel(metaclass=MetaModel):
         except ValueError:
             raise ValueError("Expected singleton: %s" % self)
 
-    def with_env(self, env):
+    def with_env(self, env: api.Environment) -> Self:
         """Return a new version of this recordset attached to the provided environment.
 
         :param env:
@@ -6033,7 +6031,7 @@ class BaseModel(metaclass=MetaModel):
         """
         return self.__class__(env, self._ids, self._prefetch_ids)
 
-    def sudo(self, flag=True):
+    def sudo(self, flag=True) -> Self:
         """ sudo([flag=True])
 
         Returns a new version of this recordset with superuser mode enabled or
@@ -6061,7 +6059,7 @@ class BaseModel(metaclass=MetaModel):
             return self
         return self.with_env(self.env(su=flag))
 
-    def with_user(self, user):
+    def with_user(self, user) -> Self:
         """ with_user(user)
 
         Return a new version of this recordset attached to the given user, in
@@ -6072,7 +6070,7 @@ class BaseModel(metaclass=MetaModel):
             return self
         return self.with_env(self.env(user=user, su=False))
 
-    def with_company(self, company):
+    def with_company(self, company) -> Self:
         """ with_company(company)
 
         Return a new version of this recordset with a modified context, such that::
@@ -6106,7 +6104,7 @@ class BaseModel(metaclass=MetaModel):
 
         return self.with_context(allowed_company_ids=allowed_company_ids)
 
-    def with_context(self, *args, **kwargs):
+    def with_context(self, *args, **kwargs) -> Self:
         """ with_context([context][, **overrides]) -> Model
 
         Returns a new version of this recordset attached to an extended
@@ -6145,7 +6143,7 @@ class BaseModel(metaclass=MetaModel):
             context['allowed_company_ids'] = self._context['allowed_company_ids']
         return self.with_env(self.env(context=context))
 
-    def with_prefetch(self, prefetch_ids=None):
+    def with_prefetch(self, prefetch_ids=None) -> Self:
         """ with_prefetch([prefetch_ids]) -> records
 
         Return a new version of this recordset that uses the given prefetch ids,
@@ -6260,7 +6258,7 @@ class BaseModel(metaclass=MetaModel):
         else:
             return self._mapped_func(func)
 
-    def filtered(self, func):
+    def filtered(self, func) -> Self:
         """Return the records in ``self`` satisfying ``func``.
 
         :param func: a function or a dot-separated sequence of field names
@@ -6309,7 +6307,7 @@ class BaseModel(metaclass=MetaModel):
         browse = functools.partial(type(self), self.env, prefetch_ids=self._prefetch_ids)
         return {key: browse(tuple(ids)) for key, ids in collator.items()}
 
-    def filtered_domain(self, domain):
+    def filtered_domain(self, domain) -> Self:
         """Return the records in ``self`` satisfying the domain and keeping the same order.
 
         :param domain: :ref:`A search domain <reference/orm/domains>`.
@@ -6465,7 +6463,7 @@ class BaseModel(metaclass=MetaModel):
         [result_ids] = stack
         return self.browse(id_ for id_ in self._ids if id_ in result_ids)
 
-    def sorted(self, key=None, reverse=False):
+    def sorted(self, key=None, reverse=False) -> Self:
         """Return the recordset ``self`` ordered by ``key``.
 
         :param key: either a function of one argument that returns a
@@ -6595,7 +6593,7 @@ class BaseModel(metaclass=MetaModel):
     #
 
     @api.model
-    def new(self, values=None, origin=None, ref=None):
+    def new(self, values=None, origin=None, ref=None) -> Self:
         """ new([values], [origin], [ref]) -> record
 
         Return a new record instance attached to the current environment and
@@ -6619,7 +6617,7 @@ class BaseModel(metaclass=MetaModel):
         return record
 
     @property
-    def _origin(self):
+    def _origin(self) -> Self:
         """ Return the actual records corresponding to ``self``. """
         ids = tuple(origin_ids(self._ids))
         prefetch_ids = OriginIds(self._prefetch_ids)
@@ -6637,7 +6635,7 @@ class BaseModel(metaclass=MetaModel):
         """ Return the size of ``self``. """
         return len(self._ids)
 
-    def __iter__(self):
+    def __iter__(self) -> typing.Iterator[Self]:
         """ Return an iterator over ``self``. """
         if len(self._ids) > PREFETCH_MAX and self._prefetch_ids is self._ids:
             for ids in self.env.cr.split_for_in_conditions(self._ids):
@@ -6647,7 +6645,7 @@ class BaseModel(metaclass=MetaModel):
             for id_ in self._ids:
                 yield self.__class__(self.env, (id_,), self._prefetch_ids)
 
-    def __reversed__(self):
+    def __reversed__(self) -> typing.Iterator[Self]:
         """ Return an reversed iterator over ``self``. """
         if len(self._ids) > PREFETCH_MAX and self._prefetch_ids is self._ids:
             for ids in self.env.cr.split_for_in_conditions(reversed(self._ids)):
@@ -6673,11 +6671,11 @@ class BaseModel(metaclass=MetaModel):
                 return item in self._fields
             raise TypeError(f"unsupported operand types in: {item!r} in {self}")
 
-    def __add__(self, other):
+    def __add__(self, other) -> Self:
         """ Return the concatenation of two recordsets. """
         return self.concat(other)
 
-    def concat(self, *args):
+    def concat(self, *args) -> Self:
         """ Return the concatenation of ``self`` with all the arguments (in
             linear time complexity).
         """
@@ -6691,7 +6689,7 @@ class BaseModel(metaclass=MetaModel):
                 raise TypeError(f"unsupported operand types in: {self} + {arg!r}")
         return self.browse(ids)
 
-    def __sub__(self, other):
+    def __sub__(self, other) -> Self:
         """ Return the recordset of all the records in ``self`` that are not in
             ``other``. Note that recordset order is preserved.
         """
@@ -6703,7 +6701,7 @@ class BaseModel(metaclass=MetaModel):
         except AttributeError:
             raise TypeError(f"unsupported operand types in: {self} - {other!r}")
 
-    def __and__(self, other):
+    def __and__(self, other) -> Self:
         """ Return the intersection of two recordsets.
             Note that first occurrence order is preserved.
         """
@@ -6715,13 +6713,13 @@ class BaseModel(metaclass=MetaModel):
         except AttributeError:
             raise TypeError(f"unsupported operand types in: {self} & {other!r}")
 
-    def __or__(self, other):
+    def __or__(self, other) -> Self:
         """ Return the union of two recordsets.
             Note that first occurrence order is preserved.
         """
         return self.union(other)
 
-    def union(self, *args):
+    def union(self, *args) -> Self:
         """ Return the union of ``self`` with all the arguments (in linear time
             complexity, with first occurrence order preserved).
         """
@@ -6791,6 +6789,12 @@ class BaseModel(metaclass=MetaModel):
 
     def __hash__(self):
         return hash((self._name, frozenset(self._ids)))
+
+    @typing.overload
+    def __getitem__(self, key: int | slice) -> Self: ...
+
+    @typing.overload
+    def __getitem__(self, key: str) -> typing.Any: ...
 
     def __getitem__(self, key):
         """ If ``key`` is an integer or a slice, return the corresponding record
@@ -7220,6 +7224,7 @@ collections.abc.Set.register(BaseModel)
 # not exactly true as BaseModel doesn't have index or count
 collections.abc.Sequence.register(BaseModel)
 
+
 class RecordCache(MutableMapping):
     """ A mapping from field names to values, to read and update the cache of a record. """
     __slots__ = ['_record']
@@ -7260,6 +7265,7 @@ class RecordCache(MutableMapping):
 
 AbstractModel = BaseModel
 
+
 class Model(AbstractModel):
     """ Main super-class for regular database-persisted Odoo models.
 
@@ -7275,6 +7281,7 @@ class Model(AbstractModel):
     _register = False           # not visible in ORM registry, meant to be python-inherited only
     _abstract = False           # not abstract
     _transient = False          # not transient
+
 
 class TransientModel(Model):
     """ Model super-class for transient records, meant to be temporarily
@@ -7353,17 +7360,20 @@ def itemgetter_tuple(items):
         return lambda gettable: (gettable[items[0]],)
     return operator.itemgetter(*items)
 
+
 def convert_pgerror_not_null(model, fields, info, e):
+    env = model.env
     if e.diag.table_name != model._table:
-        return {'message': _("Missing required value for the field '%(name)s' on a linked model [%(linked_model)s]", name=e.diag.column_name, linked_model=e.diag.table_name)}
+        return {'message': env._("Missing required value for the field '%(name)s' on a linked model [%(linked_model)s]", name=e.diag.column_name, linked_model=e.diag.table_name)}
 
     field_name = e.diag.column_name
     field = fields[field_name]
-    message = _("Missing required value for the field '%(name)s' (%(technical_name)s)", name=field['string'], technical_name=field_name)
+    message = env._("Missing required value for the field '%(name)s' (%(technical_name)s)", name=field['string'], technical_name=field_name)
     return {
         'message': message,
         'field': field_name,
     }
+
 
 def convert_pgerror_unique(model, fields, info, e):
     # new cursor since we're probably in an error handler in a blown
@@ -7391,7 +7401,7 @@ def convert_pgerror_unique(model, fields, info, e):
     if len(ufields) == 1:
         field_name = ufields[0]
         field = fields[field_name]
-        message = _(
+        message = model.env._(
             "The value for the field '%(field)s' already exists (this is probably '%(other_field)s' in the current model).",
             field=field_name,
             other_field=field['string'],
@@ -7401,7 +7411,7 @@ def convert_pgerror_unique(model, fields, info, e):
             'field': field_name,
         }
     field_strings = [fields[fname]['string'] for fname in ufields]
-    message = _(
+    message = model.env._(
         "The values for the fields '%(fields)s' already exist (they are probably '%(other_fields)s' in the current model).",
         fields=format_list(model.env, ufields),
         other_fields=format_list(model.env, field_strings),
@@ -7411,19 +7421,23 @@ def convert_pgerror_unique(model, fields, info, e):
         # no field, unclear which one we should pick and they could be in any order
     }
 
+
 def convert_pgerror_constraint(model, fields, info, e):
     sql_constraints = dict([(('%s_%s') % (e.diag.table_name, x[0]), x) for x in model._sql_constraints])
     if e.diag.constraint_name in sql_constraints.keys():
         return {'message': "'%s'" % sql_constraints[e.diag.constraint_name][2]}
     return {'message': tools.exception_to_unicode(e)}
 
+
 PGERROR_TO_OE = defaultdict(
     # shape of mapped converters
-    lambda: (lambda model, fvg, info, pgerror: {'message': tools.exception_to_unicode(pgerror)}), {
-    '23502': convert_pgerror_not_null,
-    '23505': convert_pgerror_unique,
-    '23514': convert_pgerror_constraint,
-})
+    lambda: (lambda model, fvg, info, pgerror: {'message': tools.exception_to_unicode(pgerror)}),
+    {
+        '23502': convert_pgerror_not_null,
+        '23505': convert_pgerror_unique,
+        '23514': convert_pgerror_constraint,
+    },
+)
 
 # keep those imports here to avoid dependency cycle errors
 # pylint: disable=wrong-import-position

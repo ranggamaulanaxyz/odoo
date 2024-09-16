@@ -12,12 +12,14 @@ from markupsafe import Markup, escape, escape_silent
 from PIL import Image
 from lxml import etree, html
 
-from odoo import api, fields, models, _, _lt, tools
+from odoo import api, fields, models, tools
 from odoo.tools import posix_to_ldml, float_utils, format_date, format_duration
 from odoo.tools.mail import safe_attrs
 from odoo.tools.misc import get_lang, babel_locale_parse
 from odoo.tools.mimetypes import guess_mimetype
+from odoo.tools.translate import _, LazyTranslate
 
+_lt = LazyTranslate(__name__)
 _logger = logging.getLogger(__name__)
 
 
@@ -734,6 +736,8 @@ class BarcodeConverter(models.AbstractModel):
     def value_to_html(self, value, options=None):
         if not value:
             return ''
+        if not bool(re.match(r'^[\x00-\x7F]+$', value)):
+            return nl2br(value)
         barcode_symbology = options.get('symbology', 'Code128')
         barcode = self.env['ir.actions.report'].barcode(
             barcode_symbology,

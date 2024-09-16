@@ -23,13 +23,13 @@ test("Manage Messages", async (assert) => {
         records: [],
     };
     Object.assign(serverData.views, {
-        "mail.message,false,list": "<tree/>",
+        "mail.message,false,list": "<list/>",
         "mail.message,false,form": "<form/>",
         "mail.message,false,search": "<search/>",
     });
     registry.category("debug").category("form").add("manageMessages", manageMessages);
     async function mockRPC(route, { method, model, kwargs }) {
-        if (method === "check_access_rights") {
+        if (method === "has_access") {
             return true;
         }
         if (method === "web_search_read" && model === "mail.message") {

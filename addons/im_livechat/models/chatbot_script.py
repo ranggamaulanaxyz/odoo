@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
-from odoo import _, api, models, fields
+from odoo import api, models, fields
 from odoo.http import request
 from odoo.tools import email_normalize, get_lang, html2plaintext, is_html_empty, plaintext2html
 
@@ -55,7 +55,7 @@ class ChatbotScript(models.Model):
 
     def copy_data(self, default=None):
         vals_list = super().copy_data(default=default)
-        return [dict(vals, title=_("%s (copy)", script.title)) for script, vals in zip(self, vals_list)]
+        return [dict(vals, title=self.env._("%s (copy)", script.title)) for script, vals in zip(self, vals_list)]
 
     def copy(self, default=None):
         """ Correctly copy the 'triggering_answer_ids' field from the original script_step_ids to the clone.
@@ -204,7 +204,7 @@ class ChatbotScript(models.Model):
         posted_message = False
         error_message = False
         if not email_normalized:
-            error_message = _(
+            error_message = self.env._(
                 "'%(input_email)s' does not look like a valid email. Can you please try again?",
                 input_email=email_address
             )
@@ -217,5 +217,5 @@ class ChatbotScript(models.Model):
         }
 
     def _get_chatbot_language(self):
-        frontend_lang = request and request.httprequest.cookies.get('frontend_lang')
+        frontend_lang = request and request.cookies.get('frontend_lang')
         return frontend_lang or self.env.user.lang or get_lang(self.env).code

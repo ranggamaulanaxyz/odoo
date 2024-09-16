@@ -3,7 +3,7 @@ import { useService } from "@web/core/utils/hooks";
 import { useBarcodeReader } from "@point_of_sale/app/barcode/barcode_reader_hook";
 import { _t } from "@web/core/l10n/translation";
 import { usePos } from "@point_of_sale/app/store/pos_hook";
-import { Component, onMounted, useState, reactive } from "@odoo/owl";
+import { Component, onMounted, useState, reactive, onWillRender } from "@odoo/owl";
 import { CategorySelector } from "@point_of_sale/app/generic_components/category_selector/category_selector";
 import { Input } from "@point_of_sale/app/generic_components/inputs/input/input";
 import {
@@ -55,17 +55,21 @@ export class ProductScreen extends Component {
             currentOffset: 0,
         });
         onMounted(() => {
-            this.pos.openCashControl();
-
-            if (this.pos.config.iface_start_categ_id) {
-                this.pos.setSelectedCategory(this.pos.config.iface_start_categ_id.id);
-            }
+            this.pos.openOpeningControl();
 
             // Call `reset` when the `onMounted` callback in `numberBuffer.use` is done.
             // We don't do this in the `mounted` lifecycle method because it is called before
             // the callbacks in `onMounted` hook.
             this.numberBuffer.reset();
         });
+
+        onWillRender(() => {
+            // If its a shared order it can be paid from another POS
+            if (this.currentOrder.state !== "draft") {
+                this.pos.add_new_order();
+            }
+        });
+
         this.barcodeReader = useService("barcode_reader");
 
         useBarcodeReader({
@@ -308,7 +312,7 @@ export class ProductScreen extends Component {
         let list = [];
 
         if (this.searchWord !== "") {
-            list = this.getProductsBySearchWord(this.searchWord);
+            list = this.addMainProductsToDisplay(this.getProductsBySearchWord(this.searchWord));
         } else if (this.pos.selectedCategory?.id) {
             list = this.getProductsByCategory(this.pos.selectedCategory);
         } else {
@@ -336,21 +340,19 @@ export class ProductScreen extends Component {
     }
 
     getProductsBySearchWord(searchWord) {
-        const products = this.pos.selectedCategory?.id
-            ? this.getProductsByCategory(this.pos.selectedCategory)
-            : this.products;
-
-        const exactMatches = products.filter((product) => product.exactMatch(searchWord));
-
-        if (exactMatches.length > 0 && searchWord.length > 2) {
-            return exactMatches;
-        }
-
-        const fuzzyMatches = fuzzyLookup(unaccent(searchWord, false), products, (product) =>
+        return fuzzyLookup(unaccent(searchWord, false), this.products, (product) =>
             unaccent(product.searchString, false)
         );
+    }
 
-        return Array.from(new Set([...exactMatches, ...fuzzyMatches]));
+    addMainProductsToDisplay(products) {
+        const uniqueProducts = new Set(products);
+        for (const product of products) {
+            if (product.id in this.pos.mainProductVariant) {
+                uniqueProducts.add(this.pos.mainProductVariant[product.id]);
+            }
+        }
+        return Array.from(uniqueProducts);
     }
 
     getProductsByCategory(category) {

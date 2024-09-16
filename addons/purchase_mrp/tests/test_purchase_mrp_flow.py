@@ -352,8 +352,7 @@ class TestPurchaseMrpFlow(AccountTestInvoicingCommon):
 
         # Create a backorder for the missing componenents
         pick = po.picking_ids[0]
-        res = pick.button_validate()
-        Form(self.env[res['res_model']].with_context(res['context'])).save().process()
+        Form.from_action(self.env, pick.button_validate()).save().process()
 
         # Check that a backorded is created
         self.assertEqual(len(po.picking_ids), 2)
@@ -372,8 +371,7 @@ class TestPurchaseMrpFlow(AccountTestInvoicingCommon):
         self._process_quantities(backorder_1.move_ids, qty_to_process)
 
         # Create a backorder for the missing componenents
-        res = backorder_1.button_validate()
-        Form(self.env[res['res_model']].with_context(res['context'])).save().process()
+        Form.from_action(self.env, backorder_1.button_validate()).save().process()
 
         # Only 1 kit_parent should be received at this point
         self.assertEqual(order_line.qty_received, 1)
@@ -411,8 +409,7 @@ class TestPurchaseMrpFlow(AccountTestInvoicingCommon):
         self._process_quantities(backorder_2.move_ids, qty_to_process)
 
         # Create a backorder for the missing componenents
-        res = backorder_2.button_validate()
-        Form(self.env[res['res_model']].with_context(res['context'])).save().process()
+        Form.from_action(self.env, backorder_2.button_validate()).save().process()
 
         # Check that x3 kit_parents are indeed received
         self.assertEqual(order_line.qty_received, 3)
@@ -476,9 +473,7 @@ class TestPurchaseMrpFlow(AccountTestInvoicingCommon):
                 'to_refund': True
             })
 
-        wiz_act = return_of_return_pick.button_validate()
-        wiz = Form(self.env[wiz_act['res_model']].with_context(wiz_act['context'])).save()
-        wiz.process()
+        Form.from_action(self.env, return_of_return_pick.button_validate()).save().process()
 
         # As one of each component is missing, only 6 kit_parents should be received
         self.assertEqual(order_line.qty_received, 6)
@@ -1110,9 +1105,7 @@ class TestPurchaseMrpFlow(AccountTestInvoicingCommon):
         receipt = po.picking_ids
         receipt.move_line_ids[0].quantity = 4
         receipt.move_line_ids[1].quantity = 2
-        action = receipt.button_validate()
-        wizard = Form(self.env[action['res_model']].with_context(action['context'])).save()
-        wizard.process()
+        Form.from_action(self.env, receipt.button_validate()).save().process()
         # Price Unit for 1 gm of the kit = 90000/1000 = 90
         # unit_cost for cmp1 = 90 *1000* 3 / 2 / 2 / 1000 = 67.5
         # unit_cost for cmp2  = 90 *1000* 3 / 2 / 1  * 1000 = 135000000
@@ -1124,15 +1117,16 @@ class TestPurchaseMrpFlow(AccountTestInvoicingCommon):
         self.warehouse.reception_steps = 'two_steps'
         # Enable MTO route for Component
         self.env.ref('stock.route_warehouse0_mto').active = True
-        route_buy = self.warehouse.buy_pull_id.route_id.id
-        route_mto = self.warehouse.mto_pull_id.route_id.id
+        route_buy = self.warehouse.buy_pull_id.route_id
+        route_mto = self.warehouse.mto_pull_id.route_id
+        route_mto.rule_ids.procure_method = "make_to_order"
         self.component_a.write({
             'seller_ids': [
                 Command.create({'partner_id': self.partner_a.id},
             )],
             'route_ids': [
-                Command.link(route_buy),
-                Command.link(route_mto),
+                Command.link(route_buy.id),
+                Command.link(route_mto.id),
             ],
         })
 
@@ -1172,3 +1166,24 @@ class TestPurchaseMrpFlow(AccountTestInvoicingCommon):
         replenishments = report_values['components'][0]['replenishments']
         self.assertEqual(len(replenishments), 1)
         self.assertEqual(replenishments[0]['summary']['name'], purchase.name)
+
+    def test_total_cost_share_rounded_to_precision(self):
+        kit, compo01, compo02 = self.env['product.product'].create([{
+            'name': name,
+            'standard_price': price,
+        } for name, price in [('Kit', 30), ('Compo 01', 10), ('Compo 02', 20)]])
+
+        bom = self.env['mrp.bom'].create({
+            'product_tmpl_id': kit.product_tmpl_id.id,
+            'type': 'phantom',
+            'bom_line_ids': [(0, 0, {
+                'product_id': compo01.id,
+                'product_qty': 1,
+                'cost_share': 99.99,
+            }), (0, 0, {
+                'product_id': compo02.id,
+                'product_qty': 1,
+                'cost_share': 0.01,
+            })],
+        })
+        self.assertTrue(bom)

@@ -11,18 +11,23 @@ import {
     makeServerError,
     models,
     mountView,
+    mountViewInDialog,
     mountWithCleanup,
     onRpc,
 } from "../../web_test_helpers";
 
 import { WebClient } from "@web/webclient/webclient";
 
-const hideTab = () => {
+const hideTab = async () => {
+    const prop = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState")
     Object.defineProperty(document, "visibilityState", {
         value: "hidden",
+        configurable: true,
+        writable: true,
     });
     document.dispatchEvent(new Event("visibilitychange"));
-    return tick();
+    await tick();
+    Object.defineProperty(document, "visibilityState", prop);
 };
 
 onRpc("has_group", () => true);
@@ -117,7 +122,7 @@ test.tags("desktop")(`save when page changed`, async () => {
     ]);
 
     Partner._views = {
-        list: `<tree><field name="name"/></tree>`,
+        list: `<list><field name="name"/></list>`,
         form: `
             <form>
                 <group>
@@ -169,7 +174,7 @@ test.tags("desktop")(`save when breadcrumb clicked`, async () => {
     ]);
 
     Partner._views = {
-        list: `<tree><field name="name"/></tree>`,
+        list: `<list><field name="name"/></list>`,
         form: `
             <form>
                 <group>
@@ -219,7 +224,7 @@ test.tags("desktop")(`error on save when breadcrumb clicked`, async () => {
     ]);
 
     Partner._views = {
-        list: `<tree><field name="name"/></tree>`,
+        list: `<list><field name="name"/></list>`,
         form: `
             <form>
                 <group>
@@ -267,7 +272,7 @@ test.tags("desktop")(`save when action changed`, async () => {
     ]);
 
     Partner._views = {
-        list: `<tree><field name="name"/></tree>`,
+        list: `<list><field name="name"/></list>`,
         form: `
             <form>
                 <group>
@@ -485,7 +490,7 @@ test.tags("desktop")(`save on closing tab/browser (detached form)`, async () => 
         },
     ]);
     Partner._views = {
-        list: `<tree><field name="name"/></tree>`,
+        list: `<list><field name="name"/></list>`,
         form: `
             <form>
                 <group>
@@ -852,4 +857,35 @@ test(`error on save when create button clicked`, async () => {
     expect.verifySteps(["save"]);
     await animationFrame();
     expect(`.o_error_dialog`).toHaveCount(1);
+});
+
+test(`doesn't autosave when in dialog (visibility change)`, async () => {
+    onRpc("web_save", () => {
+        expect.step("should not call web_save");
+    });
+    await mountViewInDialog({
+        resModel: "partner",
+        type: "form",
+        arch: `<form><field name="name"/></form>`,
+        resId: 1,
+    });
+    expect('.o_field_widget[name="name"] input').toHaveValue("Xavier Lancer");
+    await fieldInput("name").edit("Mathiew Brown");
+    await hideTab();
+    expect.verifySteps([]);
+});
+
+test(`doesn't autosave when in dialog (beacon)`, async () => {
+    mockSendBeacon(() => expect.step("sendBeacon"));
+    await mountViewInDialog({
+        resModel: "partner",
+        type: "form",
+        arch: `<form><field name="name"/></form>`,
+        resId: 1,
+    });
+    expect('.o_field_widget[name="name"] input').toHaveValue("Xavier Lancer");
+    await fieldInput("name").edit("Mathiew Brown");
+    unload();
+    await animationFrame();
+    expect.verifySteps([]);
 });

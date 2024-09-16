@@ -10,7 +10,6 @@ import { uniqueId } from "@web/core/utils/functions";
 import { escape } from "@web/core/utils/strings";
 import { debounce, throttleForAnimation } from "@web/core/utils/timing";
 import Class from "@web/legacy/js/core/class";
-import mixins from "@web/legacy/js/core/mixins";
 import publicWidget from "@web/legacy/js/public/public_widget";
 import wUtils from "@website/js/utils";
 import { renderToElement } from "@web/core/utils/render";
@@ -23,7 +22,7 @@ import {
 } from "@website/js/text_processing";
 import { touching } from "@web/core/utils/ui";
 import { ObservingCookieWidgetMixin } from "@website/snippets/observing_cookie_mixin";
-import { scrollTo, closestScrollableY } from "@web/core/utils/scrolling";
+import { scrollTo } from "@web_editor/js/common/scrolling";
 
 // Initialize fallbacks for the use of requestAnimationFrame,
 // cancelAnimationFrame and performance.now()
@@ -100,7 +99,7 @@ publicWidget.Widget.include({
  *
  * This uses a simple API: it can be started, stopped, played and paused.
  */
-var AnimationEffect = Class.extend(mixins.ParentedMixin, {
+var AnimationEffect = Class.extend(publicWidget.ParentedMixin, {
     /**
      * @constructor
      * @param {Object} parent
@@ -128,7 +127,7 @@ var AnimationEffect = Class.extend(mixins.ParentedMixin, {
      *        triggered when scrolling a modal.
      */
     init: function (parent, updateCallback, startEvents, $startTarget, options) {
-        mixins.ParentedMixin.init.call(this);
+        publicWidget.ParentedMixin.init.call(this);
         this.setParent(parent);
 
         options = options || {};
@@ -184,7 +183,7 @@ var AnimationEffect = Class.extend(mixins.ParentedMixin, {
      * @override
      */
     destroy: function () {
-        mixins.ParentedMixin.destroy.call(this);
+        publicWidget.ParentedMixin.destroy.call(this);
         this.stop();
     },
 
@@ -990,8 +989,8 @@ registry.anchorSlide = publicWidget.Widget.extend({
      */
     async _scrollTo($el, scrollValue = 'true') {
         return scrollTo($el[0], {
-            behavior: scrollValue === 'true' ? "smooth" : "instant",
-            offset: this._computeExtraOffset(),
+            duration: scrollValue === "true" ? 500 : 0,
+            extraOffset: this._computeExtraOffset(),
         });
     },
     /**
@@ -1066,8 +1065,8 @@ registry.anchorSlide = publicWidget.Widget.extend({
             // or to the bottom of the document even if the header or the
             // footer is removed from the DOM.
             scrollTo(hash, {
-                behavior: "smooth",
-                offset: this._computeExtraOffset(),
+                duration: 500,
+                extraOffset: this._computeExtraOffset(),
             });
         } else {
             this._scrollTo($anchor, scrollValue);
@@ -1123,22 +1122,13 @@ registry.FullScreenHeight = publicWidget.Widget.extend({
     _computeIdealHeight() {
         const windowHeight = $(window).outerHeight();
         if (this.inModal) {
-            return (windowHeight - $('#wrapwrap').position().top);
+            return windowHeight;
         }
 
         // Doing it that way allows to considerer fixed headers, hidden headers,
         // connected users, ...
         const firstContentEl = $('#wrapwrap > main > :first-child')[0]; // first child to consider the padding-top of main
-        // When a modal is open, we remove the "modal-open" class from the body.
-        // This is because this class sets "#wrapwrap" and "<body>" to
-        // "overflow: hidden," preventing the "closestScrollableY" (?) function from
-        // correctly recognizing the scrollable element closest to the element
-        // for which the height needs to be calculated. Without this, the
-        // "mainTopPos" variable would be incorrect.
-        const modalOpen = document.body.classList.contains("modal-open");
-        document.body.classList.remove("modal-open");
-        const mainTopPos = firstContentEl.getBoundingClientRect().top + closestScrollableY(firstContentEl.parentNode).scrollTop;
-        document.body.classList.toggle("modal-open", modalOpen);
+        const mainTopPos = firstContentEl.getBoundingClientRect().top + document.documentElement.scrollTop;
         return (windowHeight - mainTopPos);
     },
 });
@@ -1165,7 +1155,8 @@ registry.ScrollButton = registry.anchorSlide.extend({
 });
 
 registry.FooterSlideout = publicWidget.Widget.extend({
-    selector: '#wrapwrap:has(.o_footer_slideout)',
+    selector: '#wrapwrap',
+    selectorHas: '.o_footer_slideout',
     disabledInEditableMode: false,
 
     /**
@@ -1176,25 +1167,21 @@ registry.FooterSlideout = publicWidget.Widget.extend({
         const slideoutEffect = $main.outerHeight() >= $(window).outerHeight();
         this.el.classList.toggle('o_footer_effect_enable', slideoutEffect);
 
-        // Add a pixel div over the footer, after in the DOM, so that the
-        // height of the footer is understood by Firefox sticky implementation
-        // (which it seems to not understand because of the combination of 3
-        // items: the footer is the last :visible element in the #wrapwrap, the
-        // #wrapwrap uses flex layout and the #wrapwrap is the element with a
-        // scrollbar).
-        // TODO check if the hack is still needed by future browsers.
-        this.__pixelEl = document.createElement('div');
-        this.__pixelEl.style.width = `1px`;
-        this.__pixelEl.style.height = `1px`;
-        this.__pixelEl.style.marginTop = `-1px`;
-        // On safari, add a background attachment fixed to fix the glitches that
-        // appear when scrolling the page with a footer slide out.
+        // On safari, add a pixel div over the footer, after in the DOM, and add
+        // a background attachment on it as it fixes the glitches that appear
+        // when scrolling the page with a footer slide out.
+        // TODO check if the hack is still needed (might have been fixed when
+        // the scrollbar was restored to its natural position).
         if (/^((?!chrome|android).)*safari/i.test(navigator.userAgent)) {
+            this.__pixelEl = document.createElement('div');
+            this.__pixelEl.style.width = `1px`;
+            this.__pixelEl.style.height = `1px`;
+            this.__pixelEl.style.marginTop = `-1px`;
             this.__pixelEl.style.backgroundColor = "transparent";
             this.__pixelEl.style.backgroundAttachment = "fixed";
             this.__pixelEl.style.backgroundImage = "url(/website/static/src/img/website_logo.svg)";
+            this.el.appendChild(this.__pixelEl);
         }
-        this.el.appendChild(this.__pixelEl);
 
         return this._super(...arguments);
     },
@@ -1204,7 +1191,9 @@ registry.FooterSlideout = publicWidget.Widget.extend({
     destroy() {
         this._super(...arguments);
         this.el.classList.remove('o_footer_effect_enable');
-        this.__pixelEl.remove();
+        if (this.__pixelEl) {
+            this.__pixelEl.remove();
+        }
     },
 });
 
@@ -1417,8 +1406,8 @@ registry.WebsiteAnimate = publicWidget.Widget.extend({
         $el.css({'animation-name': animationName , 'animation-play-state': 'paused'});
     },
     /**
-     * Shows/hides the horizontal scrollbar (on the #wrapwrap) and prevents
-     * flicker of the page height (on the slideout footer).
+     * Shows/hides the horizontal scrollbar and prevents flicker of the page
+     * height (on the slideout footer).
      *
      * @private
      * @param {Boolean} add
@@ -1872,6 +1861,13 @@ registry.TextHighlight = publicWidget.Widget.extend({
         // to block the callback on this first notification for observed items.
         this.observerLock = new Map();
         this.resizeObserver = new window.ResizeObserver(entries => {
+            // Some options, like the popup, trigger a resize after a delay
+            // before the page is saved. This causes the highlights to be added
+            // back to the DOM after the "TextHighlight" widget has been
+            // destroyed. This is why the following line is needed.
+            if (this.isDestroyed()) {
+                return;
+            }
             window.requestAnimationFrame(() => {
                 const textHighlightEls = new Set();
                 entries.forEach(entry => {

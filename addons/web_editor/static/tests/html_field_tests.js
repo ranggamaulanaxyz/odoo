@@ -248,7 +248,6 @@ QUnit.module("WebEditor.HtmlField", ({ beforeEach }) => {
         assert.strictEqual(editable.innerHTML, `<p>first</p>`);
     });
 
-
     QUnit.module('Sandboxed Preview');
 
     QUnit.test("complex html is automatically in sandboxed preview mode", async (assert) => {

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 import ast
@@ -6,8 +5,7 @@ from collections import defaultdict
 
 from odoo import api, fields, models, _, Command
 from odoo.exceptions import UserError
-from odoo.tools.safe_eval import safe_eval
-from odoo.osv.expression import AND
+from odoo.osv.expression import AND, NEGATIVE_TERM_OPERATORS, TERM_OPERATORS_NEGATION
 from odoo.addons.project.models.project_task import CLOSED_STATES
 
 
@@ -27,6 +25,8 @@ class SaleOrder(models.Model):
     show_task_button = fields.Boolean(compute='_compute_show_project_and_task_button', groups='project.group_project_user', export_string_translation=False)
     closed_task_count = fields.Integer(compute='_compute_tasks_ids', export_string_translation=False)
     completed_task_percentage = fields.Float(compute="_compute_completed_task_percentage", export_string_translation=False)
+    project_id = fields.Many2one('project.project', domain=[('allow_billable', '=', True)], help="A task will be created for the project upon sales order confirmation. The analytic distribution of this project will also serve as a reference for newly created sales order items.")
+    project_account_id = fields.Many2one('account.analytic.account', related='project_id.account_id')
 
     def _compute_milestone_count(self):
         read_group = self.env['project.milestone']._read_group(
@@ -58,22 +58,15 @@ class SaleOrder(models.Model):
                 and not order.project_count
             )
 
+    @api.model
     def _search_tasks_ids(self, operator, value):
-        is_name_search = operator in ['=', '!=', 'like', '=like', 'ilike', '=ilike'] and isinstance(value, str)
-        is_id_eq_search = operator in ['=', '!='] and isinstance(value, int)
-        is_id_in_search = operator in ['in', 'not in'] and isinstance(value, list) and all(isinstance(item, int) for item in value)
-        if not (is_name_search or is_id_eq_search or is_id_in_search):
-            raise NotImplementedError(_('Operation not supported'))
-
-        if is_name_search:
-            tasks_ids = self.env['project.task']._name_search(value, operator=operator, limit=None)
-        elif is_id_eq_search:
-            tasks_ids = value if operator == '=' else self.env['project.task']._search([('id', '!=', value)], order='id')
-        else:  # is_id_in_search
-            tasks_ids = self.env['project.task']._search([('id', operator, value)], order='id')
-
-        tasks = self.env['project.task'].browse(tasks_ids)
-        return [('id', 'in', tasks.sale_order_id.ids)]
+        if operator in NEGATIVE_TERM_OPERATORS:
+            positive_operator = TERM_OPERATORS_NEGATION[operator]
+        else:
+            positive_operator = operator
+        task_domain = [('display_name' if isinstance(value, str) else 'id', positive_operator, value), ('sale_order_id', '!=', False)]
+        query = self.env['project.task']._search(task_domain)
+        return [('id', 'in' if positive_operator == operator else 'not in', query.subselect('sale_order_id'))]
 
     @api.depends('order_line.product_id.project_id')
     def _compute_tasks_ids(self):
@@ -124,13 +117,12 @@ class SaleOrder(models.Model):
             projects |= order.order_line.mapped('project_id')
             projects |= projects_per_so[order.id or order._origin.id]
             if not is_project_manager:
-                projects = projects._filter_access_rules('read')
+                projects = projects._filtered_access('read')
             order.project_ids = projects
             order.project_count = len(projects)
 
     def _action_confirm(self):
         """ On SO confirmation, some lines should generate a task or a project. """
-        result = super()._action_confirm()
         if len(self.company_id) == 1:
             # All orders are in the same company
             self.order_line.sudo().with_company(self.company_id)._timesheet_service_generation()
@@ -138,44 +130,7 @@ class SaleOrder(models.Model):
             # Orders from different companies are confirmed together
             for order in self:
                 order.order_line.sudo().with_company(order.company_id)._timesheet_service_generation()
-        return result
-
-    def _generate_analytic_account(self):
-        """ Generate Analytic Account for SO confirmed
-
-            This override generates analytic account for the SO if the AA has not been
-            generated in the parent method and the product contained in the SOLs will
-            generate a project and/or task(s)
-        """
-        super()._generate_analytic_account()
-        for order in self:
-            if (
-                not order.analytic_account_id
-                and any(
-                    sol.is_service
-                    and not sol.project_id
-                    and sol.product_id.service_tracking in ['project_only', 'task_in_project']
-                    for sol in order.order_line
-                )
-            ):
-                service_sols = order.order_line.filtered(
-                    lambda sol:
-                        sol.is_service
-                        and not sol.project_id
-                        and sol.product_id.service_tracking in ['project_only', 'task_in_project']
-                )
-                # if one service_product is found then we will generate a project and so we need to create an analytic account
-                service_products = service_sols.product_id.filtered(
-                    lambda p:
-                        p.project_template_id
-                        and (
-                            p.service_tracking == 'task_in_project'
-                            or p.service_tracking != 'no'
-                        )
-                        and p.default_code
-                )
-                default_code = service_products.default_code if len(service_products) == 1 else None
-                order._create_analytic_account(default_code)
+        return super()._action_confirm()
 
     def action_view_task(self):
         self.ensure_one()
@@ -191,8 +146,8 @@ class SaleOrder(models.Model):
             for idx, (view_id, view_type) in enumerate(action['views']):
                 if view_type == 'kanban':
                     action['views'][idx] = (kanban_view_id, 'kanban')
-                elif view_type == 'tree':
-                    action['views'][idx] = (list_view_id, 'tree')
+                elif view_type == 'list':
+                    action['views'][idx] = (list_view_id, 'list')
                 elif view_type == 'form':
                     action['views'][idx] = (form_view_id, 'form')
         else:  # 1 or 0 tasks -> form view
@@ -257,8 +212,8 @@ class SaleOrder(models.Model):
             'name': _('Projects'),
             'domain': ['|', ('sale_order_id', '=', self.id), ('id', 'in', self.with_context(active_test=False).project_ids.ids), ('active', 'in', [True, False])],
             'res_model': 'project.project',
-            'views': [(False, 'kanban'), (False, 'tree'), (False, 'form')],
-            'view_mode': 'kanban,tree,form',
+            'views': [(False, 'kanban'), (False, 'list'), (False, 'form')],
+            'view_mode': 'kanban,list,form',
             'context': {
                 **self._context,
                 'default_partner_id': self.partner_id.id,
@@ -283,8 +238,8 @@ class SaleOrder(models.Model):
             'name': _('Milestones'),
             'domain': [('sale_line_id', 'in', self.order_line.ids)],
             'res_model': 'project.milestone',
-            'views': [(self.env.ref('sale_project.sale_project_milestone_view_tree').id, 'tree')],
-            'view_mode': 'tree',
+            'views': [(self.env.ref('sale_project.sale_project_milestone_view_tree').id, 'list')],
+            'view_mode': 'list',
             'help': _("""
                 <p class="o_view_nocontent_smiling_face">
                     No milestones found. Let's create one!
@@ -319,10 +274,23 @@ class SaleOrder(models.Model):
         return res
 
     def _prepare_analytic_account_data(self, prefix=None):
-        result = super(SaleOrder, self)._prepare_analytic_account_data(prefix=prefix)
+        """ Prepare SO analytic account creation values.
+
+        :return: `account.analytic.account` creation values
+        :rtype: dict
+        """
+        self.ensure_one()
+        name = self.name
+        if prefix:
+            name = prefix + ": " + self.name
         project_plan, _other_plans = self.env['account.analytic.plan']._get_all_plans()
-        result['plan_id'] = project_plan.id or result['plan_id']
-        return result
+        return {
+            'name': name,
+            'code': self.client_order_ref,
+            'company_id': self.company_id.id,
+            'plan_id': project_plan.id,
+            'partner_id': self.partner_id.id,
+        }
 
     def _compute_completed_task_percentage(self):
         for so in self:

@@ -2,9 +2,10 @@
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 from collections import defaultdict
 
-from odoo import models, fields, api, _, _lt
-from odoo.exceptions import ValidationError, RedirectWarning
+from odoo import api, fields, models
+from odoo.exceptions import RedirectWarning, ValidationError
 from odoo.tools import SQL
+from odoo.tools.translate import _
 
 
 class Project(models.Model):
@@ -13,14 +14,14 @@ class Project(models.Model):
     allow_timesheets = fields.Boolean(
         "Timesheets", compute='_compute_allow_timesheets', store=True, readonly=False,
         default=True)
-    analytic_account_id = fields.Many2one(
+    account_id = fields.Many2one(
         # note: replaces ['|', ('company_id', '=', False), ('company_id', '=', company_id)]
         domain="""[
             '|', ('company_id', '=', False), ('company_id', '=?', company_id),
             ('partner_id', '=?', partner_id),
         ]"""
     )
-    analytic_account_active = fields.Boolean("Active Account", related="analytic_account_id.active", export_string_translation=False)
+    analytic_account_active = fields.Boolean("Active Account", related="account_id.active", export_string_translation=False)
 
     timesheet_ids = fields.One2many('account.analytic.line', 'project_id', 'Associated Timesheets', export_string_translation=False)
     timesheet_encode_uom_id = fields.Many2one('uom.uom', compute='_compute_timesheet_encode_uom_id', export_string_translation=False)
@@ -44,9 +45,9 @@ class Project(models.Model):
         for project in self:
             project.timesheet_encode_uom_id = project.company_id.timesheet_encode_uom_id or self.env.company.timesheet_encode_uom_id
 
-    @api.depends('analytic_account_id')
+    @api.depends('account_id')
     def _compute_allow_timesheets(self):
-        without_account = self.filtered(lambda t: not t.analytic_account_id and t._origin)
+        without_account = self.filtered(lambda t: t._origin and not t.account_id)
         without_account.update({'allow_timesheets': False})
 
     @api.depends('company_id')
@@ -109,11 +110,15 @@ class Project(models.Model):
             operator_new = 'not in'
         return [('id', operator_new, sql)]
 
-    @api.constrains('allow_timesheets', 'analytic_account_id')
+    @api.constrains('allow_timesheets', 'account_id')
     def _check_allow_timesheet(self):
         for project in self:
-            if project.allow_timesheets and not project.analytic_account_id:
-                raise ValidationError(_('You cannot use timesheets without an analytic account.'))
+            if project.allow_timesheets and not project.account_id:
+                project_plan, _other_plans = self.env['account.analytic.plan']._get_all_plans()
+                raise ValidationError(_(
+                    "To use the timesheets feature, you need an analytic account for your project. Please set one up in the plan '%(plan_name)s' or turn off the timesheets feature.",
+                    plan_name=project_plan.name
+                ))
 
     @api.depends('timesheet_ids', 'timesheet_encode_uom_id')
     def _compute_total_timesheet_time(self):
@@ -143,21 +148,27 @@ class Project(models.Model):
         """ Create an analytic account if project allow timesheet and don't provide one
             Note: create it before calling super() to avoid raising the ValidationError from _check_allow_timesheet
         """
-        defaults = self.default_get(['allow_timesheets', 'analytic_account_id'])
-        analytic_accounts_vals = [vals for vals in vals_list if
-            vals.get('allow_timesheets', defaults.get('allow_timesheets'))
-            and not vals.get('analytic_account_id', defaults.get('analytic_account_id'))
+        defaults = self.default_get(['allow_timesheets', 'account_id'])
+        analytic_accounts_vals = [
+            vals for vals in vals_list
+            if (
+                vals.get('allow_timesheets', defaults.get('allow_timesheets')) and
+                not vals.get('account_id', defaults.get('account_id'))
+            )
         ]
-        analytic_accounts = self.env['account.analytic.account'].create(self._get_values_analytic_account_batch(analytic_accounts_vals))
-        for vals, analytic_account in zip(analytic_accounts_vals, analytic_accounts):
-            vals['analytic_account_id'] = analytic_account.id
+
+        if analytic_accounts_vals:
+            analytic_accounts = self.env['account.analytic.account'].create(self._get_values_analytic_account_batch(analytic_accounts_vals))
+            for vals, analytic_account in zip(analytic_accounts_vals, analytic_accounts):
+                vals['account_id'] = analytic_account.id
         return super().create(vals_list)
 
     def write(self, values):
         # create the AA for project still allowing timesheet
-        if values.get('allow_timesheets') and not values.get('analytic_account_id'):
-            project_new_account = self.filtered(lambda project: not project.analytic_account_id)
-            project_new_account._create_analytic_account()
+        if values.get('allow_timesheets') and not values.get('account_id'):
+            project_wo_account = self.filtered(lambda project: not project.account_id)
+            if project_wo_account:
+                project_wo_account._create_analytic_account()
         return super(Project, self).write(values)
 
     @api.depends('is_internal_project', 'company_id')
@@ -173,7 +184,7 @@ class Project(models.Model):
 
     @api.model
     def _init_data_analytic_account(self):
-        self.search([('analytic_account_id', '=', False), ('allow_timesheets', '=', True)])._create_analytic_account()
+        self.search([('account_id', '=', False), ('allow_timesheets', '=', True)])._create_analytic_account()
 
     @api.ondelete(at_uninstall=False)
     def _unlink_except_contains_entries(self):
@@ -192,6 +203,10 @@ class Project(models.Model):
             raise RedirectWarning(
                 warning_msg, self.env.ref('hr_timesheet.timesheet_action_project').id,
                 _('See timesheet entries'), {'active_ids': projects_with_timesheets.ids})
+
+    @api.model
+    def get_create_edit_project_ids(self):
+        return []
 
     def _convert_project_uom_to_timesheet_encode_uom(self, time):
         uom_from = self.company_id.project_time_mode_id
@@ -222,7 +237,7 @@ class Project(models.Model):
             number = f"{round(effective)} / {round(allocated)} {encode_uom.name}"
             success_rate = round(100 * effective / allocated)
             if success_rate > 100:
-                number = _lt(
+                number = self.env._(
                     "%(effective)s / %(allocated)s %(uom_name)s",
                     effective=round(effective),
                     allocated=round(allocated),
@@ -230,7 +245,7 @@ class Project(models.Model):
                 )
                 color = "text-danger"
             else:
-                number = _lt(
+                number = self.env._(
                     "%(effective)s / %(allocated)s %(uom_name)s (%(success_rate)s%%)",
                     effective=round(effective),
                     allocated=round(allocated),
@@ -242,7 +257,7 @@ class Project(models.Model):
                 else:
                     color = "text-success"
         else:
-            number = _lt(
+            number = self.env._(
                     "%(effective)s %(uom_name)s",
                     effective=round(effective),
                     uom_name=encode_uom.name,
@@ -250,7 +265,7 @@ class Project(models.Model):
 
         buttons.append({
             "icon": f"clock-o {color}",
-            "text": _lt("Timesheets"),
+            "text": self.env._("Timesheets"),
             "number": number,
             "action_type": "object",
             "action": "action_project_timesheets",
@@ -260,8 +275,8 @@ class Project(models.Model):
         if allocated and success_rate > 100:
             buttons.append({
                 "icon": f"warning {color}",
-                "text": _lt("Extra Time"),
-                "number": _lt(
+                "text": self.env._("Extra Time"),
+                "number": self.env._(
                     "%(exceeding_hours)s %(uom_name)s (+%(exceeding_rate)s%%)",
                     exceeding_hours=round(effective - allocated),
                     uom_name=encode_uom.name,

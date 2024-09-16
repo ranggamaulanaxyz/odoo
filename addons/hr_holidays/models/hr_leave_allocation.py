@@ -36,9 +36,12 @@ class HolidaysAllocation(models.Model):
         return [('employee_requests', '=', 'yes')]
 
     def _domain_employee_id(self):
-        if self.env.user.has_group('hr_holidays.group_hr_holidays_user'):
-            return []
-        return [('leave_manager_id', '=', self.env.user.id)]
+        domain = [('company_id', 'in', self.env.companies.ids)]
+        if not self.env.user.has_group('hr_holidays.group_hr_holidays_user'):
+            domain += [
+                ('leave_manager_id', '=', self.env.user.id)
+            ]
+        return domain
 
     name = fields.Char(
         string='Description',
@@ -189,7 +192,8 @@ class HolidaysAllocation(models.Model):
         employee_days_per_allocation = self.employee_id._get_consumed_leaves(self.holiday_status_id, date_from, ignore_future=True)[0]
         for allocation in self:
             allocation.max_leaves = allocation.number_of_hours_display if allocation.type_request_unit == 'hour' else allocation.number_of_days
-            allocation.leaves_taken = employee_days_per_allocation[allocation.employee_id][allocation.holiday_status_id][allocation]['leaves_taken']
+            origin = allocation._origin
+            allocation.leaves_taken = employee_days_per_allocation[origin.employee_id][origin.holiday_status_id][origin]['leaves_taken']
 
     @api.depends('number_of_days')
     def _compute_number_of_days_display(self):
@@ -513,11 +517,13 @@ class HolidaysAllocation(models.Model):
                 and (not self.nextcall or self.nextcall <= accrual_date)):
             return 0
 
-        fake_allocation = self.env['hr.leave.allocation'].new(origin=self)
+        fake_allocation = self.env['hr.leave.allocation'].with_context(default_date_from=accrual_date).new(origin=self)
         fake_allocation.sudo()._process_accrual_plans(accrual_date, log=False)
         if self.type_request_unit in ['hour']:
             return float_round(fake_allocation.number_of_hours_display - self.number_of_hours_display, precision_digits=2)
-        return round((fake_allocation.number_of_days - self.number_of_days), 2)
+        res = round((fake_allocation.number_of_days - self.number_of_days), 2)
+        self._invalidate_cache()
+        return res
 
     ####################################################
     # ORM Overrides methods
@@ -689,7 +695,7 @@ class HolidaysAllocation(models.Model):
         # if allocation_validation_type == 'both': this method is the first approval
         # if allocation_validation_type != 'both': this method calls action_validate() below
 
-        if any(allocation.state != 'confirm' for allocation in self):
+        if any(allocation.validation_type != 'no_validation' and allocation.state != 'confirm' for allocation in self):
             raise UserError(_('Allocation must be confirmed ("To Approve") in order to approve it.'))
 
         current_employee = self.env.user.employee_id
@@ -734,7 +740,7 @@ class HolidaysAllocation(models.Model):
 
             if is_officer or self.env.user == allocation.employee_id.leave_manager_id:
                 # use ir.rule based first access check: department, members, ... (see security.xml)
-                allocation.check_access_rule('write')
+                allocation.check_access('write')
 
             if allocation.employee_id == current_employee and not is_manager and not val_type == 'no_validation':
                 raise UserError(_('Only a time off Manager can approve its own requests.'))
@@ -751,7 +757,7 @@ class HolidaysAllocation(models.Model):
     # before every run, as if it was run from date_from, after an optional change in the allocation value
     # the user can simply confirm and validate the allocation. The record is in correct state for the next
     # call of the cron job.
-    @api.onchange('date_from', 'accrual_plan_id', 'date_to')
+    @api.onchange('date_from', 'accrual_plan_id', 'date_to', 'employee_id')
     def _onchange_date_from(self):
         if not self.date_from or self.allocation_type != 'accrual' or self.state == 'validate' or not self.accrual_plan_id\
            or not self.employee_id:
@@ -879,7 +885,6 @@ class HolidaysAllocation(models.Model):
     def message_subscribe(self, partner_ids=None, subtype_ids=None):
         # due to record rule can not allow to add follower and mention on validated leave so subscribe through sudo
         if any(state in ['validate'] for state in self.mapped('state')):
-            self.check_access_rights('read')
-            self.check_access_rule('read')
+            self.check_access('read')
             return super(HolidaysAllocation, self.sudo()).message_subscribe(partner_ids=partner_ids, subtype_ids=subtype_ids)
         return super().message_subscribe(partner_ids=partner_ids, subtype_ids=subtype_ids)

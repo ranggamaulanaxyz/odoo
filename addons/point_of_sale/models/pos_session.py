@@ -184,11 +184,23 @@ class PosSession(models.Model):
 
         return response
 
+    def delete_opening_control_session(self):
+        self.ensure_one()
+        if self.state != 'opening_control' or len(self.order_ids) > 0:
+            raise UserError(_("You can only cancel a session that is in opening control state and has no orders."))
+        self.sudo().unlink()
+        return {
+            'status': 'success',
+        }
+
     def get_pos_ui_product_pricelist_item_by_product(self, product_tmpl_ids, product_ids, config_id):
         pricelist_fields = self.env['product.pricelist']._load_pos_data_fields(config_id)
         pricelist_item_fields = self.env['product.pricelist.item']._load_pos_data_fields(config_id)
 
         pricelist_item_domain = [
+            '|',
+            ('company_id', '=', False),
+            ('company_id', '=', self.company_id.id),
             '|',
             '&', ('product_id', '=', False), ('product_tmpl_id', 'in', product_tmpl_ids),
             ('product_id', 'in', product_ids)]
@@ -365,8 +377,6 @@ class PosSession(models.Model):
             if session.config_id.cash_control and not session.rescue:
                 last_session = self.search([('config_id', '=', session.config_id.id), ('id', '!=', session.id)], limit=1)
                 session.cash_register_balance_start = last_session.cash_register_balance_end_real  # defaults to 0 if lastsession is empty
-            else:
-                values['state'] = 'opened'
             session.write(values)
         return True
 
@@ -1546,7 +1556,7 @@ class PosSession(models.Model):
             'name': _('Cash register'),
             'type': 'ir.actions.act_window',
             'res_model': 'account.bank.statement.line',
-            'view_mode': 'tree,kanban',
+            'view_mode': 'list,kanban',
             'domain': [('id', 'in', self.statement_line_ids.ids)],
         }
 
@@ -1557,7 +1567,7 @@ class PosSession(models.Model):
             'name': _('Journal Items'),
             'type': 'ir.actions.act_window',
             'res_model': 'account.move.line',
-            'view_mode': 'tree',
+            'view_mode': 'list',
             'view_id':self.env.ref('account.view_move_line_tree').id,
             'domain': [('id', 'in', all_related_moves.mapped('line_ids').ids)],
             'context': {
@@ -1598,7 +1608,7 @@ class PosSession(models.Model):
             'name': _('Payments'),
             'type': 'ir.actions.act_window',
             'res_model': 'pos.payment',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'domain': [('session_id', '=', self.id)],
             'context': {'search_default_group_by_payment_method': 1}
         }
@@ -1615,12 +1625,19 @@ class PosSession(models.Model):
             return {}
         return self.config_id.open_ui()
 
-    def set_cashbox_pos(self, cashbox_value: int, notes: str):
+    def set_opening_control(self, cashbox_value: int, notes: str):
         self.state = 'opened'
-        self.opening_notes = notes
-        difference = cashbox_value - self.cash_register_balance_start
-        self._post_cash_details_message('Opening', self.cash_register_balance_start, difference, notes)
-        self.cash_register_balance_start = cashbox_value
+
+        cash_payment_method_ids = self.config_id.payment_method_ids.filtered(lambda pm: pm.is_cash_count)
+        if cash_payment_method_ids:
+            self.opening_notes = notes
+            difference = cashbox_value - self.cash_register_balance_start
+            self.cash_register_balance_start = cashbox_value
+            self._post_cash_details_message('Opening cash', self.cash_register_balance_start, difference, notes)
+        elif notes:
+            message = _('Opening control message: ')
+            message += notes
+            self.message_post(body=plaintext2html(message))
 
     def _post_cash_details_message(self, state, expected, difference, notes):
         message = (state + " difference: " + self.currency_id.format(difference) + '\n' +
@@ -1628,6 +1645,7 @@ class PosSession(models.Model):
            state + " counted: " + self.currency_id.format(expected + difference) + '\n')
 
         if notes:
+            message += _('Opening control message: ')
             message += notes
         if message:
             self.message_post(body=plaintext2html(message))
@@ -1636,9 +1654,9 @@ class PosSession(models.Model):
         return {
             'name': _('Orders'),
             'res_model': 'pos.order',
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'views': [
-                (self.env.ref('point_of_sale.view_pos_order_tree_no_session_id').id, 'tree'),
+                (self.env.ref('point_of_sale.view_pos_order_tree_no_session_id').id, 'list'),
                 (self.env.ref('point_of_sale.view_pos_pos_form').id, 'form'),
                 ],
             'type': 'ir.actions.act_window',

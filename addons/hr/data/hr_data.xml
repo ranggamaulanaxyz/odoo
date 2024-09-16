@@ -48,7 +48,7 @@
 
         <record id="offboarding_setup_compute_out_delais" model="mail.activity.plan.template">
             <field name="sequence">10</field>
-            <field name="summary">Compute Out Delais</field>
+            <field name="summary">Organize knowledge transfer inside the team</field>
             <field name="responsible_type">manager</field>
             <field name="plan_id" ref="offboarding_plan"/>
         </record>
@@ -58,11 +58,6 @@
             <field name="summary">Take Back HR Materials</field>
             <field name="responsible_type">manager</field>
             <field name="plan_id" ref="offboarding_plan"/>
-        </record>
-
-        <record model="ir.config_parameter" id="hr_presence_control_login" forcecreate="False">
-            <field name="key">hr.hr_presence_control_login</field>
-            <field name="value">True</field>
         </record>
 
         <!-- Departure Reasons -->

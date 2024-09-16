@@ -94,33 +94,44 @@ class PosConfig(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        self._prepare_self_order_splash_screen(vals_list)
         pos_config_ids = super().create(vals_list)
-        pos_config_ids._configure_pos_config()
+        pos_config_ids._prepare_self_order_custom_btn()
         return pos_config_ids
 
-    def _configure_pos_config(self):
-        for pos_config_id in self:
-            for image_name in ['landing_01.jpg', 'landing_02.jpg', 'landing_03.jpg']:
-                image_path = opj("pos_self_order/static/img", image_name)
-                attachment = self.env['ir.attachment'].create({
+    @api.model
+    def _prepare_self_order_splash_screen(self, vals_list):
+        for vals in vals_list:
+            if not vals.get('self_ordering_mode'):
+                return True
+
+            if not vals.get('self_ordering_image_home_ids'):
+                vals['self_ordering_image_home_ids'] = [(0, 0, {
                     'name': image_name,
-                    'datas': base64.b64encode(file_open(image_path, "rb").read()),
+                    'datas': base64.b64encode(file_open(opj("pos_self_order/static/img", image_name), "rb").read()),
                     'res_model': 'pos.config',
-                    'res_id': pos_config_id.id,
                     'type': 'binary',
+                }) for image_name in ['landing_01.jpg', 'landing_02.jpg', 'landing_03.jpg']]
+
+        return True
+
+    def _prepare_self_order_custom_btn(self):
+        for record in self:
+            exists = record.env['pos_self_order.custom_link'].search_count([
+                ('pos_config_ids', 'in', record.id),
+                ('url', '=', f'/pos-self/{record.id}/products')
+            ])
+
+            if not exists:
+                record.env['pos_self_order.custom_link'].create({
+                    'name': _('Order Now'),
+                    'url': f'/pos-self/{record.id}/products',
+                    'pos_config_ids': [(4, record.id)],
                 })
-                pos_config_id.self_ordering_image_home_ids = [(4, attachment.id)]
-
-            self.env['pos_self_order.custom_link'].create({
-                'name': _('Order Now'),
-                'url': f'/pos-self/{pos_config_id.id}/products',
-                'pos_config_ids': [(4, pos_config_id.id)],
-            })
-
-            if pos_config_id.module_pos_restaurant:
-                pos_config_id.self_ordering_mode = 'mobile'
 
     def write(self, vals):
+        self._prepare_self_order_splash_screen([vals])
+
         for record in self:
             if vals.get('self_ordering_mode') == 'kiosk' or (vals.get('pos_self_ordering_mode') == 'mobile' and vals.get('pos_self_ordering_service_mode') == 'counter'):
                 vals['self_ordering_pay_after'] = 'each'
@@ -133,7 +144,10 @@ class PosConfig(models.Model):
 
             if vals.get('self_ordering_mode') == 'mobile' and vals.get('self_ordering_pay_after') == 'meal':
                 vals['self_ordering_service_mode'] = 'table'
-        return super().write(vals)
+
+        res = super().write(vals)
+        self._prepare_self_order_custom_btn()
+        return res
 
     @api.depends("module_pos_restaurant")
     def _compute_self_order(self):
@@ -205,7 +219,7 @@ class PosConfig(models.Model):
         table_route = ""
 
         if self.self_ordering_mode == 'consultation':
-            return f"{base_route}/products"
+            return base_route
 
         if self.self_ordering_mode == 'mobile':
             table = self.env["restaurant.table"].search(
@@ -236,6 +250,10 @@ class PosConfig(models.Model):
                 'id': image.id,
                 'data': image.sudo().datas.decode('utf-8'),
             })
+
+            # Only one image is needed for the mobile mode
+            if self.self_ordering_mode == 'mobile':
+                break
         return encoded_images
 
     def _load_self_data_models(self):
@@ -322,16 +340,27 @@ class PosConfig(models.Model):
         return self.self_ordering_url
 
     @api.model
-    def _modify_pos_restaurant_config(self):
-        pos_config = self.env.ref('pos_restaurant.pos_config_main_restaurant', raise_if_not_found=False)
-        if pos_config:
-            pos_config._configure_pos_config()
-            pos_config.write({
-                'self_ordering_service_mode': 'table',
-                'self_ordering_pay_after': 'meal'
-            })
+    def load_onboarding_kiosk_scenario(self):
+        if not bool(self.env.company.chart_template):
+            return False
 
-    @api.model
-    def _load_restaurant_data(self):
-        super()._load_restaurant_data()
-        self._modify_pos_restaurant_config()
+        journal, payment_methods_ids = self._create_journal_and_payment_methods()
+        restaurant_categories = [
+            self.env.ref('pos_restaurant.food').id,
+            self.env.ref('pos_restaurant.drinks').id,
+        ]
+        not_cash_payment_methods_ids = self.env['pos.payment.method'].search([
+            ('is_cash_count', '=', False),
+            ('id', 'in', payment_methods_ids),
+        ]).ids
+        self.env['pos.config'].create({
+            'name': _('Kiosk'),
+            'company_id': self.env.company.id,
+            'journal_id': journal.id,
+            'payment_method_ids': not_cash_payment_methods_ids,
+            'limit_categories': True,
+            'iface_available_categ_ids': restaurant_categories,
+            'iface_splitbill': True,
+            'module_pos_restaurant': True,
+            'self_ordering_mode': 'kiosk',
+        })

@@ -611,6 +611,7 @@ class TestUi(TestPointOfSaleHttpCommon):
         self.pos_admin.write({
             'groups_id': [Command.link(self.env.ref('base.group_system').id)],
         })
+        self.assertFalse(self.product_a.is_storable)
         self.main_pos_config.with_user(self.pos_admin).open_ui()
         self.start_tour("/pos/ui?config_id=%d" % self.main_pos_config.id, 'CheckProductInformation', login="pos_admin")
 
@@ -675,7 +676,7 @@ class TestUi(TestPointOfSaleHttpCommon):
             'split_transactions': False,
             'company_id': self.env.company.id,
         })
-        self.main_pos_config.write({'payment_method_ids': [(6, 0, bank_pm.ids)]})
+        self.main_pos_config.write({'payment_method_ids': [(6, 0, bank_pm.ids)], 'ship_later': True})
         self.main_pos_config.with_user(self.pos_user).open_ui()
         self.start_tour("/pos/ui?config_id=%d" % self.main_pos_config.id, 'PaymentScreenTour2', login="pos_user")
 
@@ -1415,7 +1416,7 @@ class TestUi(TestPointOfSaleHttpCommon):
         })
 
         self.main_pos_config.with_user(self.pos_user).open_ui()
-        self.start_tour(f"/pos/ui?config_id={self.main_pos_config.id}", 'PosCustomerAllFieldsDisplayed', login="pos_user")
+        self.start_pos_tour('PosCustomerAllFieldsDisplayed')
 
     def test_product_combo_change_fp(self):
         """
@@ -1458,6 +1459,28 @@ class TestUi(TestPointOfSaleHttpCommon):
         })
         self.main_pos_config.with_user(self.pos_user).open_ui()
         self.start_tour(f"/pos/ui?config_id={self.main_pos_config.id}", 'ProductComboChangeFP', login="pos_user")
+
+    def test_cash_rounding_payment(self):
+        """Verify than an error popup is shown if the payment value is more precise than the rounding method"""
+        rounding_method = self.env['account.cash.rounding'].create({
+            'name': 'Down 0.10',
+            'rounding': 0.10,
+            'strategy': 'add_invoice_line',
+            'profit_account_id': self.company_data['default_account_revenue'].copy().id,
+            'loss_account_id': self.company_data['default_account_expense'].copy().id,
+            'rounding_method': 'DOWN',
+        })
+
+        self.main_pos_config.write({
+            'cash_rounding': True,
+            'only_round_cash_method': False,
+            'rounding_method': rounding_method.id,
+        })
+
+        self.env['ir.config_parameter'].sudo().set_param('barcode.max_time_between_keys_in_ms', 1)
+        self.main_pos_config.open_ui()
+        self.start_tour("/pos/ui?config_id=%d" % self.main_pos_config.id, 'CashRoundingPayment', login="accountman")
+
 
 # This class just runs the same tests as above but with mobile emulation
 class MobileTestUi(TestUi):

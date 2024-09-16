@@ -170,7 +170,7 @@ registerWebsitePreviewTour('link_tools', {
     },
     {
         content: "Check that the second image is not within a link.",
-        trigger: ':iframe .s_three_columns .row > :nth-child(2) div > img',
+        trigger: ':iframe .s_three_columns .row > :nth-child(2) figure > img',
     },
     {
         content: "Check that link tools appear.",
@@ -179,17 +179,17 @@ registerWebsitePreviewTour('link_tools', {
     ...clickOnSave(),
     {
         content: "Check that the first image was saved.",
-        trigger: ':iframe .s_three_columns .row > :nth-child(1) div > a > img',
+        trigger: ':iframe .s_three_columns .row > :nth-child(1) figure > a > img',
     },
     {
         content: "Check that the second image was saved.",
-        trigger: ':iframe .s_three_columns .row > :nth-child(2) div > img',
+        trigger: ':iframe .s_three_columns .row > :nth-child(2) figure > img',
     },
     // 5. Remove link from image.
     ...clickOnEditAndWaitEditMode(),
     {
         content: "Reselect the first image.",
-        trigger: ':iframe .s_three_columns .row > :nth-child(1) div > a > img',
+        trigger: ':iframe .s_three_columns .row > :nth-child(1) figure > a > img',
         run: 'click',
     },
     {
@@ -203,7 +203,7 @@ registerWebsitePreviewTour('link_tools', {
     },
     {
         content: "Check that image is not within a link anymore.",
-        trigger: ':iframe .s_three_columns .row > :nth-child(1) div > img',
+        trigger: ':iframe .s_three_columns .row > :nth-child(1) figure > img',
     },
     // 6. Add mega menu with Cards template and edit URL on text-selected card.
     clickOnElement("menu link", ":iframe header .nav-item a"),
@@ -250,7 +250,7 @@ registerWebsitePreviewTour('link_tools', {
     clickOnElement("mega menu", ":iframe header .o_mega_menu_toggle"),
     changeOption("MegaMenuLayout", "we-toggler"),
     changeOption("MegaMenuLayout", '[data-select-label="Cards"]'),
-    clickOnElement("card's text", ":iframe header .s_mega_menu_cards p"),
+    clickOnElement("card's text", ":iframe header .s_mega_menu_cards span"),
     {
         content: "Enter an URL",
         trigger: "#o_link_dialog_url_input",
@@ -258,7 +258,7 @@ registerWebsitePreviewTour('link_tools', {
     },
     {
         content: "Check nothing is lost",
-        trigger: ":iframe header .s_mega_menu_cards a[href='https://www.odoo.com']:has(img):has(h4):has(p)",
+        trigger: ":iframe header .s_mega_menu_cards a[href='https://www.odoo.com']:has(img):has(h4):has(span)",
     },
     // 7. Create new a link from a URL-like text.
     // TODO: the two following steps should be removed.

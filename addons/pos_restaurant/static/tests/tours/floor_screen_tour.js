@@ -17,6 +17,7 @@ registry.category("web_tour.tours").add("FloorScreenTour", {
     steps: () =>
         [
             // check floors if they contain their corresponding tables
+            Chrome.startPoS(),
             FloorScreen.selectedFloorIs("Main Floor"),
             FloorScreen.hasTable("2"),
             FloorScreen.hasTable("4"),
@@ -149,6 +150,10 @@ registry.category("web_tour.tours").add("FloorScreenTour", {
 
             // Check the linking of tables
             FloorScreen.clickFloor("Main Floor"),
+            FloorScreen.clickTable("4"),
+            ProductScreen.clickDisplayedProduct("Coca-Cola"),
+            Chrome.clickPlanButton(),
+            FloorScreen.isShown(),
             FloorScreen.linkTables("5", "4"),
             FloorScreen.isChildTable("5"),
             Utils.refresh(),
@@ -156,8 +161,13 @@ registry.category("web_tour.tours").add("FloorScreenTour", {
 
             // Check that tables are unlinked automatically when the order is done
             FloorScreen.clickTable("5"),
-            Chrome.isTabActive("4"),
-            ProductScreen.clickDisplayedProduct("Coca-Cola"),
+            Chrome.isTabActive("4 & 5"),
+            ProductScreen.selectedOrderlineHas("Coca-Cola", "1.0"),
+            Chrome.clickPlanButton(),
+            FloorScreen.isShown(),
+            FloorScreen.goTo("5"),
+            Chrome.isTabActive("4 & 5"),
+            ProductScreen.selectedOrderlineHas("Coca-Cola", "1.0"),
             ProductScreen.clickPayButton(),
             PaymentScreen.clickPaymentMethod("Cash"),
             PaymentScreen.clickValidate(),

@@ -11,7 +11,7 @@ import {
 } from "@web/../tests/web_test_helpers";
 import { serializeDateTime } from "@web/core/l10n/dates";
 import { registry } from "@web/core/registry";
-import { session } from "@web/session";
+import { groupBy } from "@web/core/utils/arrays";
 
 export const DISCUSS_ACTION_ID = 104;
 
@@ -34,7 +34,6 @@ export const authenticateGuest = (guest) => {
     env.cookie.set("dgid", guest.id);
     authenticate(publicUser.login, publicUser.password);
     env.uid = serverState.publicUserId;
-    session.user_id = false;
 };
 
 /**
@@ -49,9 +48,7 @@ export async function withGuest(guestId, fn) {
     const MailGuest = env["mail.guest"];
     const currentUser = env.user;
     const [targetGuest] = MailGuest.browse(guestId);
-    const OLD_SESSION_USER_ID = session.user_id;
     authenticateGuest(targetGuest);
-    session.user_id = false;
     let result;
     try {
         result = await fn();
@@ -62,7 +59,6 @@ export async function withGuest(guestId, fn) {
             logout();
             env.cookie.delete("dgid");
         }
-        session.user_id = OLD_SESSION_USER_ID;
     }
     return result;
 }
@@ -632,14 +628,17 @@ export async function mail_message_post(request) {
     ).get_result();
 }
 
-registerRoute("/mail/message/reaction", mail_message_add_reaction);
+registerRoute("/mail/message/reaction", mail_message_reaction);
 /** @type {RouteCallback} */
-async function mail_message_add_reaction(request) {
+async function mail_message_reaction(request) {
     /** @type {import("mock_models").MailMessage} */
     const MailMessage = this.env["mail.message"];
-
     const { action, content, message_id } = await parseRequestParams(request);
-    return MailMessage._message_reaction(message_id, content, action);
+    const partner_id = this.env.user?.partner_id ?? false;
+    const guest_id = this.env.cookie.get("dgid") ?? false;
+    const store = new mailDataHelpers.Store();
+    MailMessage._message_reaction(message_id, content, partner_id, guest_id, action, store);
+    return store.get_result();
 }
 
 registerRoute("/mail/message/translate", translate);
@@ -685,7 +684,7 @@ async function mail_message_update_content(request) {
         MailMessage._bus_notification_target(message.id),
         "mail.record/insert",
         new mailDataHelpers.Store(MailMessage.browse(message.id), {
-            attachments: mailDataHelpers.Store.many(IrAttachment.browse(message.attachment_ids)),
+            attachment_ids: mailDataHelpers.Store.many(IrAttachment.browse(message.attachment_ids)),
             body: message.body,
             pinned_at: message.pinned_at,
             recipients: mailDataHelpers.Store.many(
@@ -965,6 +964,7 @@ async function processRequest(request) {
 
 const ids_by_model = {
     "mail.thread": ["model", "id"],
+    MessageReactions: ["message", "content"],
     Rtc: [],
     Store: [],
 };
@@ -1222,6 +1222,14 @@ class Store {
         let res = records.map((record) =>
             Store.one_id(records.browse(record.id), makeKwArgs({ as_thread }))
         );
+        if (records._name === "mail.message.reaction") {
+            res = [];
+            const reactionGroups = groupBy(records, (r) => [r.message_id, r.content]);
+            for (const groupId in reactionGroups) {
+                const { message_id, content } = reactionGroups[groupId][0];
+                res.push({ message: message_id, content: content });
+            }
+        }
         if (mode === "ADD") {
             res = [["ADD", res]];
         } else if (mode === "DELETE") {

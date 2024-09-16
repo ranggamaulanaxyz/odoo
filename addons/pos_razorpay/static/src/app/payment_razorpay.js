@@ -1,7 +1,7 @@
 import { _t } from "@web/core/l10n/translation";
 import { PaymentInterface } from "@point_of_sale/app/payment/payment_interface";
 import { AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
-import { getUTCString } from "@point_of_sale/utils";
+import { serializeDateTime } from "@web/core/l10n/dates";
 
 const REQUEST_TIMEOUT = 10000;
 const { DateTime } = luxon;
@@ -61,6 +61,9 @@ export class PaymentRazorpay extends PaymentInterface {
             this.payment_stopped
                 ? this._showError(_t("Transaction failed due to inactivity"))
                 : this._showError(response.error);
+            if (response.payment_messageCode === "P2P_DEVICE_CANCELED") {
+                line.set_payment_status("retry");
+            }
             this._removePaymentHandler(["p2pRequestId", "referenceId"]);
             return Promise.resolve(false);
         }
@@ -126,7 +129,7 @@ export class PaymentRazorpay extends PaymentInterface {
             //Within 90 seconds, inactivity will result in transaction cancellation and payment termination.
             if (this.payment_stopped) {
                 this._razorpay_cancel().then(() => {
-                    paymentLine.set_payment_status("force_done");
+                    paymentLine.set_payment_status("retry");
                     this.payment_stopped = false;
                 });
                 return resolve(false);
@@ -184,7 +187,7 @@ export class PaymentRazorpay extends PaymentInterface {
         const utcDate = timeMillis
             ? DateTime.fromMillis(timeMillis, { zone: "utc" })
             : DateTime.now();
-        return getUTCString(utcDate);
+        return serializeDateTime(utcDate);
     }
 
     _stop_pending_payment() {

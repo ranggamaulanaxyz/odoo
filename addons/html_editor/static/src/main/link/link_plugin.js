@@ -8,6 +8,9 @@ import { DIRECTIONS, leftPos, nodeSize, rightPos } from "@html_editor/utils/posi
 import { prepareUpdate } from "@html_editor/utils/dom_state";
 import { EMAIL_REGEX, URL_REGEX, cleanZWChars, deduceURLfromText } from "./utils";
 import { isVisible } from "@html_editor/utils/dom_info";
+import { KeepLast } from "@web/core/utils/concurrency";
+import { rpc } from "@web/core/network/rpc";
+import { memoize } from "@web/core/utils/functions";
 
 /**
  * @typedef {import("@html_editor/core/selection_plugin").EditorSelection} EditorSelection
@@ -51,6 +54,49 @@ function isPositionAtEdgeofLink(link, offset) {
         return "end";
     }
     return false;
+}
+
+async function fetchExternalMetaData(url) {
+    // Get the external metadata
+    try {
+        return await rpc("/html_editor/link_preview_external", {
+            preview_url: url,
+        });
+    } catch {
+        // when it's not possible to fetch the metadata we don't want to block the ui
+        return;
+    }
+}
+
+async function fetchInternalMetaData(url) {
+    // Get the internal metadata
+    const keepLastPromise = new KeepLast();
+    const urlParsed = new URL(url);
+
+    const result = await keepLastPromise
+        .add(fetch(urlParsed))
+        .then((response) => response.text())
+        .then(async (content) => {
+            const html_parser = new window.DOMParser();
+            const doc = html_parser.parseFromString(content, "text/html");
+            const internalUrlMetaData = await rpc("/html_editor/link_preview_internal", {
+                preview_url: urlParsed.pathname,
+            });
+
+            internalUrlMetaData["favicon"] = doc.querySelector("link[rel~='icon']");
+            internalUrlMetaData["ogTitle"] = doc.querySelector("[property='og:title']");
+            internalUrlMetaData["title"] = doc.querySelector("title");
+
+            return internalUrlMetaData;
+        })
+        .catch((error) => {
+            // HTTP error codes should not prevent to edit the links, so we
+            // only check for proper instances of Error.
+            if (error instanceof Error) {
+                return Promise.reject(error);
+            }
+        });
+    return result;
 }
 
 export class LinkPlugin extends Plugin {
@@ -136,10 +182,13 @@ export class LinkPlugin extends Plugin {
             {
                 hotkey: "control+k",
                 category: "shortcut_conflict",
-                isAvailable: () => this.shared.getEditableSelection().inEditable,
+                isAvailable: () => this.shared.getSelectionData().documentSelectionIsInEditable,
             }
         );
         this.ignoredClasses = new Set(this.resources["link_ignore_classes"] || []);
+
+        this.getExternalMetaData = memoize(fetchExternalMetaData);
+        this.getInternalMetaData = memoize(fetchInternalMetaData);
     }
 
     destroy() {
@@ -157,8 +206,7 @@ export class LinkPlugin extends Plugin {
             case "NORMALIZE":
                 this.normalizeLink();
                 break;
-            case "CLEAN":
-                // TODO @phoenix: evaluate if this should be cleanforsave instead
+            case "CLEAN_FOR_SAVE":
                 this.removeEmptyLinks(payload.root);
                 break;
             case "REMOVE_LINK_FROM_SELECTION":
@@ -247,15 +295,15 @@ export class LinkPlugin extends Plugin {
         }
     }
 
-    handleSelectionChange(selection) {
+    handleSelectionChange(selectionData) {
+        const selection = selectionData.editableSelection;
         if (!selection.isCollapsed) {
             this.overlay.close();
-        } else if (!selection.inEditable) {
-            const selection = this.document.getSelection();
+        } else if (!selectionData.documentSelectionIsInEditable) {
             // note that data-prevent-closing-overlay also used in color picker but link popover
             // and color picker don't open at the same time so it's ok to query like this
             const popoverEl = document.querySelector("[data-prevent-closing-overlay=true]");
-            if (popoverEl?.contains(selection.anchorNode)) {
+            if (popoverEl?.contains(selectionData.documentSelection.anchorNode)) {
                 return;
             }
             this.overlay.close();
@@ -305,6 +353,8 @@ export class LinkPlugin extends Plugin {
                 onClose: () => {
                     this.overlay.close();
                 },
+                getInternalMetaData: this.getInternalMetaData,
+                getExternalMetaData: this.getExternalMetaData,
             };
             // pass the link element to overlay to prevent position change
             this.overlay.open({ target: this.linkElement, props });
@@ -349,7 +399,6 @@ export class LinkPlugin extends Plugin {
             }
             this.shared.domInsert(link);
             this.shared.setCursorEnd(link);
-            this.dispatch("ADD_STEP");
             return link;
         }
     }
@@ -358,7 +407,12 @@ export class LinkPlugin extends Plugin {
         if (this.linkElement && cleanZWChars(this.linkElement.innerText) === "") {
             this.linkElement.remove();
         }
-        if (this.linkElement && !this.linkElement.href) {
+        if (
+            this.linkElement &&
+            !this.linkElement.href &&
+            !this.linkElement.hasAttribute("t-attf-href") &&
+            !this.linkElement.hasAttribute("t-att-href")
+        ) {
             this.removeLink();
             this.dispatch("ADD_STEP");
         }
@@ -426,7 +480,7 @@ export class LinkPlugin extends Plugin {
 
     removeEmptyLinks(root) {
         // @todo: check for unremovables
-        // @todo: preserve cursor and spaces
+        // @todo: preserve spaces
         for (const link of root.querySelectorAll("a")) {
             if ([...link.childNodes].some(isVisible)) {
                 continue;
@@ -474,6 +528,7 @@ export class LinkPlugin extends Plugin {
                 textNodeToReplace.splitText(match[0].length);
                 selection.anchorNode.parentElement.replaceChild(link, textNodeToReplace);
                 this.shared.setCursorStart(nodeForSelectionRestore);
+                this.dispatch("ADD_STEP");
             }
         }
     }

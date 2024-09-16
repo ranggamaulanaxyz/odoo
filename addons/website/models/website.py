@@ -14,7 +14,7 @@ from lxml import etree, html
 from werkzeug import urls
 from werkzeug.exceptions import NotFound
 
-from odoo import api, fields, models, tools, release, registry
+from odoo import api, fields, models, tools, release
 from odoo.addons.website.models.ir_http import sitemap_qs2dom
 from odoo.addons.website.tools import similarity_score, text_from_html, get_base_domain
 from odoo.addons.portal.controllers.portal import pager
@@ -346,9 +346,19 @@ class Website(models.Model):
     @api.model
     def _handle_domain(self, vals):
         if 'domain' in vals and vals['domain']:
-            if not vals['domain'].startswith('http'):
-                vals['domain'] = 'https://%s' % vals['domain']
-            vals['domain'] = vals['domain'].rstrip('/')
+            vals['domain'] = self._normalize_domain_url(vals['domain'])
+
+    def _normalize_domain_url(self, url):
+        """
+        This method:
+        - Prefixes 'https://' if it doesn't start with 'http'
+        - Strips any tailing '/'
+        """
+        normalized_url = url
+        if not normalized_url.startswith('http'):
+            normalized_url = 'https://%s' % normalized_url
+        normalized_url = normalized_url.rstrip('/')
+        return normalized_url
 
     @api.model
     def _handle_homepage_url(self, vals):
@@ -507,9 +517,6 @@ class Website(models.Model):
         theme = self.env['ir.module.module'].search([('name', '=', theme_name)])
         redirect_url = theme.button_choose_theme()
 
-        # Force to refresh env after install of module
-        assert self.env.registry is registry()
-
         website.configurator_done = True
 
         # Enable tour
@@ -621,7 +628,6 @@ class Website(models.Model):
 
         if modules:
             modules.button_immediate_install()
-            assert self.env.registry is registry()
 
         self.env['website'].browse(website.id).configurator_set_menu_links(menu_company, module_data)
 
@@ -849,9 +855,30 @@ class Website(models.Model):
             #       to close to OXP.
             fallback_create_missing_industry_image('s_banner_default_image_2', 's_image_text_default_image')
             fallback_create_missing_industry_image('s_banner_default_image_3', 's_product_list_default_image_1')
+            fallback_create_missing_industry_image('s_striped_top_default_image', 's_picture_default_image')
             fallback_create_missing_industry_image('s_text_cover_default_image', 's_cover_default_image')
             fallback_create_missing_industry_image('s_showcase_default_image', 's_image_text_default_image')
+            fallback_create_missing_industry_image('s_image_hexagonal_default_image', 's_cover_default_image')
+            fallback_create_missing_industry_image('s_image_hexagonal_default_image_1', 's_company_team_image_1')
             fallback_create_missing_industry_image('s_accordion_image_default_image', 's_image_text_default_image')
+            fallback_create_missing_industry_image('s_pricelist_boxed_default_background', 's_product_catalog_default_image')
+            fallback_create_missing_industry_image('s_image_title_default_image', 's_cover_default_image')
+            fallback_create_missing_industry_image('s_key_images_default_image_1', 's_media_list_default_image_1')
+            fallback_create_missing_industry_image('s_key_images_default_image_2', 's_image_text_default_image')
+            fallback_create_missing_industry_image('s_key_images_default_image_3', 's_media_list_default_image_2')
+            fallback_create_missing_industry_image('s_key_images_default_image_4', 's_text_image_default_image')
+            fallback_create_missing_industry_image('s_kickoff_default_image', 's_cover_default_image')
+            fallback_create_missing_industry_image('s_quadrant_default_image_1', 'library_image_03')
+            fallback_create_missing_industry_image('s_quadrant_default_image_2', 'library_image_10')
+            fallback_create_missing_industry_image('s_quadrant_default_image_3', 'library_image_13')
+            fallback_create_missing_industry_image('s_quadrant_default_image_4', 'library_image_05')
+            fallback_create_missing_industry_image('s_sidegrid_default_image_1', 'library_image_03')
+            fallback_create_missing_industry_image('s_sidegrid_default_image_2', 'library_image_10')
+            fallback_create_missing_industry_image('s_sidegrid_default_image_3', 'library_image_13')
+            fallback_create_missing_industry_image('s_sidegrid_default_image_4', 'library_image_05')
+            fallback_create_missing_industry_image('s_cta_box_default_image', 'library_image_02')
+            fallback_create_missing_industry_image('s_image_punchy_default_image', 's_cover_default_image')
+
         except Exception:
             pass
 
@@ -1076,7 +1103,7 @@ class Website(models.Model):
         ]
         for model, _table, column, _translate in html_fields_attributes:
             Model = self.env[model]
-            if not Model.check_access_rights('read', raise_exception=False):
+            if not Model.has_access('read'):
                 continue
 
             # Generate the exact domain to search for the URL in this field
@@ -1504,13 +1531,9 @@ class Website(models.Model):
         }
         return action
 
-    def button_go_website(self, path='/', mode_edit=False):
+    def button_go_website(self, path='/'):
         self._force()
-        if mode_edit:
-            # If the user gets on a translated page (e.g /fr) the editor will
-            # never start. Forcing the default language fixes this issue.
-            path = self.env['ir.http']._url_for(path, self.default_lang_id.url_code)
-        return self.get_client_action(path, mode_edit)
+        return self.get_client_action(path)
 
     def _is_canonical_url(self):
         """Returns whether the current request URL is canonical."""
@@ -1609,8 +1632,7 @@ class Website(models.Model):
         :param record: record on which to perform the check
         :raise AccessError: if the operation is forbidden
         """
-        record.check_access_rights('write')
-        record.check_access_rule('write')
+        record.check_access('write')
 
     def _disable_unused_snippets_assets(self):
         snippet_assets = self.env['ir.asset'].with_context(active_test=False).search_fetch(
@@ -1634,6 +1656,14 @@ class Website(models.Model):
             is_snippet_used = snippet_used[key]
             if is_snippet_used != snippet_asset.active:
                 snippet_asset.active = is_snippet_used
+                # Handle missing data-snippet attributes
+                if snippet_id == 's_quotes_carousel' and asset_type == 'css' and asset_version in ['000', '001']:
+                    old_blockquote_key = ('s_blockquote', '000', 'css')
+                    if not snippet_used.get(old_blockquote_key):
+                        snippet_used[old_blockquote_key] = True
+                        old_blockquote_asset = snippet_assets.filtered(lambda asset: asset.path == 'website/static/src/snippets/s_blockquote/000.scss')
+                        if old_blockquote_asset and not old_blockquote_asset.active:
+                            old_blockquote_asset.active = True
         self.env['ir.asset'].flush_model()
 
     def _search_build_domain(self, domain, search, fields, extra=None):

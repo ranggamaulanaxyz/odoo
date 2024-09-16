@@ -1,4 +1,5 @@
 import { browser } from "@web/core/browser/browser";
+import { pyToJsLocale } from "@web/core/l10n/utils/locales";
 import { rpc } from "@web/core/network/rpc";
 import { Cache } from "@web/core/utils/cache";
 import { session } from "@web/session";
@@ -46,7 +47,7 @@ export function _makeUser(session) {
     delete session.user_settings;
     delete session.partner_write_date;
 
-    // Generate caches for has_group and check_access_rights calls
+    // Generate caches for has_group and has_access calls
     const getGroupCacheValue = (group, context) => {
         if (!userId) {
             return Promise.resolve(false);
@@ -63,16 +64,17 @@ export function _makeUser(session) {
     groupCache.cache["base.group_user"] = Promise.resolve(isInternalUser);
     groupCache.cache["base.group_system"] = Promise.resolve(isSystem);
     const getAccessRightCacheValue = (model, operation, context) => {
-        const url = `/web/dataset/call_kw/${model}/check_access_rights`;
+        const url = `/web/dataset/call_kw/${model}/has_access`;
         return rpc(url, {
             model,
-            method: "check_access_rights",
-            args: [operation, false],
+            method: "has_access",
+            args: [[], operation],
             kwargs: { context },
         });
     };
     const getAccessRightCacheKey = (model, operation) => `${model}/${operation}`;
     const accessRightCache = new Cache(getAccessRightCacheValue, getAccessRightCacheKey);
+    const lang = pyToJsLocale(context?.lang);
 
     const user = {
         name,
@@ -88,7 +90,7 @@ export function _makeUser(session) {
             return Object.assign({}, context, { uid: this.userId });
         },
         get lang() {
-            return this.context.lang;
+            return lang;
         },
         get tz() {
             return this.context.tz;

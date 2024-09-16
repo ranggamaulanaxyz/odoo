@@ -529,6 +529,10 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
                 self._expected_result_for_thread(self.channel_livechat_1),
                 self._expected_result_for_thread(self.channel_livechat_2),
             ),
+            "MessageReactions": [
+                *self._expected_result_for_message_reactions(self.channel_general),
+                *self._expected_result_for_message_reactions(self.channel_channel_public_1),
+            ],
             "res.partner": self._filter_partners_fields(
                 self._expected_result_for_persona(
                     self.users[0],
@@ -1202,7 +1206,7 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
         guest = member_g.guest_id
         if channel == self.channel_general:
             return {
-                "attachments": [],
+                "attachment_ids": [],
                 "author": {"id": user_0.partner_id.id, "type": "partner"},
                 "body": "<p>test</p>",
                 "create_date": create_date,
@@ -1221,31 +1225,9 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
                 "pinned_at": False,
                 "rating_id": False,
                 "reactions": [
-                    {
-                        "content": "👍",
-                        "count": 1,
-                        "message": last_message.id,
-                        "personas": [{"id": user_2.partner_id.id, "type": "partner"}],
-                    },
-                    {
-                        "content": "😁",
-                        "count": 2,
-                        "message": last_message.id,
-                        "personas": [
-                            {"id": user_2.partner_id.id, "type": "partner"},
-                            {"id": user_1.partner_id.id, "type": "partner"},
-                        ],
-                    },
-                    {
-                        "content": "😊",
-                        "count": 3,
-                        "message": last_message.id,
-                        "personas": [
-                            {"id": user_2.partner_id.id, "type": "partner"},
-                            {"id": user_1.partner_id.id, "type": "partner"},
-                            {"id": user_0.partner_id.id, "type": "partner"},
-                        ],
-                    },
+                    {"content": "👍", "message": last_message.id},
+                    {"content": "😁", "message": last_message.id},
+                    {"content": "😊", "message": last_message.id},
                 ],
                 "recipients": [],
                 "record_name": "general",
@@ -1260,7 +1242,7 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
             }
         if channel == self.channel_channel_public_1:
             return {
-                "attachments": [],
+                "attachment_ids": [],
                 "author": {"id": user_2.partner_id.id, "type": "partner"},
                 "body": "<p>test</p>",
                 "create_date": create_date,
@@ -1280,31 +1262,9 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
                 "pinned_at": False,
                 "rating_id": False,
                 "reactions": [
-                    {
-                        "content": "😁",
-                        "count": 1,
-                        "message": last_message.id,
-                        "personas": [{"id": user_2.partner_id.id, "type": "partner"}],
-                    },
-                    {
-                        "content": "😊",
-                        "count": 3,
-                        "message": last_message.id,
-                        "personas": [
-                            {"id": user_2.partner_id.id, "type": "partner"},
-                            {"id": user_1.partner_id.id, "type": "partner"},
-                            {"id": user_0.partner_id.id, "type": "partner"},
-                        ],
-                    },
-                    {
-                        "content": "😏",
-                        "count": 2,
-                        "message": last_message.id,
-                        "personas": [
-                            {"id": user_1.partner_id.id, "type": "partner"},
-                            {"id": user_0.partner_id.id, "type": "partner"},
-                        ],
-                    },
+                    {"content": "😁", "message": last_message.id},
+                    {"content": "😊", "message": last_message.id},
+                    {"content": "😏", "message": last_message.id},
                 ],
                 "recipients": [{"id": self.users[0].partner_id.id, "type": "partner"}],
                 "record_name": "public channel 1",
@@ -1318,7 +1278,7 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
             }
         if channel == self.channel_channel_public_2:
             return {
-                "attachments": [],
+                "attachment_ids": [],
                 "author": {"id": user_0.partner_id.id, "type": "partner"},
                 "body": f'<div class="o_mail_notification">invited <a href="#" data-oe-model="res.partner" data-oe-id="{user_9.partner_id.id}">@test9</a> to the channel</div>',
                 "create_date": create_date,
@@ -1350,7 +1310,7 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
             }
         if channel == self.channel_channel_group_1:
             return {
-                "attachments": [],
+                "attachment_ids": [],
                 "author": {"id": user_0.partner_id.id, "type": "partner"},
                 "body": f'<div class="o_mail_notification">invited <a href="#" data-oe-model="res.partner" data-oe-id="{user_12.partner_id.id}">@test12</a> to the channel</div>',
                 "create_date": create_date,
@@ -1382,7 +1342,7 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
             }
         if channel == self.channel_channel_group_2:
             return {
-                "attachments": [],
+                "attachment_ids": [],
                 "author": {"id": user_0.partner_id.id, "type": "partner"},
                 "body": f'<div class="o_mail_notification">invited <a href="#" data-oe-model="res.partner" data-oe-id="{user_13.partner_id.id}">@test13</a> to the channel</div>',
                 "create_date": create_date,
@@ -1414,7 +1374,7 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
             }
         if channel == self.channel_livechat_1:
             return {
-                "attachments": [],
+                "attachment_ids": [],
                 "author": {"id": user_1.partner_id.id, "type": "partner"},
                 "body": "<p>test</p>",
                 "create_date": create_date,
@@ -1445,7 +1405,7 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
             }
         if channel == self.channel_livechat_2:
             return {
-                "attachments": [],
+                "attachment_ids": [],
                 "author": {"id": guest.id, "type": "guest"},
                 "body": "<p>test</p>",
                 "create_date": create_date,
@@ -1476,6 +1436,68 @@ class TestDiscussFullPerformance(HttpCase, MailCommon):
                 "write_date": write_date,
             }
         return {}
+
+    def _expected_result_for_message_reactions(self, channel):
+        last_message = channel._get_last_messages()
+        partner_0 = self.users[0].partner_id.id
+        partner_1 = self.users[1].partner_id.id
+        partner_2 = self.users[2].partner_id.id
+        if channel == self.channel_general:
+            return [
+                {
+                    "content": "👍",
+                    "count": 1,
+                    "message": last_message.id,
+                    "personas": [{"id": partner_2, "type": "partner"}],
+                },
+                {
+                    "content": "😁",
+                    "count": 2,
+                    "message": last_message.id,
+                    "personas": [
+                        {"id": partner_2, "type": "partner"},
+                        {"id": partner_1, "type": "partner"},
+                    ],
+                },
+                {
+                    "content": "😊",
+                    "count": 3,
+                    "message": last_message.id,
+                    "personas": [
+                        {"id": partner_2, "type": "partner"},
+                        {"id": partner_1, "type": "partner"},
+                        {"id": partner_0, "type": "partner"},
+                    ],
+                },
+            ]
+        if channel == self.channel_channel_public_1:
+            return [
+                {
+                    "content": "😁",
+                    "count": 1,
+                    "message": last_message.id,
+                    "personas": [{"id": partner_2, "type": "partner"}],
+                },
+                {
+                    "content": "😊",
+                    "count": 3,
+                    "message": last_message.id,
+                    "personas": [
+                        {"id": partner_2, "type": "partner"},
+                        {"id": partner_1, "type": "partner"},
+                        {"id": partner_0, "type": "partner"},
+                    ],
+                },
+                {
+                    "content": "😏",
+                    "count": 2,
+                    "message": last_message.id,
+                    "personas": [
+                        {"id": partner_1, "type": "partner"},
+                        {"id": partner_0, "type": "partner"},
+                    ],
+                },
+            ]
 
     def _expected_result_for_notification(self, channel):
         last_message = channel._get_last_messages()

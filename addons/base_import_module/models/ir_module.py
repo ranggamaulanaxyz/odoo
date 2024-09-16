@@ -87,6 +87,8 @@ class IrModule(models.Model):
         values = self.get_values_from_terp(terp)
         if 'version' in terp:
             values['latest_version'] = adapt_version(terp['version'])
+        if self.env.context.get('data_module'):
+            values['module_type'] = 'industries'
 
         unmet_dependencies = set(terp.get('depends', [])).difference(installed_mods)
 
@@ -213,6 +215,14 @@ class IrModule(models.Model):
             imported_module=True,
         )
 
+        if ('knowledge.article' in self.env
+            and (article_record := self.env.ref(f"{module}.welcome_article", raise_if_not_found=False))
+            and article_record._name == 'knowledge.article'
+            and self.env.ref(f"{module}.welcome_article_body", raise_if_not_found=False)
+        ):
+            body = self.env['ir.qweb']._render(f"{module}.welcome_article_body", lang=self.env.user.lang)
+            article_record.write({'body': body})
+
         mod._update_from_terp(terp)
         _logger.info("Successfully imported module '%s'", module)
 
@@ -277,7 +287,6 @@ class IrModule(models.Model):
                         path = opj(module_dir, mod_name)
                         self.sudo()._import_module(mod_name, path, force=force, with_demo=with_demo)
                     except Exception as e:
-                        _logger.exception('Error while importing module')
                         raise UserError(_(
                             "Error while importing module '%(module)s'.\n\n %(error_message)s \n\n",
                             module=mod_name, error_message=exception_to_unicode(e),

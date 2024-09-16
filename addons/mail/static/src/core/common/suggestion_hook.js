@@ -12,6 +12,9 @@ class UseSuggestion {
                 if (this.search.position === undefined || !this.search.delimiter) {
                     return; // nothing else to fetch
                 }
+                if (this.composer.store.self.type !== "partner") {
+                    return; // guests cannot access fetch suggestion method
+                }
                 this.sequential(async () => {
                     if (
                         this.search.delimiter !== delimiter ||
@@ -20,13 +23,30 @@ class UseSuggestion {
                     ) {
                         return; // ignore obsolete call
                     }
-                    await this.suggestionService.fetchSuggestions(this.search, {
-                        thread: this.thread,
-                    });
+                    if (
+                        this.lastFetchedSearch?.count === 0 &&
+                        (!this.search.delimiter || this.isSearchMoreSpecificThanLastFetch)
+                    ) {
+                        return; // no need to fetch since this is more specific than last and last had no result
+                    }
+                    this.state.isFetching = true;
+                    try {
+                        await this.suggestionService.fetchSuggestions(this.search, {
+                            thread: this.thread,
+                        });
+                    } catch {
+                        this.lastFetchedSearch = null;
+                    } finally {
+                        this.state.isFetching = false;
+                    }
                     if (status(comp) === "destroyed") {
                         return;
                     }
                     this.update();
+                    this.lastFetchedSearch = {
+                        ...this.search,
+                        count: this.state.items?.suggestions.length ?? 0,
+                    };
                     if (
                         this.search.delimiter === delimiter &&
                         this.search.position === position &&
@@ -58,12 +78,21 @@ class UseSuggestion {
     state = useState({
         count: 0,
         items: undefined,
+        isFetching: false,
     });
     search = {
         delimiter: undefined,
         position: undefined,
         term: "",
     };
+    lastFetchedSearch;
+    get isSearchMoreSpecificThanLastFetch() {
+        return (
+            this.lastFetchedSearch.delimiter === this.search.delimiter &&
+            this.search.term.startsWith(this.lastFetchedSearch.term) &&
+            this.lastFetchedSearch.position >= this.search.position
+        );
+    }
     clearRawMentions() {
         this.composer.mentionedChannels.length = 0;
         this.composer.mentionedPartners.length = 0;

@@ -1,6 +1,6 @@
-import { expect, getFixture, mountOnFixture, test } from "@odoo/hoot";
-import { drag, queryAllTexts, queryFirst } from "@odoo/hoot-dom";
-import { animationFrame, advanceFrame, runAllTimers } from "@odoo/hoot-mock";
+import { expect, mountOnFixture, test } from "@odoo/hoot";
+import { queryAllTexts, queryFirst } from "@odoo/hoot-dom";
+import { advanceFrame, animationFrame } from "@odoo/hoot-mock";
 import { contains, mountWithCleanup } from "@web/../tests/web_test_helpers";
 
 import { Component, reactive, useRef, useState, xml } from "@odoo/owl";
@@ -181,12 +181,27 @@ test("Simple sorting in multiple groups", async () => {
     expect(".item").toHaveCount(9);
     expect.verifySteps(["start", "groupenter", "drop", "end"]);
 });
-// TODO WAITING HOOT TO SUPPORT THIS CASE
-test.skip("Sorting in groups with distinct per-axis scrolling", async () => {
-    const processAdvanceFrame = async () => {
-        await advanceFrame(16);
-        await runAllTimers();
+
+test("Sorting in groups with distinct per-axis scrolling", async () => {
+    /**
+     * @param {string} selector
+     * @param {{ x?: number; y?: number }} position
+     * @param {() => any} callback
+     */
+    const dragAndExpect = async (selector, position, callback) => {
+        const { drop, moveTo } = await contains(selector).drag();
+        await moveTo(`${selector}:last`, { position });
+        // Wait for the edge scrolling to scroll to the end
+        await advanceFrame(50);
+
+        callback();
+
+        await drop();
+
+        queryFirst(".scroll_parent_y").scrollTop = 0;
+        queryFirst(".root").scrollLeft = 0;
     };
+
     class List extends Component {
         static props = ["*"];
         static template = xml`
@@ -223,97 +238,92 @@ test.skip("Sorting in groups with distinct per-axis scrolling", async () => {
     expect(".list").toHaveCount(3);
     expect(".item").toHaveCount(9);
 
-    const scrollParentX = queryFirst(".root");
-    const scrollParentY = queryFirst(".scroll_parent_y");
-    const cancelDrag = async ({ cancel }) => {
-        cancel();
-        await animationFrame();
-        scrollParentY.scrollTop = 0;
-        scrollParentX.scrollLeft = 0;
-        await animationFrame();
-        expect(".o_dragged").toHaveCount(0);
-    };
-    expect(".o_dragged").toHaveCount(0);
-    // Negative horizontal scrolling.
-    queryFirst(".spacer_horizontal").scrollIntoView();
-    scrollParentX.scrollLeft = 16;
-    await animationFrame();
-    expect(scrollParentY).toHaveProperty("scrollTop", 50, {
-        message: "Negative horizontal scrolling: scrollTop",
-    });
-    expect(scrollParentX).toHaveProperty("scrollLeft", 16, {
+    // Negative horizontal scrolling
+
+    queryFirst(".spacer_horizontal").scrollIntoView({ behavior: "instant" });
+    queryFirst(".root").scrollLeft = 16;
+    expect(".root").toHaveProperty("scrollLeft", 16, {
         message: "Negative horizontal scrolling: scrollLeft",
     });
-    let dragHelpers = drag(".item12");
-    dragHelpers.moveTo(".item11", { position: "left", relative: true });
-    await processAdvanceFrame();
-    expect(scrollParentY).toHaveProperty("scrollTop", 50, {
-        message: "Negative horizontal scrolling left - scrollTop",
+    expect(".scroll_parent_y").toHaveProperty("scrollTop", 50, {
+        message: "Negative horizontal scrolling: scrollTop",
     });
-    expect(scrollParentX).toHaveProperty("scrollLeft", 0, {
-        message: "Negative horizontal scrolling left - scrollLeft",
-    });
-    await cancelDrag(dragHelpers);
 
-    // Positive horizontal scrolling.
-    queryFirst(".spacer_horizontal").scrollIntoView();
-    await animationFrame();
-    expect(scrollParentY).toHaveProperty("scrollTop", 50, {
-        message: "Positive horizontal scrolling - scrollTop",
+    await dragAndExpect(".item12", { x: 0 }, () => {
+        expect(".scroll_parent_y").toHaveProperty("scrollTop", 50, {
+            message: "Negative horizontal scrolling left - scrollTop",
+        });
+        expect(".root").toHaveProperty("scrollLeft", 0, {
+            message: "Negative horizontal scrolling left - scrollLeft",
+        });
     });
-    expect(scrollParentX).toHaveProperty("scrollLeft", 0, {
+
+    expect(".o_dragged").toHaveCount(0);
+
+    // Positive horizontal scrolling
+
+    queryFirst(".spacer_horizontal").scrollIntoView({ behavior: "instant" });
+    expect(".root").toHaveProperty("scrollLeft", 0, {
         message: "Positive horizontal scrolling - scrollLeft",
     });
-    dragHelpers = drag(".item11");
-    dragHelpers.moveTo(".item12", { position: "right", relative: true });
-    await processAdvanceFrame();
-    expect(scrollParentY).toHaveProperty("scrollTop", 50, {
-        message: "Positive horizontal scrolling right - scrollTop",
+    expect(".scroll_parent_y").toHaveProperty("scrollTop", 50, {
+        message: "Positive horizontal scrolling - scrollTop",
     });
-    expect(scrollParentX).toHaveProperty("scrollLeft", 16, {
-        message: "Positive horizontal scrolling right - scrollLeft",
-    });
-    await cancelDrag(dragHelpers);
 
-    // Negative vertical scrolling.
-    queryFirst(".root").scrollIntoView();
-    await animationFrame();
-    expect(scrollParentY).toHaveProperty("scrollTop", 100, {
-        message: "Negative vertical scrolling - scrollTop",
+    await dragAndExpect(".item11", { x: 1000 }, () => {
+        expect(".scroll_parent_y").toHaveProperty("scrollTop", 50, {
+            message: "Positive horizontal scrolling right - scrollTop",
+        });
+        expect(".root").toHaveProperty("scrollLeft", 75, {
+            message: "Positive horizontal scrolling right - scrollLeft",
+        });
     });
-    expect(scrollParentX).toHaveProperty("scrollLeft", 0, {
+
+    expect(".o_dragged").toHaveCount(0);
+
+    // Negative vertical scrolling
+
+    queryFirst(".root").scrollIntoView({ behavior: "instant" });
+    queryFirst(".root").scrollLeft = 16;
+    expect(".root").toHaveProperty("scrollLeft", 16, {
         message: "Negative vertical scrolling - scrollLeft",
     });
-    dragHelpers = drag(".item11");
-    dragHelpers.moveTo(".item11", { position: "top", relative: true });
-    await processAdvanceFrame();
-    expect(scrollParentY).toHaveProperty("scrollTop", 84, {
-        message: "Negative vertical scrolling top - scrollTop",
+    expect(".scroll_parent_y").toHaveProperty("scrollTop", 100, {
+        message: "Negative vertical scrolling - scrollTop",
     });
-    expect(scrollParentX).toHaveProperty("scrollLeft", 0, {
-        message: "Negative vertical scrolling top - scrollLeft",
-    });
-    await cancelDrag(dragHelpers);
 
-    // Positive vertical scrolling.
-    queryFirst(".spacer_before").scrollIntoView();
-    await animationFrame();
-    expect(scrollParentY).toHaveProperty("scrollTop", 0, {
-        message: "Positive vertical scrolling - scrollTop",
+    await dragAndExpect(".item11", { y: 0 }, () => {
+        expect(".scroll_parent_y").toHaveProperty("scrollTop", 0, {
+            message: "Negative vertical scrolling top - scrollTop",
+        });
+        expect(".root").toHaveProperty("scrollLeft", 16, {
+            message: "Negative vertical scrolling top - scrollLeft",
+        });
     });
-    expect(scrollParentX).toHaveProperty("scrollLeft", 0, {
+
+    expect(".o_dragged").toHaveCount(0);
+
+    // Positive vertical scrolling
+
+    queryFirst(".spacer_before").scrollIntoView({ behavior: "instant" });
+    queryFirst(".root").scrollLeft = 16;
+    expect(".root").toHaveProperty("scrollLeft", 16, {
         message: "Positive vertical scrolling - scrollLeft",
     });
-    dragHelpers = drag(".item21");
-    dragHelpers.moveTo(".item21", { position: "bottom", relative: true });
-    await processAdvanceFrame();
-    expect(scrollParentY).toHaveProperty("scrollTop", 16, {
-        message: "Positive vertical scrolling bottom - scrollTop",
+    expect(".scroll_parent_y").toHaveProperty("scrollTop", 0, {
+        message: "Positive vertical scrolling - scrollTop",
     });
-    expect(scrollParentX).toHaveProperty("scrollLeft", 0, {
-        message: "Positive vertical scrolling bottom - scrollLeft",
+
+    await dragAndExpect(".item21", { y: 1000 }, () => {
+        expect(".scroll_parent_y").toHaveProperty("scrollTop", 215, {
+            message: "Positive vertical scrolling bottom - scrollTop",
+        });
+        expect(".root").toHaveProperty("scrollLeft", 16, {
+            message: "Positive vertical scrolling bottom - scrollLeft",
+        });
     });
-    await cancelDrag(dragHelpers);
+
+    expect(".o_dragged").toHaveCount(0);
 });
 
 test("draggable area contains overflowing visible elements", async () => {
@@ -337,9 +347,11 @@ test("draggable area contains overflowing visible elements", async () => {
                 elements: ".item",
                 groups: ".list",
                 connectGroups: true,
+                touchDelay: 0,
             });
         }
     }
+
     await mountWithCleanup(List);
 
     const controller = queryFirst(".controller");
@@ -352,32 +364,23 @@ test("draggable area contains overflowing visible elements", async () => {
     expect(renderer.getBoundingClientRect().width).toBe(600);
     expect(renderer).toHaveProperty("scrollWidth", 900);
     expect(".item.o_dragged").toHaveCount(0);
-    const { cancel, moveTo } = drag(".item11");
+
+    const { cancel, moveTo } = await contains(".item11").drag();
 
     // Drag first record of first group to the right
-    moveTo(queryFirst(".list3 .item"));
-
-    // Next frame (normal time delta)
-    await animationFrame();
+    await moveTo(".list3 .item:first");
 
     // Verify that there is no scrolling
     expect(content).toHaveProperty("scrollLeft", 0);
     expect(".item.o_dragged").toHaveCount(1);
 
-    const dragged = queryFirst(".item.o_dragged");
-    const sibling = queryFirst(".list3 .item");
     // Verify that the dragged element is allowed to go inside the
     // overflowing part of the draggable container.
-    expect(dragged.getBoundingClientRect().right).toBe(
-        900 + getFixture().getBoundingClientRect().x
-    );
-    expect(sibling.getBoundingClientRect().right).toBe(
-        900 + getFixture().getBoundingClientRect().x
-    );
+    expect(".item.o_dragged").toHaveRect({ right: 900 });
+    expect(".list3 .item:first").toHaveRect({ right: 900 });
 
-    // Cancel drag: press "Escape"
-    cancel();
-    await animationFrame();
+    // Cancel drag
+    await cancel();
 
     expect(".item.o_dragged").toHaveCount(0);
 });
@@ -452,29 +455,27 @@ test("Drag has a default tolerance of 10 pixels before initiating the dragging",
 
     await mountWithCleanup(List);
 
-    async function dnd(listItem, position) {
-        const { drop, moveTo } = drag(listItem);
-        moveTo(listItem, { position, relative: true });
-        await animationFrame();
-        drop();
-    }
-    const listItem = queryFirst(".item:first-child");
-
-    // Move the element from only 5 pixels
-    await dnd(listItem, {
-        x: listItem.getBoundingClientRect().width / 2,
-        y: listItem.getBoundingClientRect().height / 2 + 5,
+    const listItem = queryFirst(".item");
+    const { cancel, moveTo } = await contains(listItem).drag({
+        initialPointerMoveDistance: 0,
+        position: { x: 0, y: 0 }, // Move the element from only 5 pixels
+        relative: true,
     });
-    // No drag sequence should have been initiated
+    await moveTo(listItem, {
+        position: { x: 0, y: 5 },
+        relative: true,
+    });
+
     expect.verifySteps([]);
 
-    // Move the element from more than 10 pixels
-    await dnd(listItem, {
-        x: listItem.getBoundingClientRect().width / 2 + 10,
-        y: listItem.getBoundingClientRect().height / 2 + 10,
+    await moveTo(listItem, {
+        position: { x: 10, y: 10 }, // Move the element from more than 10 pixels
+        relative: true,
     });
-    // A drag sequence should have been initiated
+
     expect.verifySteps(["Initiation of the drag sequence"]);
+
+    await cancel();
 });
 
 test("Ignore specified elements", async () => {

@@ -23,14 +23,17 @@ threadActionsRegistry.add("expand-discuss", {
         return false;
     },
     open(component) {
-        component.thread.setAsDiscussThread();
         component.actionService.doAction(
             {
                 type: "ir.actions.client",
                 tag: "mail.action_discuss",
             },
-            { clearBreadcrumbs: this.shouldClearBreadcrumbs(component) }
+            {
+                clearBreadcrumbs: this.shouldClearBreadcrumbs(component),
+                additionalContext: { active_id: component.thread.id },
+            }
         );
     },
-    sequence: 15,
+    sequence: 40,
+    sequenceGroup: 20,
 });

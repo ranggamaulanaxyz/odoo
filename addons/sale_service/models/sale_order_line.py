@@ -24,29 +24,12 @@ class SaleOrderLine(models.Model):
         :param kwargs: boolean kwargs of the form 'check_<leaf_field>=False'
         :return: a valid domain
         """
-        return [
-            ('is_service', '=', True),
-            ('is_expense', '=', False) if kwargs.get("check_is_expense", True) else expression.TRUE_LEAF,
-            ('is_downpayment', '=', False) if kwargs.get("check_is_downpayment", True) else expression.TRUE_LEAF,
-            ('state', '=', 'sale') if kwargs.get("check_state", True) else expression.TRUE_LEAF,
-        ]
-
-    def _domain_sale_line_service_str(self, domain='', op='&', **kwargs):
-        """
-        Get the str version of the domain for services sale.order.line.
-        Can be optionally aggregated with another domain for customization of the field domain definition
-
-        :param str domain: static str representing the domain for the field definition. Assumed it's a valid domain
-        :param str op: '&' or '|' depending on how the domain should be combined. Defaults to '&'
-        :param kwargs: refer to :ref:`_domain_sale_line_service`
-        :return: str version of the combined services sale.order.line domain.
-        """
-        if not domain:
-            return str(self._domain_sale_line_service(**kwargs))
-        if op not in ('&', '|'):
-            raise ValueError(f"op is expected to be '&' or '|', got '{op}' instead.")
-        domain = domain.replace('\r\n', '').replace('\n', '').strip()[1:-1].strip(", ")
-        return f"['{op}', {domain}, {str(self._domain_sale_line_service(**kwargs))[1:-1]}]"
+        domain = [('is_service', '=', True)]
+        if kwargs.get("check_is_expense", True):
+            domain.append(('is_expense', '=', False))
+        if kwargs.get("check_state", True):
+            domain.append(('state', '=', 'sale'))
+        return domain
 
     @api.depends('product_id.type')
     def _compute_is_service(self):
@@ -94,11 +77,13 @@ class SaleOrderLine(models.Model):
 
         return name_per_id
 
-    def _name_search(self, name, domain=None, operator='ilike', limit=None, order=None):
+    @api.model
+    def name_search(self, name='', args=None, operator='ilike', limit=100):
+        domain = args or []
         # optimization for a SOL services name_search, to avoid joining on sale_order with too many lines
         if domain and ('is_service', '=', True) in domain and operator in ('like', 'ilike') and limit is not None:
-            query = self.env['sale.order.line']._search(domain, limit=limit, order=None)
-            query.order = f'{query.table}.order_id DESC, {query.table}.sequence, {query.table}.id'
-            return query
-        else:
-            return super()._name_search(name, domain, operator, limit, order)
+            sols = self.search_fetch(
+                domain, ['display_name'], limit=limit, order='order_id.id DESC, sequence, id',
+            )
+            return [(sol.id, sol.display_name) for sol in sols]
+        return super().name_search(name, domain, operator, limit)

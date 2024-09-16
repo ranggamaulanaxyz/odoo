@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
 # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
 import odoo
+from uuid import uuid4
 
 from odoo.addons.point_of_sale.tests.test_frontend import TestPointOfSaleHttpCommon
 from odoo.tests import Form
@@ -59,9 +59,7 @@ class TestPoSSale(TestPointOfSaleHttpCommon):
         picking = sale_order.picking_ids
         picking.move_ids.quantity = 300
         picking.move_ids.picked = True
-        action = picking.button_validate()
-        wizard = Form(self.env[action['res_model']].with_context(action['context']))
-        wizard.save().process()
+        Form.from_action(self.env, picking.button_validate()).save().process()
 
         self.assertEqual(sale_order.order_line.qty_delivered, 1)
 
@@ -372,34 +370,6 @@ class TestPoSSale(TestPointOfSaleHttpCommon):
         self.main_pos_config.open_ui()
         self.start_pos_tour('PosSettleOrderWithNote', login="accountman")
 
-    def test_pos_invoice_analytic_account(self):
-        #create a sale order with product_a
-        self.analytic_plan_projects = self.env['account.analytic.plan'].create({'name': 'Projects'})
-        self.analytic_plan_departments = self.env['account.analytic.plan'].create({'name': 'Departments test'})
-
-        self.analytic_account_partner_a_1 = self.env['account.analytic.account'].create({
-            'name': 'analytic_account_partner_a_1',
-            'partner_id': self.partner_a.id,
-            'plan_id': self.analytic_plan_projects.id,
-        })
-        self.env['sale.order'].create({
-            'partner_id': self.env['res.partner'].create({'name': 'Test Partner'}).id,
-            'order_line': [(0, 0, {
-                'product_id': self.desk_pad.id,
-                'name': self.desk_pad.name,
-                'product_uom_qty': 3.5,
-                'product_uom': self.desk_pad.uom_id.id,
-                'price_unit': self.desk_pad.lst_price,
-            })],
-            'analytic_account_id': self.analytic_account_partner_a_1.id,
-        })
-        self.main_pos_config.open_ui()
-        self.start_pos_tour('PosSettleAndInvoiceOrder', login="accountman")
-
-        pos_order = self.env['pos.order'].search([], order='id desc', limit=1)
-        self.assertTrue(pos_order.account_move.line_ids[0].analytic_distribution, "Analytic distribution should be set on the invoice line")
-        self.assertEqual(pos_order.account_move.line_ids[0].analytic_distribution.get(str(self.analytic_account_partner_a_1.id)), 100)
-
     def test_order_sales_count(self):
         self.main_pos_config.open_ui()
         current_session = self.main_pos_config.current_session_id
@@ -506,7 +476,8 @@ class TestPoSSale(TestPointOfSaleHttpCommon):
              {'amount': 10,
               'name': fields.Datetime.now(),
               'payment_method_id': self.main_pos_config.payment_method_ids[0].id}]],
-           'user_id': self.env.uid
+           'user_id': self.env.uid,
+           'uuid': str(uuid4()),
             }
 
         self.env['pos.order'].sync_from_ui([pos_order])
@@ -689,6 +660,12 @@ class TestPoSSale(TestPointOfSaleHttpCommon):
         self.main_pos_config.open_ui()
         self.start_tour("/pos/ui?config_id=%d" % self.main_pos_config.id, 'PoSDownPaymentLinesPerTax', login="accountman")
 
+        # We check the content of the invoice to make sure Product A/B/C only appears only once
+        invoice_pdf_content = str(self.env['pos.order'].search([]).account_move._get_invoice_legal_documents('pdf', allow_fallback=True).get('content'))
+        self.assertEqual(invoice_pdf_content.count('Product A'), 1)
+        self.assertEqual(invoice_pdf_content.count('Product B'), 1)
+        self.assertEqual(invoice_pdf_content.count('Product C'), 1)
+
     def test_settle_so_with_pos_downpayment(self):
         so = self.env['sale.order'].create({
             'partner_id': self.partner_a.id,
@@ -712,3 +689,26 @@ class TestPoSSale(TestPointOfSaleHttpCommon):
         invoice = so._create_invoices(final=True)
         invoice.action_post()
         self.assertEqual(invoice.amount_total, 90)
+
+    def test_ship_later_no_default(self):
+        """ Verify that when settling an order the ship later is not activated by default"""
+        product = self.env['product.product'].create({
+            'name': 'Product',
+            'available_in_pos': True,
+            'lst_price': 10.0,
+            'taxes_id': False,
+        })
+
+        sale_order = self.env['sale.order'].create({
+            'partner_id': self.env['res.partner'].create({'name': 'Test Partner'}).id,
+            'order_line': [(0, 0, {
+                'product_id': product.id,
+                'name': product.name,
+                'product_uom_qty': 4,
+                'price_unit': product.lst_price,
+            })],
+        })
+        sale_order.action_confirm()
+        self.main_pos_config.write({'ship_later': True})
+        self.main_pos_config.open_ui()
+        self.start_tour("/pos/ui?config_id=%d" % self.main_pos_config.id, 'PosShipLaterNoDefault', login="accountman")

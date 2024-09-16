@@ -36,11 +36,6 @@ class CryptContext:
     def __init__(self, *args, **kwargs):
         self.__obj__ = _CryptContext(*args, **kwargs)
 
-    @property
-    def encrypt(self):
-        # deprecated alias
-        return self.hash
-
     def copy(self):
         """
             The copy method must create a new instance of the
@@ -572,7 +567,7 @@ class Users(models.Model):
     def _fetch_query(self, query, fields):
         records = super()._fetch_query(query, fields)
         if not set(USER_PRIVATE_FIELDS).isdisjoint(field.name for field in fields):
-            if self.check_access_rights('write', raise_exception=False):
+            if self.browse().has_access('write'):
                 return records
             for fname in USER_PRIVATE_FIELDS:
                 self.env.cache.update(records, self._fields[fname], repeat('********'))
@@ -802,18 +797,23 @@ class Users(models.Model):
             raise UserError(_('Deleting the template users is not allowed. Deleting this profile will compromise critical functionalities.'))
 
     @api.model
-    def _name_search(self, name, domain=None, operator='ilike', limit=None, order=None):
-        domain = domain or []
-        user_ids = []
-        if operator not in expression.NEGATIVE_TERM_OPERATORS:
-            if operator == 'ilike' and not (name or '').strip():
-                name_domain = []
-            else:
-                name_domain = [('login', '=', name)]
-            user_ids = self._search(expression.AND([name_domain, domain]), limit=limit, order=order)
-        if not user_ids:
-            user_ids = self._search(expression.AND([[('name', operator, name)], domain]), limit=limit, order=order)
-        return user_ids
+    def name_search(self, name='', args=None, operator='ilike', limit=100):
+        domain = args or []
+        # first search only by login, then the normal search
+        if (
+            name and operator not in expression.NEGATIVE_TERM_OPERATORS
+            and (user := self.search_fetch(expression.AND([[('login', '=', name)], domain]), ['display_name']))
+        ):
+            return [(user.id, user.display_name)]
+        return super().name_search(name, domain, operator, limit)
+
+    @api.model
+    def _search_display_name(self, operator, value):
+        domain = super()._search_display_name(operator, value)
+        if operator in ('=', 'ilike') and value:
+            name_domain = [('login', '=', value)]
+            domain = expression.OR([name_domain, domain])
+        return domain
 
     def copy_data(self, default=None):
         default = dict(default or {})
@@ -837,7 +837,11 @@ class Users(models.Model):
         }
         # use read() to not read other fields: this must work while modifying
         # the schema of models res.users or res.partner
-        values = user.read(list(name_to_key), load=False)[0]
+        try:
+            values = user.read(list(name_to_key), load=False)[0]
+        except IndexError:
+            # user not found, no context information
+            return frozendict()
 
         context = {
             key: values[name]
@@ -912,7 +916,7 @@ class Users(models.Model):
                         raise AccessDenied()
                     user = user.with_user(user)
                     auth_info = user._check_credentials(credential, user_agent_env)
-                    tz = request.httprequest.cookies.get('tz') if request else None
+                    tz = request.cookies.get('tz') if request else None
                     if tz in pytz.all_timezones and (not user.tz or not user.login_date):
                         # first login or missing tz -> set tz to browser tz
                         user.tz = tz
@@ -1201,7 +1205,7 @@ class Users(models.Model):
         return self.groups_id._ids
 
     def _action_show(self):
-        """If self is a singleton, directly access the form view. If it is a recordset, open a tree view"""
+        """If self is a singleton, directly access the form view. If it is a recordset, open a list view"""
         view_id = self.env.ref('base.view_users_form').id
         action = {
             'type': 'ir.actions.act_window',
@@ -1227,7 +1231,7 @@ class Users(models.Model):
         self.ensure_one()
         return {
             'name': _('Groups'),
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'res_model': 'res.groups',
             'type': 'ir.actions.act_window',
             'context': {'create': False, 'delete': False},
@@ -1239,7 +1243,7 @@ class Users(models.Model):
         self.ensure_one()
         return {
             'name': _('Access Rights'),
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'res_model': 'ir.model.access',
             'type': 'ir.actions.act_window',
             'context': {'create': False, 'delete': False},
@@ -1251,7 +1255,7 @@ class Users(models.Model):
         self.ensure_one()
         return {
             'name': _('Record Rules'),
-            'view_mode': 'tree,form',
+            'view_mode': 'list,form',
             'res_model': 'ir.rule',
             'type': 'ir.actions.act_window',
             'context': {'create': False, 'delete': False},
@@ -1928,15 +1932,18 @@ class UsersView(models.Model):
             )
             if missing_implied_groups:
                 # prepare missing group message, by categories
-                missing_groups[group] = ", ".join(f'"{missing_group.category_id.name or _("Other")}: {missing_group.name}"'
-                                                  for missing_group in missing_implied_groups)
+                missing_groups[group] = ", ".join(
+                    f'"{missing_group.category_id.name or self.env._("Other")}: {missing_group.name}"'
+                    for missing_group in missing_implied_groups
+                )
         return "\n".join(
-            _('Since %(user)s is a/an "%(category)s: %(group)s", they will at least obtain the right %(missing_group_message)s',
-              user=user.name,
-              category=group.category_id.name or _('Other'),
-              group=group.name,
-              missing_group_message=missing_group_message
-             ) for group, missing_group_message in missing_groups.items()
+            self.env._(
+                'Since %(user)s is a/an "%(category)s: %(group)s", they will at least obtain the right %(missing_group_message)s',
+                user=user.name,
+                category=group.category_id.name or self.env._('Other'),
+                group=group.name,
+                missing_group_message=missing_group_message,
+            ) for group, missing_group_message in missing_groups.items()
         )
 
     def _remove_reified_groups(self, values):

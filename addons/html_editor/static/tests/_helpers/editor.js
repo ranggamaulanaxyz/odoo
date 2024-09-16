@@ -174,9 +174,7 @@ export async function testEditor(config) {
     }
     if (contentAfter) {
         const content = editor.getContent();
-        editor.dispatch("CLEAN", { root: el });
-        editor.dispatch("CLEAN_FOR_SAVE", { root: el });
-        editor.dispatch("MERGE_ADJACENT_NODE", { node: el });
+        editor.dispatch("CLEAN_FOR_SAVE", { root: el, preserveSelection: true });
         compareFunction(getContent(el), contentAfter, "Editor content, after clean");
         compareFunction(content, el.innerHTML, "Value from editor.getContent()");
     }
@@ -191,7 +189,9 @@ export async function setupWysiwyg(props = {}) {
     const content = props.content;
     delete props.content;
     const wysiwyg = await mountWithCleanup(Wysiwyg, { props });
-    const el = /** @type {HTMLElement} **/ (queryOne(".odoo-editor-editable"));
+    const el = /** @type {HTMLElement} **/ (
+        queryOne(`${props.iframe ? ":iframe " : ""}.odoo-editor-editable`)
+    );
     if (content) {
         // force selection to be put properly
         setContent(el, content);

@@ -57,15 +57,24 @@ registry.category("web_tour.tours").add("pos_restaurant_sync", {
     test: true,
     steps: () =>
         [
-            Dialog.confirm("Open session"),
+            Chrome.startPoS(),
+            Dialog.confirm("Open Register"),
 
             // Create a floating order. The idea is to have one of the draft orders be a floating order during the tour.
-            Chrome.newOrder(),
 
+            {
+                content: "open table selector",
+                trigger: ".pos-topheader button.table-free-order-label",
+                run: "click",
+            },
+            {
+                content: "create new order",
+                trigger: ".modal-body button i.fa-plus-circle",
+                run: "click",
+            },
             // Dine in / Takeaway can be toggled.
             ProductScreen.clickControlButton("Dine in"),
             ProductScreen.clickControlButton("Takeaway"),
-
             ProductScreen.clickDisplayedProduct("Coca-Cola"),
             ProductScreen.clickDisplayedProduct("Coca-Cola"),
             ProductScreen.clickDisplayedProduct("Coca-Cola"),
@@ -186,6 +195,7 @@ registry.category("web_tour.tours").add("pos_restaurant_sync_second_login", {
     steps: () =>
         [
             // There is one draft synced order from the previous tour
+            Chrome.startPoS(),
             FloorScreen.clickTable("5"),
             ProductScreen.totalAmountIs("4.40"),
 
@@ -225,7 +235,8 @@ registry.category("web_tour.tours").add("SaveLastPreparationChangesTour", {
     test: true,
     steps: () =>
         [
-            Dialog.confirm("Open session"),
+            Chrome.startPoS(),
+            Dialog.confirm("Open Register"),
             FloorScreen.clickTable("5"),
             ProductScreen.clickDisplayedProduct("Coca-Cola", true, "1.0"),
             ProductScreen.clickOrderButton(),
@@ -243,7 +254,8 @@ registry.category("web_tour.tours").add("BillScreenTour", {
     test: true,
     steps: () =>
         [
-            Dialog.confirm("Open session"),
+            Chrome.startPoS(),
+            Dialog.confirm("Open Register"),
             FloorScreen.clickTable("5"),
             ProductScreen.clickDisplayedProduct("Coca-Cola"),
             ProductScreen.clickControlButton("Bill"),
@@ -254,5 +266,37 @@ registry.category("web_tour.tours").add("BillScreenTour", {
             PaymentScreen.clickPaymentMethod("Bank"),
             PaymentScreen.clickValidate(),
             billScreenQRCode,
+        ].flat(),
+});
+
+registry.category("web_tour.tours").add("OrderTrackingTour", {
+    test: true,
+    steps: () =>
+        [
+            Chrome.startPoS(),
+            Dialog.confirm("Open Register"),
+            FloorScreen.clickTable("5"),
+            ProductScreen.clickDisplayedProduct("Coca-Cola"),
+            ProductScreen.clickDisplayedProduct("Coca-Cola", true, "2.0"),
+            Chrome.clickPlanButton(),
+            FloorScreen.clickTable("5"),
+            ProductScreen.selectedOrderlineHas("Coca-Cola", "2.0"),
+            ProductScreen.clickNumpad("⌫"),
+            ProductScreen.clickNumpad("1"),
+            ProductScreen.selectedOrderlineHas("Coca-Cola", "1.0"),
+            ProductScreen.clickPayButton(),
+            PaymentScreen.clickPaymentMethod("Bank"),
+            PaymentScreen.clickValidate(),
+        ].flat(),
+});
+registry.category("web_tour.tours").add("CategLabelCheck", {
+    test: true,
+    steps: () =>
+        [
+            Chrome.startPoS(),
+            Dialog.confirm("Open Register"),
+            FloorScreen.clickTable("5"),
+            ProductScreen.clickDisplayedProduct("Test Multi Category Product"),
+            ProductScreen.OrderButtonNotContain("Drinks"),
         ].flat(),
 });

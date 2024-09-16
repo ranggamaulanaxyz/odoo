@@ -54,7 +54,8 @@ class AccountPayment(models.Model):
                 or tx_sudo.payment_method_id
             )
             if (
-                tx_sudo.provider_id.support_refund != 'none'
+                tx_sudo  # The payment was created by a transaction.
+                and tx_sudo.provider_id.support_refund != 'none'
                 and payment_method.support_refund != 'none'
                 and tx_sudo.operation != 'refund'
             ):
@@ -173,7 +174,7 @@ class AccountPayment(models.Model):
             action['res_id'] = refund_tx.id
             action['view_mode'] = 'form'
         else:
-            action['view_mode'] = 'tree,form'
+            action['view_mode'] = 'list,form'
             action['domain'] = [('source_payment_id', '=', self.id)]
         return action
 

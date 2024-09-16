@@ -12,7 +12,7 @@ import { useSequential } from "@mail/utils/common/hooks";
 
 export class ChannelSelector extends Component {
     static components = { TagsList, NavigableList };
-    static props = ["category", "onValidate?", "autofocus?", "multiple?", "close?", "class?"];
+    static props = ["category", "onValidate?", "autofocus?", "multiple?", "close?"];
     static defaultProps = { multiple: true };
     static template = "discuss.ChannelSelector";
 
@@ -30,7 +30,6 @@ export class ChannelSelector extends Component {
                 anchorRef: undefined,
                 position: "bottom-fit",
                 onSelect: (ev, option) => this.onSelect(option),
-                placeholder: _t("Loading"),
                 optionTemplate:
                     this.props.category.id === "channels"
                         ? "discuss.ChannelSelector.channel"

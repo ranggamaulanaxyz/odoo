@@ -1,18 +1,12 @@
 import { Component, onWillRender, useState } from "@odoo/owl";
 import { useDateTimePicker } from "@web/core/datetime/datetime_hook";
-import {
-    areDatesEqual,
-    deserializeDate,
-    deserializeDateTime,
-    formatDate,
-    formatDateTime,
-    today,
-} from "@web/core/l10n/dates";
+import { areDatesEqual, deserializeDate, deserializeDateTime, today } from "@web/core/l10n/dates";
 import { evaluateBooleanExpr } from "@web/core/py_js/py";
 import { _t } from "@web/core/l10n/translation";
 import { registry } from "@web/core/registry";
 import { ensureArray } from "@web/core/utils/arrays";
 import { exprToBoolean } from "@web/core/utils/strings";
+import { formatDate, formatDateTime } from "../formatters";
 import { standardFieldProps } from "../standard_field_props";
 
 /**
@@ -61,6 +55,7 @@ export class DateTimeField extends Component {
             optional: true,
             validate: (props) => ["days", "months", "years", "decades"].includes(props),
         },
+        condensed: { type: Boolean, optional: true },
     };
     static defaultProps = {
         showSeconds: true,
@@ -129,6 +124,7 @@ export class DateTimeField extends Component {
         const dateTimePicker = useDateTimePicker({
             target: "root",
             showSeconds: this.props.showSeconds,
+            condensed: this.props.condensed,
             get pickerProps() {
                 return getPickerProps();
             },
@@ -188,10 +184,11 @@ export class DateTimeField extends Component {
      */
     getFormattedValue(valueIndex) {
         const value = this.values[valueIndex];
+        const { condensed, showSeconds, showTime } = this.props;
         return value
-            ? this.field.type === "date" || !this.props.showTime
-                ? formatDate(value)
-                : formatDateTime(value, { showSeconds: this.props.showSeconds })
+            ? this.field.type === "date"
+                ? formatDate(value, { condensed })
+                : formatDateTime(value, { condensed, showSeconds, showTime })
             : "";
     }
 
@@ -338,6 +335,12 @@ export const dateField = {
                 { label: _t("Decades"), value: "decades" },
             ],
         },
+        {
+            label: _t("Condensed display"),
+            name: "condensed",
+            type: "boolean",
+            help: _t(`Set to true to display days, months (and hours) with unpadded numbers`),
+        },
     ],
     supportedTypes: ["date"],
     extractProps: ({ attrs, options }, dynamicInfo) => ({
@@ -352,6 +355,7 @@ export const dateField = {
         warnFuture: exprToBoolean(options.warn_future),
         minPrecision: options.min_precision,
         maxPrecision: options.max_precision,
+        condensed: options.condensed,
     }),
     fieldDependencies: ({ type, attrs, options }) => {
         const deps = [];
