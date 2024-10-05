@@ -9,6 +9,7 @@ import logging
 import re
 import requests
 import threading
+import uuid
 
 from lxml import etree, html
 from werkzeug import urls
@@ -432,7 +433,7 @@ class Website(models.Model):
 
     def _OLG_api_rpc(self, route, params):
         # For text content generation
-        return self._api_rpc(route, params, 'website.olg_api_endpoint', DEFAULT_OLG_ENDPOINT, timeout=20)
+        return self._api_rpc(route, params, 'website.olg_api_endpoint', DEFAULT_OLG_ENDPOINT, timeout=45)
 
     def get_cta_data(self, website_purpose, website_type):
         return {'cta_btn_text': False, 'cta_btn_href': '/contactus'}
@@ -480,7 +481,7 @@ class Website(models.Model):
         return r
 
     @api.model
-    def configurator_recommended_themes(self, industry_id, palette):
+    def configurator_recommended_themes(self, industry_id, palette, result_nbr_max=3):
         Module = request.env['ir.module.module']
         domain = Module.get_themes_domain()
         domain = AND([[('name', '!=', 'theme_default')], domain])
@@ -488,7 +489,10 @@ class Website(models.Model):
         client_themes_img = {t: get_manifest(t).get('images_preview_theme', {}) for t in client_themes if get_manifest(t)}
         themes_suggested = self._website_api_rpc(
             '/api/website/2/configurator/recommended_themes/%s' % (industry_id if industry_id > 0 else ''),
-            {'client_themes': client_themes_img}
+            {
+                'client_themes': client_themes_img,
+                'result_nbr_max': result_nbr_max,
+            }
         )
         process_svg = self.env['website.configurator.feature']._process_svg
         for theme in themes_suggested:
@@ -675,9 +679,81 @@ class Website(models.Model):
         IrQweb = self.env['ir.qweb'].with_context(website_id=website.id, lang=website.default_lang_id.code)
         snippets_cache = {}
         translated_content = {}
+        hashes_to_tags_and_attributes = {}
+        html_string_to_wrapping_tags = {}
 
-        def _compute_placeholder(term):
-            return xml_translate.get_text_content(term).strip()
+        def _compute_placeholder(html_string):
+            """
+            Transforms an HTML string by converting specific HTML tags into a
+            custom pseudo-markdown format.
+
+            The function wraps the input `html_string` with a root `<div>`
+            element, parses it into a tree, and iterates through the HTML
+            elements. It replaces recognized HTML tags with a custom pseudo-
+            markdown format like `#[text](hash_value)`, where `text` is the
+            content of the tag and `hash_value` is the key to fetch the tag name
+            and the attributes.
+
+            Args:
+                html_string (str): The input HTML string to be transformed.
+
+            Returns:
+                str: The transformed string with HTML tags replaced by
+                     pseudo-markdown.
+            """
+            tree = etree.fromstring(f'<div>{html_string}</div>')
+
+            # Identifying one or more wrapping tags that enclose the entire HTML
+            # content e.g., <strong><em>text ...</em></strong>. Store them to
+            # reapply them after processing with chatGPT.
+            wrapping_html = []
+            for element in tree.iter():
+                wrapping_html.append({"tag": element.tag, "attr": element.attrib})
+                if len(element) != 1 \
+                        or (element.text and element.text.strip()) \
+                        or (element[-1].tail and element[-1].tail.strip()):
+                    break
+            # Remove the wrapping element used for parsing into a tree
+            wrapping_html = wrapping_html[1:]
+
+            # Loop through all nodes, ignoring wrapping ones, to mark them with
+            # a pseudo-markdown identifier if they are leaf nodes.
+            nb_tags_to_skip = len(wrapping_html) + 1
+            for cursor, element in enumerate(tree.iter()):
+                if cursor < nb_tags_to_skip or len(element) > 0:
+                    continue
+
+                # Generate a unique hash based on the element's text, tag
+                # and attributes.
+                attrib_string = ','.join(f'{key}={value}' for key, value in sorted(element.attrib.items()))
+                combined_string = f'{element.text or ""}-{element.tag}-{attrib_string}'
+                unique_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, combined_string)
+                hash_value = unique_uuid.hex[:12]
+
+                hashes_to_tags_and_attributes[hash_value] = {"tag": element.tag, "attr": element.attrib}
+                element.text = f'#[{element.text or "0"}]({hash_value})'
+
+            res = tree.xpath('string()')
+
+            # If there is at least one wrapping tag, save the way it needs to
+            # be re-applied.
+            if wrapping_html:
+                tags = [
+                    (
+                        f'<{tag}{" " if attrs else ""}{attrs}>',
+                        f'</{tag}>'
+                    )
+                    for el in wrapping_html
+                    for tag, attrs in [(el["tag"], " ".join([f'{k}="{v}"' for k, v in el["attr"].items()]))]
+                ]
+                opening_tags, closing_tags = zip(*tags)
+                html_string_to_wrapping_tags[html_string] = f'{"".join(opening_tags)}$0{"".join(closing_tags[::-1])}'
+
+            # Note that `get_text_content` here is still needed despite the use
+            # of `string()` in the XPath expression above. Indeed, it allows to
+            # strip newlines and double-spaces, which would confuse IAP (without
+            # this, it does not perform any replacement for some reason).
+            return xml_translate.get_text_content(res.strip())
 
         def _render_snippet(key):
             # Using this avoids rendering the same snippet multiple times
@@ -698,7 +774,11 @@ class Website(models.Model):
                     {text_generation_target_lang: str(render)},
                 )
                 # Remove all numeric keys.
-                translation_dictionary = {k: v for k, v in translation_dictionary.items() if not _compute_placeholder(k).isnumeric()}
+                translation_dictionary = {
+                    k: v
+                    for k, v in translation_dictionary.items()
+                    if not xml_translate.get_text_content(k).strip().isnumeric()
+                }
                 for from_lang_term, to_lang_terms in translation_dictionary.items():
                     translated_content[from_lang_term] = to_lang_terms[text_generation_target_lang]
 
@@ -745,6 +825,58 @@ class Website(models.Model):
         else:
             logger.info("Skip AI text generation because translation coverage is too low (%s%%)", translated_ratio * 100)
 
+        def _format_replacement(html_string):
+            """
+            Reapplies original HTML formatting by replacing pseudo-markdown
+            with corresponding HTML tags.
+
+            The function searches for the replacement of the given HTML string
+            then processes it by identifying and replacing pseudo-markdown
+            in the form of `#[string](hash)` with actual HTML tags. It uses
+            stored tag and attribute information and reconstructs the correct
+            HTML structure. Additionally, it handles any wrapping tags that was
+            identified for the given HTML.
+
+            Args:
+                html_string (str): The source HTML whose replacement has to
+                    receive original formatting
+
+            Returns:
+                str: The text with HTML tags re-applied.
+            """
+            replacement = generated_content.get(_compute_placeholder(html_string))
+            if not replacement:
+                return html_string
+
+            # Replace #[string](hash) with <tag>...</tag> based on stored tag
+            # and attribute information
+            def _replace_tag(match):
+                content = match.group(1)  # The string inside the square brackets
+                hash_value = match.group(2)  # The hash value inside the parentheses
+                if hash_value not in hashes_to_tags_and_attributes:
+                    return content
+
+                tag = hashes_to_tags_and_attributes[hash_value]['tag']
+                attr = hashes_to_tags_and_attributes[hash_value]['attr']
+                attr_string = (" " + " ".join([f'{key}="{value}"' for key, value in attr.items()])) if attr else ''
+
+                # Handle self-closing tag if content is "0"
+                if content == "0":
+                    return f'<{tag}{attr_string}/>'
+
+                return f'<{tag}{attr_string}>{content}</{tag}>'
+
+            # Use regular expression to find instances of #[string](hash) and
+            # replace them
+            tag_pattern = r'#\[([^\]]+)\]\(([^)]+)\)'
+            replacement = re.sub(tag_pattern, _replace_tag, replacement)
+
+            # Handle possible wrapping tags identified
+            if html_string in html_string_to_wrapping_tags:
+                replacement = html_string_to_wrapping_tags[html_string].replace('$0', replacement)
+
+            return replacement
+
         # Configure the pages
         for page_code in requested_pages:
             snippet_list = configurator_snippets.get(page_code, [])
@@ -757,18 +889,19 @@ class Website(models.Model):
             for i, snippet in enumerate(snippet_list, start=1):
                 try:
                     render, placeholders = _render_snippet(f'website.configurator_{page_code}_{snippet}')
-
                     # Fill rendered block with AI text
-                    render = xml_translate(
-                        lambda x: generated_content.get(_compute_placeholder(x), x),
-                        render
-                    )
+                    render = xml_translate(_format_replacement, render)
 
                     el = html.fromstring(render)
 
                     # Add the data-snippet attribute to identify the snippet
                     # for compatibility code
                     el.attrib['data-snippet'] = snippet
+
+                    # Remove the previews needed for the snippets dialog
+                    dialog_preview_els = el.find_class('s_dialog_preview')
+                    for preview_el in dialog_preview_els:
+                        preview_el.getparent().remove(preview_el)
 
                     # Tweak the shape of the first snippet to connect it
                     # properly with the header color in some themes
@@ -853,6 +986,8 @@ class Website(models.Model):
         try:
             # TODO: Remove this try/except, safety net because it was merged
             #       to close to OXP.
+            fallback_create_missing_industry_image('s_intro_pill_default_image', 'library_image_10')
+            fallback_create_missing_industry_image('s_intro_pill_default_image_2', 'library_image_14')
             fallback_create_missing_industry_image('s_banner_default_image_2', 's_image_text_default_image')
             fallback_create_missing_industry_image('s_banner_default_image_3', 's_product_list_default_image_1')
             fallback_create_missing_industry_image('s_striped_top_default_image', 's_picture_default_image')
@@ -878,6 +1013,16 @@ class Website(models.Model):
             fallback_create_missing_industry_image('s_sidegrid_default_image_4', 'library_image_05')
             fallback_create_missing_industry_image('s_cta_box_default_image', 'library_image_02')
             fallback_create_missing_industry_image('s_image_punchy_default_image', 's_cover_default_image')
+            fallback_create_missing_industry_image('s_image_frame_default_image', 's_carousel_default_image_2')
+            fallback_create_missing_industry_image('s_carousel_intro_default_image_1', 's_cover_default_image')
+            fallback_create_missing_industry_image('s_carousel_intro_default_image_2', 's_image_text_default_image')
+            fallback_create_missing_industry_image('s_carousel_intro_default_image_3', 's_text_image_default_image')
+
+            fallback_create_missing_industry_image('s_framed_intro_default_image', 's_cover_default_image')
+            fallback_create_missing_industry_image('s_wavy_grid_default_image_1', 's_cover_default_image')
+            fallback_create_missing_industry_image('s_wavy_grid_default_image_2', 's_image_text_default_image')
+            fallback_create_missing_industry_image('s_wavy_grid_default_image_3', 's_text_image_default_image')
+            fallback_create_missing_industry_image('s_wavy_grid_default_image_4', 's_carousel_default_image_1')
 
         except Exception:
             pass
@@ -1098,11 +1243,11 @@ class Website(models.Model):
             search_criteria.append((url, website.website_domain()))
 
         # Search the URL in every relevant field
-        html_fields_attributes = self._get_html_fields_attributes() + [
-            ('website.menu', 'website_menu', 'url', False),
+        html_fields = self._get_html_fields() + [
+            ('website.menu', 'url'),
         ]
-        for model, _table, column, _translate in html_fields_attributes:
-            Model = self.env[model]
+        for model_name, field_name in html_fields:
+            Model = self.env[model_name]
             if not Model.has_access('read'):
                 continue
 
@@ -1110,21 +1255,21 @@ class Website(models.Model):
             domains = []
             for url, website_domain in search_criteria:
                 domains.append(AND([
-                    [(column, 'ilike', url)],
+                    [(field_name, 'ilike', url)],
                     website_domain if hasattr(Model, 'website_id') else [],
                 ]))
 
             dependency_records = Model.search(OR(domains))
-            if model == 'ir.ui.view':
+            if model_name == 'ir.ui.view':
                 dependency_records = _handle_views_and_pages(dependency_records)
             if dependency_records:
-                model_name = self.env['ir.model']._display_name_for([model])[0]['display_name']
-                field_name = Model.fields_get()[column]['string']
+                model_name = self.env['ir.model']._display_name_for([model_name])[0]['display_name']
+                field_string = Model.fields_get()[field_name]['string']
                 dependencies.setdefault(model_name, [])
                 dependencies[model_name] += [{
-                    'field_name': field_name,
+                    'field_name': field_string,
                     'record_name': rec.display_name,
-                    'link': 'website_url' in rec and rec.website_url or f'/odoo/{model}/{rec.id}',
+                    'link': 'website_url' in rec and rec.website_url or f'/odoo/{model_name}/{rec.id}',
                     'model_name': model_name,
                 } for rec in dependency_records]
 
@@ -1562,18 +1707,17 @@ class Website(models.Model):
     def _get_cached(self, field):
         return self._get_cached_values()[field]
 
-    def _get_html_fields_attributes_blacklist(self):
+    def _get_html_fields_blacklist(self):
         return (
             'mail.message', 'mail.activity', 'digest.tip',
         )
 
-    def _get_html_fields_attributes(self):
-        html_fields = [('ir.ui.view', 'ir_ui_view', 'arch_db', True)]
+    def _get_html_fields(self):
+        html_fields = [('ir.ui.view', 'arch_db')]
         cr = self.env.cr
         cr.execute("""
             SELECT f.model,
-                   f.name,
-                   f.translate
+                   f.name
               FROM ir_model_fields f
               JOIN ir_model m
                 ON m.id = f.model_id
@@ -1582,14 +1726,20 @@ class Website(models.Model):
                AND m.transient = false
                AND f.model NOT LIKE 'ir.actions%%'
                AND f.model NOT IN %s
-        """, ([self._get_html_fields_attributes_blacklist()]))
-        for model, name, translate in cr.fetchall():
-            table = self.env[model]._table
-            if sqltools.table_exists(cr, table) and sqltools.column_exists(cr, table, name):
-                html_fields.append((model, table, name, translate))
+        """, ([self._get_html_fields_blacklist()]))
+        for model_name, field_name, in cr.fetchall():
+            try:
+                model = self.env[model_name]
+                field = model._fields[field_name]
+                if model._abstract or model._table_query is not None or not field.store:
+                    continue
+            except KeyError:
+                continue
+
+            html_fields.append((model_name, field_name))
         return html_fields
 
-    def _is_snippet_used(self, snippet_module, snippet_id, asset_version, asset_type, html_fields_attributes):
+    def _is_snippet_used(self, snippet_module, snippet_id, asset_version, asset_type, html_fields):
         snippet_occurences = []
         # Check snippet template definition to avoid disabling its related assets.
         # This special case is needed because snippet template definitions do not
@@ -1602,18 +1752,18 @@ class Website(models.Model):
         if self._check_snippet_used(snippet_occurences, asset_type, asset_version):
             return True
 
+        html_fields = [(self.env[model_name], field_name) for model_name, field_name in html_fields]
         # As well as every snippet dropped in html fields
-        result = self.env.execute_query(SQL(" UNION ").join(
-            SQL(
-                "SELECT regexp_matches(%s%s, %s, 'g') FROM %s",
-                SQL.identifier(column),
-                SQL("->>'en_US'") if translate else SQL(),
+        self.env.cr.execute(SQL(" UNION ").join(
+            SQL("SELECT regexp_matches(%s, %s, 'g') FROM %s",
+                model._field_to_sql(model._table, field_name),
                 f'<([^>]*data-snippet="{snippet_id}"[^>]*)>',
-                SQL.identifier(table),
+                SQL.identifier(model._table)
             )
-            for _model, table, column, translate in html_fields_attributes
+            for model, field_name in html_fields
         ))
-        snippet_occurences = [r[0][0] for r in result]
+
+        snippet_occurences = [r[0][0] for r in self.env.cr.fetchall()]
         return self._check_snippet_used(snippet_occurences, asset_type, asset_version)
 
     def _check_snippet_used(self, snippet_occurences, asset_type, asset_version):
@@ -1641,7 +1791,7 @@ class Website(models.Model):
         snippet_re = re.compile(r'(\w*)\/.*\/snippets\/(\w*)\/(\d{3})(?:_\w*)?\.(js|scss)')
         # regex will match /module/static/[.../]/snippets/snippet_id/XXX[_variable].asset_type
         # _variable is not kept since only module, snippet_id, asset_version (XXX), asset_type are relevant
-        html_fields_attributes = self._get_html_fields_attributes()
+        html_fields = self._get_html_fields()
         snippet_used = {}
         for snippet_asset in snippet_assets:
             match = snippet_re.match(snippet_asset.path)
@@ -1652,7 +1802,7 @@ class Website(models.Model):
                 asset_type = 'css'
             key = (snippet_id, asset_version, asset_type)  # module is not relevant, we want the first one in the asset id order to filter module extension
             if key not in snippet_used:
-                snippet_used[key] = self._is_snippet_used(snippet_module, snippet_id, asset_version, asset_type, html_fields_attributes)
+                snippet_used[key] = self._is_snippet_used(snippet_module, snippet_id, asset_version, asset_type, html_fields)
             is_snippet_used = snippet_used[key]
             if is_snippet_used != snippet_asset.active:
                 snippet_asset.active = is_snippet_used
@@ -2014,3 +2164,17 @@ class Website(models.Model):
                         if isinstance(value, str):
                             value = value.lower()
                             yield from re.findall(match_pattern, value)
+
+    def _allConsentsGranted(self):
+        """
+        Checks if all (cookies) consents have been granted. Note that in the
+        case no cookies bar has been enabled, this considers that full consent
+        has been immediately given. Indeed, in that case, we suppose that the
+        user implemented his own consent behavior through custom code / app.
+        That custom code / app is able to override this function as desired and
+        xpath the `tracking_code_config` script in `website.layout`.
+
+        :return: True if all consents have been granted, False otherwise
+        """
+        self.ensure_one()
+        return not self.cookies_bar or self.env['ir.http']._is_allowed_cookie('optional')

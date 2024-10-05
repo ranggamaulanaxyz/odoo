@@ -8,12 +8,14 @@ import { registry } from "@web/core/registry";
 
 registry.category("web_tour.tours").add("ChromeTour", {
     test: true,
+    checkDelay: 50,
     steps: () =>
         [
             Chrome.startPoS(),
             Dialog.confirm("Open Register"),
             Chrome.clickMenuButton(),
             Chrome.clickMenuDropdownOption("Cash In/Out"),
+            Chrome.fillTextArea(".cash-reason", "MOBT"),
             Dialog.confirm(),
             Chrome.clickMenuButton(),
 
@@ -23,7 +25,7 @@ registry.category("web_tour.tours").add("ChromeTour", {
             TicketScreen.checkStatus("-0001", "Ongoing"),
 
             // Order 2 is at Payment Screen
-            TicketScreen.clickNewTicket(),
+            Chrome.createFloatingOrder(),
             ProductScreen.addOrderline("Monitor Stand", "3", "4", "12.0"),
             ProductScreen.clickPayButton(),
             PaymentScreen.isShown(),
@@ -31,7 +33,7 @@ registry.category("web_tour.tours").add("ChromeTour", {
             TicketScreen.checkStatus("-0002", "Payment"),
 
             // Order 3 is at Receipt Screen
-            TicketScreen.clickNewTicket(),
+            Chrome.createFloatingOrder(),
             ProductScreen.addOrderline("Whiteboard Pen", "5", "6", "30.0"),
             ProductScreen.clickPayButton(),
             PaymentScreen.clickPaymentMethod("Bank", true, { remaining: "0.0" }),
@@ -88,14 +90,13 @@ registry.category("web_tour.tours").add("ChromeTour", {
             ProductScreen.orderIsEmpty(),
             Chrome.clickMenuOption("Orders"),
             TicketScreen.deleteOrder("-0004"),
-            TicketScreen.deleteOrder("-0001"),
 
             // After deleting order 1 above, order 2 became
             // the 2nd-row order and it has payment status
             TicketScreen.nthRowContains(2, "Payment"),
             TicketScreen.deleteOrder("-0002"),
             Dialog.confirm(),
-            TicketScreen.clickNewTicket(),
+            Chrome.createFloatingOrder(),
 
             // Invoice an order
             ProductScreen.addOrderline("Whiteboard Pen", "5", "6"),
@@ -111,6 +112,7 @@ registry.category("web_tour.tours").add("ChromeTour", {
 
 registry.category("web_tour.tours").add("OrderModificationAfterValidationError", {
     test: true,
+    checkDelay: 50,
     steps: () =>
         [
             Chrome.startPoS(),

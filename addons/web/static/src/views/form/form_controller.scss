@@ -169,13 +169,16 @@
                 flex: 1 1 auto;
                 width: 0!important; // 3rd flex argument does not work with input (must be auto and real width 0)
 
-                &.o_field_boolean, &.o_priority {
+                &.o_field_boolean, &.o_field_boolean_toggle, &.o_priority {
                     flex: 0 0 auto;
                     width: auto!important;
                 }
             }
             .o_field_many2one_selection {
                 width: 100% !important;
+            }
+            .fb-mincontent {
+                flex-basis: min-content !important;
             }
         }
     }
@@ -324,6 +327,12 @@
             --fieldWidget-margin-bottom: 0;
 
             align-self: flex-start;
+
+            &:first-child:last-child {
+                @include media-breakpoint-down(md) {
+                    width: 100%;
+                }
+            }
         }
     }
 
@@ -916,7 +925,8 @@
 
     // One2Many List views
     .o_field_widget .o_list_renderer {
-        --ListRenderer-thead-bg-color:  #{$o-view-background-color};
+        --ListRenderer-thead-bg-color: #{$o-view-background-color};
+        --ListRenderer-thead-bg-active-color: #{$o-form-lightsecondary};
         --ListRenderer-tfoot-bg-color: #{$o-view-background-color};
 
         margin-bottom: 10px;

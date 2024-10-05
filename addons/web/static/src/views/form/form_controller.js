@@ -24,22 +24,25 @@ import { Field } from "@web/views/fields/field";
 import { useModel } from "@web/model/model";
 import { addFieldDependencies, extractFieldsFromArchInfo } from "@web/model/relational_model/utils";
 import { useViewCompiler } from "@web/views/view_compiler";
-import { CogMenu } from "@web/search/cog_menu/cog_menu";
+import { Widget } from "@web/views/widgets/widget";
 import { STATIC_ACTIONS_GROUP_NUMBER } from "@web/search/action_menus/action_menus";
 
 import { ButtonBox } from "./button_box/button_box";
 import { FormCompiler } from "./form_compiler";
 import { FormErrorDialog } from "./form_error_dialog/form_error_dialog";
 import { FormStatusIndicator } from "./form_status_indicator/form_status_indicator";
+import { StatusBarDropdownItems } from "./status_bar_dropdown_items/status_bar_dropdown_items";
+import { FormCogMenu } from "./form_cog_menu/form_cog_menu";
 
 import {
     Component,
     onError,
     onMounted,
     onRendered,
+    onWillUnmount,
     status,
+    useComponent,
     useEffect,
-    useExternalListener,
     useRef,
     useState,
 } from "@odoo/owl";
@@ -109,6 +112,16 @@ export async function loadSubViews(fieldNodes, fields, context, resModel, viewSe
     }
 }
 
+export function useFormViewInDialog() {
+    const component = useComponent();
+    onMounted(() => {
+        component.env.bus.trigger("FORM-CONTROLLER:FORM-IN-DIALOG:ADD");
+    });
+
+    onWillUnmount(() => {
+        component.env.bus.trigger("FORM-CONTROLLER:FORM-IN-DIALOG:REMOVE");
+    });
+}
 // -----------------------------------------------------------------------------
 
 export class FormController extends Component {
@@ -119,7 +132,9 @@ export class FormController extends Component {
         ButtonBox,
         ViewButton,
         Field,
-        CogMenu,
+        CogMenu: FormCogMenu,
+        StatusBarDropdownItems,
+        Widget,
     };
 
     static props = {
@@ -166,6 +181,11 @@ export class FormController extends Component {
         if (this.env.inDialog) {
             this.display.controlPanel = false;
         }
+
+        this.formInDialog = 0;
+
+        useBus(this.env.bus, "FORM-CONTROLLER:FORM-IN-DIALOG:ADD", () => this.formInDialog++);
+        useBus(this.env.bus, "FORM-CONTROLLER:FORM-IN-DIALOG:REMOVE", () => this.formInDialog--);
 
         const beforeFirstLoad = async () => {
             await loadSubViews(
@@ -235,6 +255,16 @@ export class FormController extends Component {
             this.buttonBoxTemplate = buttonBoxTemplates.ButtonBox;
         }
 
+        const xmlDocHeader = this.archInfo.xmlDoc.querySelector("header");
+        if (xmlDocHeader) {
+            const { StatusBarDropdownItems } = useViewCompiler(
+                this.props.Compiler || FormCompiler,
+                { StatusBarDropdownItems: xmlDocHeader },
+                { isSubView: true, asDropdownItems: true }
+            );
+            this.statusBarDropdownItemsTemplate = StatusBarDropdownItems;
+        }
+
         this.rootRef = useRef("root");
         useViewButtons(this.rootRef, {
             beforeExecuteAction: this.beforeExecuteActionButton.bind(this),
@@ -252,6 +282,7 @@ export class FormController extends Component {
 
         useSetupAction({
             rootRef: this.rootRef,
+            beforeVisibilityChange: () => this.beforeVisibilityChange(),
             beforeLeave: () => this.beforeLeave(),
             beforeUnload: (ev) => this.beforeUnload(ev),
             getLocalState: () => {
@@ -302,12 +333,8 @@ export class FormController extends Component {
             );
         }
 
-        if (!this.env.inDialog) {
-            useExternalListener(document, "visibilitychange", () => {
-                if (document.visibilityState === "hidden") {
-                    this.model.root.save();
-                }
-            });
+        if (this.env.inDialog) {
+            useFormViewInDialog();
         }
     }
 
@@ -428,6 +455,12 @@ export class FormController extends Component {
                 });
             }
             throw e;
+        }
+    }
+
+    beforeVisibilityChange() {
+        if (document.visibilityState === "hidden" && this.formInDialog === 0) {
+            return this.model.root.save();
         }
     }
 

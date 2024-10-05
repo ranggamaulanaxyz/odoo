@@ -10,7 +10,6 @@ import {
     redo,
 } from "@spreadsheet/../tests/helpers/commands";
 import {
-    getBorders,
     getCell,
     getCellContent,
     getCellFormula,
@@ -29,10 +28,13 @@ import * as spreadsheet from "@odoo/o-spreadsheet";
 import {
     defineSpreadsheetActions,
     defineSpreadsheetModels,
+    generateListDefinition,
     getBasicServerData,
 } from "@spreadsheet/../tests/helpers/data";
+
 import { waitForDataLoaded } from "@spreadsheet/helpers/model";
-const { DEFAULT_LOCALE } = spreadsheet.constants;
+const { DEFAULT_LOCALE, PIVOT_TABLE_CONFIG } = spreadsheet.constants;
+const { toZone } = spreadsheet.helpers;
 
 describe.current.tags("headless");
 defineSpreadsheetModels();
@@ -70,8 +72,8 @@ test("Return display_name of many2one field", async () => {
 
 test("Boolean fields are correctly formatted", async () => {
     const { model } = await createSpreadsheetWithList({ columns: ["bar"] });
-    expect(getCellValue(model, "A2")).toBe("TRUE");
-    expect(getCellValue(model, "A5")).toBe("FALSE");
+    expect(getCellValue(model, "A2")).toBe(true);
+    expect(getCellValue(model, "A5")).toBe(false);
 });
 
 test("properties field displays property display names", async () => {
@@ -97,7 +99,7 @@ test("Can display a field which is not in the columns", async function () {
     expect(getCellValue(model, "A1")).toBe("Loading...");
     await waitForDataLoaded(model); // Await for batching collection of missing fields
     await animationFrame();
-    expect(getCellValue(model, "A1")).toBe("TRUE");
+    expect(getCellValue(model, "A1")).toBe(true);
 });
 
 test("Can remove a list with undo after editing a cell", async function () {
@@ -196,6 +198,14 @@ test("can get a listId from cell formula with other numerical values", async fun
     const sheetId = model.getters.getActiveSheetId();
     const listId = model.getters.getListIdFromPosition({ sheetId, col: 0, row: 0 });
     expect(listId).toBe("1");
+});
+
+test("can get a listId from a vectorized cell formula", async function () {
+    const { model } = await createSpreadsheetWithList();
+    const sheetId = model.getters.getActiveSheetId();
+    setCellContent(model, "G1", '=LIST(1,SEQUENCE(10),"foo")');
+    expect(model.getters.getListIdFromPosition({ sheetId, col: 0, row: 0 })).toBe("1");
+    expect(model.getters.getListIdFromPosition({ sheetId, col: 0, row: 5 })).toBe("1");
 });
 
 test("List datasource is loaded with correct linesNumber", async function () {
@@ -478,7 +488,7 @@ test("can edit list domain", async () => {
     const { model } = await createSpreadsheetWithList();
     const [listId] = model.getters.getListIds();
     expect(model.getters.getListDefinition(listId).domain).toEqual([]);
-    expect(getCellValue(model, "B2")).toBe("TRUE");
+    expect(getCellValue(model, "B2")).toBe(true);
     model.dispatch("UPDATE_ODOO_LIST_DOMAIN", {
         listId,
         domain: [["foo", "in", [55]]],
@@ -490,7 +500,7 @@ test("can edit list domain", async () => {
     await waitForDataLoaded(model);
     expect(model.getters.getListDefinition(listId).domain).toEqual([]);
     await waitForDataLoaded(model);
-    expect(getCellValue(model, "B2")).toBe("TRUE");
+    expect(getCellValue(model, "B2")).toBe(true);
     model.dispatch("REQUEST_REDO");
     expect(model.getters.getListDefinition(listId).domain).toEqual([["foo", "in", [55]]]);
     await waitForDataLoaded(model);
@@ -504,18 +514,18 @@ test("can edit list sorting", async () => {
     // prettier-ignore
     const initialGrid = [
         ["Foo", "Bar",   "Date", "Probability", "Money!"],
-        [12,    "TRUE",  42474,  10,                74.4],
-        [1,     "TRUE",  42669,  11,                74.8],
-        [17,    "TRUE",  42719,  95,                   4],
-        [2,     "FALSE", 42715,  15,                1000],
+        [12,     true,   42474,  10,                74.4],
+        [1,      true,   42669,  11,                74.8],
+        [17,     true,   42719,  95,                   4],
+        [2,      false,  42715,  15,                1000],
     ]
     // prettier-ignore
     const orderedGrid = [
         ["Foo", "Bar",   "Date", "Probability", "Money!"],
-        [17,    "TRUE",  42719,   95,                  4],
-        [12,    "TRUE",  42474,   10,               74.4],
-        [1,     "TRUE",  42669,   11,               74.8],
-        [2,     "FALSE", 42715,   15,               1000],
+        [17,     true,   42719,   95,                  4],
+        [12,     true,   42474,   10,               74.4],
+        [1,      true,   42669,   11,               74.8],
+        [2,      false,  42715,   15,               1000],
     ]
     const [listId] = model.getters.getListIds();
     expect(model.getters.getListDefinition(listId).orderBy).toEqual([]);
@@ -718,6 +728,41 @@ test("fetch all and only required fields", async function () {
     expect.verifySteps(["data-fetched"]);
 });
 
+test("fetch all required positions, including the evaluated ones", async function () {
+    const spreadsheetData = {
+        sheets: [
+            {
+                id: "sheet1",
+                cells: {
+                    A1: { content: '=ODOO.LIST(1, 11, "foo")' },
+                    A2: { content: '=ODOO.LIST(1, A3, "foo")' },
+                    A3: { content: "111" },
+                },
+            },
+        ],
+        lists: {
+            1: {
+                id: 1,
+                columns: ["foo"],
+                domain: [],
+                model: "partner",
+                orderBy: [],
+                context: {},
+            },
+        },
+    };
+    await createModelWithDataSource({
+        spreadsheetData,
+        mockRPC: function (route, args) {
+            if (args.method === "web_search_read" && args.model === "partner") {
+                expect.step("data-fetched");
+                expect(args.kwargs.limit).toBe(111);
+            }
+        },
+    });
+    expect.verifySteps(["data-fetched"]);
+});
+
 test("list with both a monetary field and the related currency field 1", async function () {
     const { model } = await createSpreadsheetWithList({
         columns: ["pognon", "currency_id"],
@@ -872,25 +917,6 @@ test("Load list spreadsheet with models that cannot be accessed", async function
     expect(cell.message).toBe("ya done!");
 });
 
-test("Cells in the list header zone have borders", async function () {
-    const { model } = await createSpreadsheetWithList({
-        linesNumber: 4,
-    });
-    const leftBorder = { left: { style: "thin", color: "#2D7E84" } };
-    const rightBorder = { right: { style: "thin", color: "#2D7E84" } };
-    const topBorder = { top: { style: "thin", color: "#2D7E84" } };
-    const bottomBorder = { bottom: { style: "thin", color: "#2D7E84" } };
-    expect(getBorders(model, "A1")).toEqual({ ...topBorder, ...bottomBorder, ...leftBorder });
-    expect(getBorders(model, "B1")).toEqual({ ...topBorder, ...bottomBorder });
-    expect(getBorders(model, "D1")).toEqual({
-        ...topBorder,
-        ...bottomBorder,
-        ...rightBorder,
-    });
-    expect(getBorders(model, "A5")).toEqual({ ...leftBorder, ...bottomBorder });
-    expect(getBorders(model, "D5")).toEqual({ ...rightBorder, ...bottomBorder });
-});
-
 test("Can duplicate a list", async () => {
     const { model } = await createSpreadsheetWithList();
     const [listId] = model.getters.getListIds();
@@ -953,4 +979,29 @@ test("isListUnused getter", async () => {
 
     model.dispatch("REQUEST_UNDO", {});
     expect(model.getters.isListUnused("1")).toBe(true);
+});
+
+test("INSERT_ODOO_LIST_WITH_TABLE adds a table that maches the list dimension", async function () {
+    const { model } = await createSpreadsheetWithList({
+        linesNumber: 4,
+    });
+    const sheetId = model.getters.getActiveSheetId();
+    const { columns: currentColumns, model: resModel } = model.getters.getListDefinition("1");
+    const col = 0;
+    const row = 19;
+    const threshold = 5;
+    const { definition, columns } = generateListDefinition(resModel, currentColumns);
+    model.dispatch("INSERT_ODOO_LIST_WITH_TABLE", {
+        sheetId,
+        col,
+        row,
+        id: model.getters.getNextListId(),
+        definition,
+        linesNumber: threshold,
+        columns,
+    });
+    const table = model.getters.getTable({ sheetId, col, row });
+    expect(table.range.zone).toEqual(toZone("A20:D25"));
+    expect(table.type).toBe("static");
+    expect(table.config).toEqual({ ...PIVOT_TABLE_CONFIG, firstColumn: false });
 });

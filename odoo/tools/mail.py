@@ -9,7 +9,8 @@ import random
 import re
 import socket
 import time
-from email.utils import getaddresses
+import email.utils
+from email.utils import getaddresses as orig_getaddresses
 from urllib.parse import urlparse
 import html as htmllib
 
@@ -40,6 +41,17 @@ __all__ = [
 
 _logger = logging.getLogger(__name__)
 
+
+# disable strict mode when present: we rely on original non-strict
+# parsing, and we know that it isn't reliable, that ok.
+# cfr python/cpython@4a153a1d3b18803a684cd1bcc2cdf3ede3dbae19
+if hasattr(email.utils, 'supports_strict_parsing'):
+    def getaddresses(fieldvalues):
+        return orig_getaddresses(fieldvalues, strict=False)
+else:
+    getaddresses = orig_getaddresses
+
+
 #----------------------------------------------------------
 # HTML Sanitizer
 #----------------------------------------------------------
@@ -48,7 +60,7 @@ safe_attrs = defs.safe_attrs | frozenset(
     ['style',
      'data-o-mail-quote', 'data-o-mail-quote-node',  # quote detection
      'data-oe-model', 'data-oe-id', 'data-oe-field', 'data-oe-type', 'data-oe-expression', 'data-oe-translation-source-sha', 'data-oe-nodeid',
-     'data-last-history-steps', 'data-oe-protected', 'data-embedded', 'data-embedded-editable', 'data-embedded-props',
+     'data-last-history-steps', 'data-oe-protected', 'data-embedded', 'data-embedded-editable', 'data-embedded-props', 'data-oe-version',
      'data-oe-transient-content', 'data-behavior-props', 'data-prop-name',  # legacy editor
      'data-publish', 'data-id', 'data-res_id', 'data-interval', 'data-member_id', 'data-scroll-background-ratio', 'data-view-id',
      'data-class', 'data-mimetype', 'data-original-src', 'data-original-id', 'data-gl-filter', 'data-quality', 'data-resize-width',

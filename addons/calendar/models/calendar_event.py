@@ -24,7 +24,7 @@ from odoo.addons.calendar.models.calendar_recurrence import (
 )
 from odoo.tools.translate import _
 from odoo.tools.misc import get_lang
-from odoo.tools import html2plaintext, is_html_empty, single_email_re
+from odoo.tools import html2plaintext, html_sanitize, is_html_empty, single_email_re
 from odoo.exceptions import UserError, ValidationError
 
 _logger = logging.getLogger(__name__)
@@ -770,13 +770,7 @@ class Meeting(models.Model):
         grouped_fields = {group_field.split(':')[0] for group_field in groupby + fields_aggregates}
         private_fields = grouped_fields - self._get_public_fields()
         if not self.env.su and private_fields:
-            # Sub query user settings from calendars that are not private ('public' and 'confidential').
-            public_calendars_settings = self.env['res.users.settings'].sudo()._search([('calendar_default_privacy', '!=', 'private')])
-            # display public, confidential events and events with default privacy when owner's default privacy is not private
-            domain = AND([domain, [
-                '|', '|', '|', ('privacy', '=', 'public'), ('privacy', '=', 'confidential'), ('user_id', '=', self.env.user.id),
-                '&', ('privacy', '=', False), ('user_id.res_users_settings_id', 'in', public_calendars_settings)
-            ]])
+            domain = AND([domain, self._get_default_privacy_domain()])
             return super(Meeting, self).read_group(domain, fields, groupby, offset=offset, limit=limit, orderby=orderby, lazy=lazy)
         return super(Meeting, self).read_group(domain, fields, groupby, offset=offset, limit=limit, orderby=orderby, lazy=lazy)
 
@@ -887,6 +881,15 @@ class Meeting(models.Model):
             ])
             recurrent_events_without_channel.videocall_channel_id = videocall_channel
         return videocall_channel
+
+    def _get_default_privacy_domain(self):
+        # Sub query user settings from calendars that are not private ('public' and 'confidential').
+        public_calendars_settings = self.env['res.users.settings'].sudo()._search([('calendar_default_privacy', '!=', 'private')])
+        # display public, confidential events and events with default privacy when owner's default privacy is not private
+        return [
+            '|', '|', '|', ('privacy', '=', 'public'), ('privacy', '=', 'confidential'), ('user_id', '=', self.env.user.id),
+            '&', ('privacy', '=', False), ('user_id.res_users_settings_id', 'in', public_calendars_settings)
+        ]
 
     # ------------------------------------------------------------
     # ACTIONS
@@ -1390,7 +1393,7 @@ class Meeting(models.Model):
             event.add('dtstart').value = ics_datetime(meeting.start, meeting.allday)
             event.add('dtend').value = ics_datetime(meeting.stop, meeting.allday)
             event.add('summary').value = meeting._get_customer_summary()
-            description = meeting._get_customer_description()
+            description = html2plaintext(meeting._get_customer_description())
             if description:
                 event.add('description').value = description
             if meeting.location:
@@ -1429,8 +1432,8 @@ class Meeting(models.Model):
         return result
 
     def _get_customer_description(self):
-        """:return (str): The description to include in calendar exports"""
-        return html2plaintext(self.description) if self.description else ''
+        """:return (html): Sanitized HTML description for customer to include in calendar exports"""
+        return html_sanitize(self.description) if not is_html_empty(self.description) else ''
 
     def _get_customer_summary(self):
         """:return (str): The summary to include in calendar exports"""

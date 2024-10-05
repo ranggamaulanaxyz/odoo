@@ -38,9 +38,6 @@ class PickingType(models.Model):
         'stock.location', 'Destination Location', compute='_compute_default_location_dest_id',
         check_company=True, store=True, readonly=False, precompute=True, required=True,
         help="This is the default destination location when you create a picking manually with this operation type. It is possible however to change it or that the routes put another location.")
-    default_location_return_id = fields.Many2one('stock.location', 'Return Location', check_company=True,
-        help="This is the default location for returns created from a picking with this operation type.",
-        domain="[('return_location', '=', True)]")
     code = fields.Selection([('incoming', 'Receipt'), ('outgoing', 'Delivery'), ('internal', 'Internal Transfer')], 'Type of Operation', required=True)
     return_picking_type_id = fields.Many2one(
         'stock.picking.type', 'Operation Type for Returns',
@@ -461,9 +458,6 @@ class PickingType(models.Model):
     def get_action_picking_tree_ready(self):
         return self._get_action('stock.action_picking_tree_ready')
 
-    def get_action_picking_type_operations(self):
-        return self._get_action('stock.action_get_picking_type_operations')
-
     def get_action_picking_type_moves_analysis(self):
         action = self.env["ir.actions.actions"]._for_xml_id('stock.stock_move_action')
         action['domain'] = expression.AND([
@@ -602,7 +596,7 @@ class Picking(models.Model):
         help="Is late or will be late depending on the deadline and scheduled date")
     date = fields.Datetime(
         'Creation Date',
-        default=fields.Datetime.now, tracking=True,
+        default=fields.Datetime.now, tracking=True, copy=False,
         help="Creation Date, usually the time of the order")
     date_done = fields.Datetime('Date of Transfer', copy=False, readonly=True, help="Date at which the transfer has been processed or cancelled.")
     delay_alert_date = fields.Datetime('Delay Alert Date', compute='_compute_delay_alert_date', search='_search_delay_alert_date')
@@ -624,6 +618,7 @@ class Picking(models.Model):
         'stock.picking.type', 'Operation Type',
         required=True, index=True,
         default=_default_picking_type_id)
+    warehouse_address_id = fields.Many2one('res.partner', related='picking_type_id.warehouse_id.partner_id')
     picking_type_code = fields.Selection(
         related='picking_type_id.code',
         readonly=True)
@@ -2124,3 +2119,7 @@ class Picking(models.Model):
                 clean_action(action, self.env)
                 report_actions.append(action)
         return report_actions
+
+    def _can_return(self):
+        self.ensure_one()
+        return self.state == 'done'

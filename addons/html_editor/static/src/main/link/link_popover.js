@@ -1,5 +1,5 @@
 import { _t } from "@web/core/l10n/translation";
-import { Component, useState, onMounted, useExternalListener, useRef } from "@odoo/owl";
+import { Component, useState, onMounted, useRef } from "@odoo/owl";
 import { useAutofocus, useService } from "@web/core/utils/hooks";
 import { browser } from "@web/core/browser/browser";
 import { cleanZWChars, deduceURLfromText } from "./utils";
@@ -14,6 +14,7 @@ export class LinkPopover extends Component {
         onClose: Function,
         getInternalMetaData: Function,
         getExternalMetaData: Function,
+        isImage: Boolean,
     };
     colorsData = [
         { type: "", label: _t("Link"), btnPreview: "link" },
@@ -40,6 +41,10 @@ export class LinkPopover extends Component {
         { style: "flat", label: _t("Flat") },
     ];
     setup() {
+        this.ui = useService("ui");
+        this.notificationService = useService("notification");
+        this.http = useService("http");
+
         this.state = useState({
             editing: this.props.linkEl.href ? false : true,
             url: this.props.linkEl.href || "",
@@ -57,19 +62,19 @@ export class LinkPopover extends Component {
                 "",
             buttonSize: this.props.linkEl.className.match(/btn-(sm|lg)/)?.[1] || "",
             buttonStyle: this.initButtonStyle(this.props.linkEl.className),
+            isImage: this.props.isImage,
         });
-        this.notificationService = useService("notification");
-
-        this.http = useService("http");
 
         this.editingWrapper = useRef("editing-wrapper");
-        useAutofocus({ refName: this.state.label === "" ? "label" : "url", mobile: true });
+        useAutofocus({
+            refName: this.state.isImage || this.state.label !== "" ? "url" : "label",
+            mobile: true,
+        });
         onMounted(() => {
             if (!this.state.editing) {
                 this.loadAsyncLinkPreview();
             }
         });
-        useExternalListener(document, "mousedown", this.onClickAway, { capture: true });
     }
     initButtonStyle(className) {
         const styleArray = [
@@ -89,6 +94,7 @@ export class LinkPopover extends Component {
         this.state.url = deducedUrl
             ? this.correctLink(deducedUrl)
             : this.correctLink(this.state.url);
+        this.loadAsyncLinkPreview();
         this.props.onApply(this.state.url, this.state.label, this.state.classes);
     }
     onClickEdit() {
@@ -107,17 +113,21 @@ export class LinkPopover extends Component {
     onClickRemove() {
         this.props.onRemove();
     }
-    onClickAway(ev) {
-        if (this.editingWrapper?.el && !this.editingWrapper?.el.contains(ev.target)) {
-            this.props.onClose();
-        }
-    }
+
     onKeydownEnter(ev) {
         if (ev.key === "Enter") {
             ev.preventDefault();
             this.onClickApply();
         }
     }
+
+    onKeydown(ev) {
+        if (ev.key === "Escape") {
+            ev.preventDefault();
+            this.props.onClose();
+        }
+    }
+
     onClickReplaceTitle() {
         this.state.label = this.state.urlTitle;
         this.onClickApply();

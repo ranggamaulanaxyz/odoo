@@ -82,14 +82,6 @@
                             <span class="o_stat_text">Employee</span>
                         </div>
                     </button>
-                    <button name="action_open_similar_candidates"
-                            class="oe_stat_button"
-                            icon="fa-pencil"
-                            type="object"
-                            context="{'active_test': False}"
-                            invisible="similar_candidates_count == 0">
-                        <field name="similar_candidates_count" widget="statinfo" string="Similar Candidates"/>
-                    </button>
                     <button name="action_open_other_applications"
                             class="oe_stat_button"
                             icon="fa-pencil"
@@ -269,6 +261,7 @@
                 <group expand="0" string="Group By">
                     <filter string="Job" name="job" domain="[]" context="{'group_by': 'job_id'}"/>
                     <filter string="Stage" name="stage" domain="[]" context="{'group_by': 'stage_id'}"/>
+                    <filter string="Candidate" name="candidate" domain="[]" context="{'group_by': 'candidate_id'}"/>
                     <filter string="Responsible" name="responsible" domain="[]"  context="{'group_by': 'user_id'}"/>
                     <filter string="Creation Date" name="creation_date" context="{'group_by': 'create_date'}"/>
                     <filter string="Hiring Date" name="hired_date" context="{'group_by': 'date_closed'}"/>
@@ -310,7 +303,7 @@
         <field name="arch" type="xml">
             <form>
                 <group>
-                    <field name="candidate_id" placeholder="e.g. John Doe"/>
+                    <field name="candidate_id" options="{'no_create_edit': True}" placeholder="e.g. John Doe"/>
                     <field name="job_id" options="{'no_open': True}"/>
                     <field name="company_id" invisible="1"/>
                 </group>
@@ -333,16 +326,17 @@
                 <field name="user_id"/>
                 <field name="active"/>
                 <field name="application_status" />
+                <field name="company_id" invisible="1"/> <!-- We need to keep this field as it is used in the domain of user_id in the model -->
                 <progressbar field="kanban_state" colors='{"done": "success", "blocked": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <a role="menuitem" name="action_create_meeting" type="object" class="dropdown-item">Schedule Interview</a>
                         <a role="menuitem" name="archive_applicant" type="object" class="dropdown-item">Refuse</a>
                         <a t-if="record.active.raw_value" role="menuitem" type="archive" class="dropdown-item">Archive</a>
                         <a t-if="!record.active.raw_value" role="menuitem" type="unarchive" class="dropdown-item">Unarchive</a>
                         <t t-if="widget.deletable"><a role="menuitem" type="delete" class="dropdown-item">Delete</a></t>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <widget name="web_ribbon" title="Hired" bg_color="text-bg-success" invisible="not date_closed"/>
                         <widget name="web_ribbon" title="Refused" bg_color="text-bg-danger" invisible="application_status != 'refused'"/>
                         <widget name="web_ribbon" title="Archived" bg_color="text-bg-secondary" invisible="application_status != 'archived'"/>
@@ -350,7 +344,7 @@
                         <field name="job_id" invisible="context.get('search_default_job_id', False)"/>
                         <field name="categ_ids" widget="many2many_tags" options="{'color_field': 'color'}"/>
                         <field name="applicant_properties" widget="properties"/>
-                        <footer class="fs-6">
+                        <footer>
                             <field name="priority" widget="priority"/>
                             <field class="ms-1 align-items-center" name="activity_ids" widget="kanban_activity"/>
                             <div class="d-flex ms-auto align-items-center">

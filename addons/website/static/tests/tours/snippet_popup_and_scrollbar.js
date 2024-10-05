@@ -2,7 +2,7 @@
 
 import {
     changeOption,
-    dragNDrop,
+    insertSnippet,
     goBackToBlocks,
     registerWebsitePreviewTour,
 } from "@website/js/tours/tour_utils";
@@ -44,8 +44,8 @@ registerWebsitePreviewTour("snippet_popup_and_scrollbar", {
     url: "/",
     edition: true,
 }, () => [
-    ...dragNDrop(snippets[1]), // Media List
-    ...dragNDrop(snippets[0]), // Popup
+    ...insertSnippet(snippets[1]), // Media List
+    ...insertSnippet(snippets[0]), // Popup
     checkScrollbar(false),
     {
         content: 'Click on the s_popup snippet',
@@ -57,7 +57,7 @@ registerWebsitePreviewTour("snippet_popup_and_scrollbar", {
     goBackToBlocks(),
     {
         content: "Drag the Content snippet group and drop it at the bottom of the popup.",
-        trigger: '#oe_snippets .oe_snippet[name="Content"] .oe_snippet_thumbnail:not(.o_we_already_dragging)',
+        trigger: '#oe_snippets .oe_snippet[name="Content"] .oe_snippet_thumbnail:not(.o_we_ongoing_insertion)',
         run: "drag_and_drop :iframe #wrap .s_popup .oe_drop_zone:last",
     },
     {
@@ -106,7 +106,7 @@ registerWebsitePreviewTour("snippet_popup_and_scrollbar", {
     goBackToBlocks(),
     {
         content: "Drag the Content snippet group and drop it at the bottom of the popup.",
-        trigger: '#oe_snippets .oe_snippet[name="Content"] .oe_snippet_thumbnail:not(.o_we_already_dragging)',
+        trigger: '#oe_snippets .oe_snippet[name="Content"] .oe_snippet_thumbnail:not(.o_we_ongoing_insertion)',
         run: "drag_and_drop :iframe #wrap .s_popup .oe_drop_zone:last",
     },
     {
@@ -126,7 +126,7 @@ registerWebsitePreviewTour("snippet_popup_and_scrollbar", {
         content: "Remove the s_popup snippet",
         trigger: ".o_we_customize_panel we-customizeblock-options:contains('Popup') we-button.oe_snippet_remove:first",
         async run(helpers) {
-            helpers.click();
+            await helpers.click();
             // TODO: remove the below setTimeout. Without it, goBackToBlocks() not works.
             await new Promise((r) => setTimeout(r, 1000));
         }
@@ -135,7 +135,7 @@ registerWebsitePreviewTour("snippet_popup_and_scrollbar", {
     goBackToBlocks(),
     {
         content: "Drag the Content snippet group and drop it in the Cookies Bar.",
-        trigger: '#oe_snippets .oe_snippet[name="Content"] .oe_snippet_thumbnail:not(.o_we_already_dragging)',
+        trigger: '#oe_snippets .oe_snippet[name="Content"] .oe_snippet_thumbnail:not(.o_we_ongoing_insertion)',
         run: "drag_and_drop :iframe #website_cookies_bar .modal-content.oe_structure",
     },
     {

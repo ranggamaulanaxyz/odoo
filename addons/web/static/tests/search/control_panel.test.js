@@ -1,4 +1,4 @@
-import { expect, test } from "@odoo/hoot";
+import { expect, test, getFixture } from "@odoo/hoot";
 import { click, press, queryAll } from "@odoo/hoot-dom";
 import { animationFrame } from "@odoo/hoot-mock";
 import { reactive } from "@odoo/owl";
@@ -18,7 +18,7 @@ class Foo extends models.Model {
     _views = {
         search: `<search/>`,
         list: `<list/>`,
-        kanban: `<kanban><t t-name="kanban-card"></t></kanban>`,
+        kanban: `<kanban><t t-name="card"></t></kanban>`,
     };
 }
 defineModels([Foo]);
@@ -41,8 +41,16 @@ test.tags`desktop`("breadcrumbs", async () => {
         { resModel: "foo" },
         {
             breadcrumbs: [
-                { jsId: "controller_7", name: "Previous", onSelected: () => expect.step("controller_7") },
-                { jsId: "controller_9", name: "Current", onSelected: () => expect.step("controller_9") },
+                {
+                    jsId: "controller_7",
+                    name: "Previous",
+                    onSelected: () => expect.step("controller_7"),
+                },
+                {
+                    jsId: "controller_9",
+                    name: "Current",
+                    onSelected: () => expect.step("controller_9"),
+                },
             ],
         }
     );
@@ -53,7 +61,7 @@ test.tags`desktop`("breadcrumbs", async () => {
     expect(breadcrumbItems[1]).toHaveText("Current");
     expect(breadcrumbItems[1]).toHaveClass("active");
 
-    click(breadcrumbItems[0]);
+    await click(breadcrumbItems[0]);
     expect.verifySteps(["controller_7"]);
 });
 
@@ -74,13 +82,13 @@ test.tags`desktop`("view switcher", async () => {
     const views = queryAll`.o_switch_view`;
     expect(views[0]).toHaveAttribute("data-tooltip", "List");
     expect(views[0]).toHaveClass("active");
-    expect(queryAll(`.oi-view-list`, { root: views[0] })).toHaveCount(1);
+    expect(`.o_switch_view:eq(0) .oi-view-list`).toHaveCount(1);
     expect(views[1]).toHaveAttribute("data-tooltip", "Kanban");
     expect(views[1]).not.toHaveClass("active");
-    expect(queryAll(`.oi-view-kanban`, { root: views[1] })).toHaveCount(1);
+    expect(`.o_switch_view:eq(1) .oi-view-kanban`).toHaveCount(1);
 
     getService("action").switchView = (viewType) => expect.step(viewType);
-    click(views[1]);
+    await click(views[1]);
     expect.verifySteps(["kanban"]);
 });
 
@@ -97,7 +105,7 @@ test.tags`mobile`("view switcher on mobile", async () => {
     );
     expect(`.o_control_panel_navigation .o_cp_switch_buttons`).toHaveCount(1);
 
-    click(".o_control_panel_navigation .o_cp_switch_buttons .dropdown-toggle");
+    await click(".o_control_panel_navigation .o_cp_switch_buttons .dropdown-toggle");
     await animationFrame();
 
     expect(`.dropdown-item`).toHaveCount(2);
@@ -111,7 +119,7 @@ test.tags`mobile`("view switcher on mobile", async () => {
     expect(queryAll(`.oi-view-kanban`, { root: views[1] })).toHaveCount(1);
 
     getService("action").switchView = (viewType) => expect.step(viewType);
-    click(views[1]);
+    await click(views[1]);
     expect.verifySteps(["kanban"]);
 });
 
@@ -145,11 +153,41 @@ test("view switcher hotkey cycles through views", async () => {
     });
     expect(`.o_list_view`).toHaveCount(1);
 
-    press(["alt", "shift", "v"]);
+    await press(["alt", "shift", "v"]);
     await animationFrame();
     expect(`.o_kanban_view`).toHaveCount(1);
 
-    press(["alt", "shift", "v"]);
+    await press(["alt", "shift", "v"]);
     await animationFrame();
     expect(`.o_list_view`).toHaveCount(1);
+});
+
+test.tags("mobile")("Control panel is shown/hide on top when scrolling", async () => {
+    await mountWithSearch(
+        ControlPanel,
+        { resModel: "foo" },
+        {
+            viewSwitcherEntries: [
+                { type: "list", active: true, icon: "oi-view-list", name: "List" },
+                { type: "kanban", icon: "oi-view-kanban", name: "Kanban" },
+            ],
+        }
+    );
+    const contentHeight = 200;
+    const sampleContent = document.createElement("div");
+    sampleContent.style.minHeight = `${2 * contentHeight}px`;
+    const target = getFixture();
+    target.appendChild(sampleContent);
+    target.style.maxHeight = `${contentHeight}px`;
+    target.style.overflow = "auto";
+    target.scrollTo({ top: 50 });
+    await animationFrame();
+    expect(".o_control_panel").toHaveClass("o_mobile_sticky", {
+        message: "control panel becomes sticky when the target is not on top",
+    });
+    target.scrollTo({ top: -50 });
+    await animationFrame();
+    expect(".o_control_panel").not.toHaveClass("o_mobile_sticky", {
+        message: "control panel is not sticky anymore",
+    });
 });

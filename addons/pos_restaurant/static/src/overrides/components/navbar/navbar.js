@@ -22,15 +22,9 @@ patch(Navbar.prototype, {
         }
         return super.orderCount;
     },
-    getTable() {
-        return this.pos.orderToTransferUuid
-            ? this.pos.models["pos.order"].find((o) => o.uuid == this.pos.orderToTransferUuid)
-                  ?.table_id
-            : this.pos.selectedTable;
-    },
     showTabs() {
         if (this.pos.config.module_pos_restaurant) {
-            return !(this.pos.selectedTable || this.pos.orderToTransferUuid);
+            return !this.pos.selectedTable;
         } else {
             return super.showTabs();
         }
@@ -46,12 +40,17 @@ patch(Navbar.prototype, {
     setFloatingOrder(floatingOrder) {
         this.pos.selectedTable = null;
         this.pos.set_order(floatingOrder);
-        this.pos.showScreen("ProductScreen");
+
+        const props = {};
+        const screenName = floatingOrder.get_screen_data().name;
+        if (screenName === "PaymentScreen") {
+            props.orderUuid = floatingOrder.uuid;
+        }
+
+        this.pos.showScreen(screenName || "ProductScreen", props);
     },
     async onClickTableTab() {
-        if (this.pos.orderToTransferUuid) {
-            return this.pos.setTableFromUi(this.getTable());
-        }
+        await this.pos.syncAllOrders();
         this.dialog.add(TableSelector, {
             title: _t("Table Selector"),
             placeholder: _t("Enter a table number"),
@@ -85,15 +84,7 @@ patch(Navbar.prototype, {
             },
         });
     },
-    getOrderToDisplay() {
-        const currentOrder = this.pos.get_order();
-        const orderToTransfer = this.pos.models["pos.order"].find((order) => {
-            return order.uuid === this.pos.orderToTransferUuid;
-        });
-        return currentOrder || orderToTransfer;
-    },
     onClickPlanButton() {
-        this.pos.orderToTransferUuid = null;
         this.pos.showScreen("FloorScreen", { floor: this.floor });
     },
 });

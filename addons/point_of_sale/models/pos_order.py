@@ -5,6 +5,7 @@ from datetime import datetime
 from markupsafe import Markup
 from itertools import groupby
 from collections import defaultdict
+from uuid import uuid4
 
 import psycopg2
 import pytz
@@ -106,7 +107,10 @@ class PosOrder(models.Model):
         combo_child_uuids_by_parent_uuid = self._prepare_combo_line_uuids(order)
 
         if not existing_order:
-            pos_order = self.create(order)
+            pos_order = self.create({
+                **{key: value for key, value in order.items() if key != 'name'},
+                'pos_reference': order.get('name')
+            })
             pos_order = pos_order.with_company(pos_order.company_id)
         else:
             pos_order = self.env['pos.order'].browse(order.get('id'))
@@ -205,25 +209,25 @@ class PosOrder(models.Model):
             }
             order.add_payment(return_payment_vals)
 
-    def _prepare_tax_base_line_values(self, sign=1):
+    def _prepare_tax_base_line_values(self):
         """ Convert pos order lines into dictionaries that would be used to compute taxes later.
 
         :param sign: An optional parameter to force the sign of amounts.
-        :return: A list of python dictionaries (see '_convert_to_tax_base_line_dict' in account.tax).
+        :return: A list of python dictionaries (see '_prepare_base_line_for_taxes_computation' in account.tax).
         """
         self.ensure_one()
-        return self.lines._prepare_tax_base_line_values(sign=sign)
+        return self.lines._prepare_tax_base_line_values()
 
     @api.model
     def _get_invoice_lines_values(self, line_values, pos_order_line):
         return {
-            'product_id': line_values['product'].id,
+            'product_id': line_values['product_id'].id,
             'quantity': line_values['quantity'],
             'discount': line_values['discount'],
             'price_unit': line_values['price_unit'],
             'name': line_values['name'],
-            'tax_ids': [(6, 0, line_values['taxes'].ids)],
-            'product_uom_id': line_values['uom'].id,
+            'tax_ids': [(6, 0, line_values['tax_ids'].ids)],
+            'product_uom_id': line_values['uom_id'].id,
         }
 
     def _prepare_invoice_lines(self):
@@ -232,8 +236,7 @@ class PosOrder(models.Model):
 
         :return: A list of Command.create to fill 'invoice_line_ids' when calling account.move.create.
         """
-        sign = 1 if self.amount_total >= 0 else -1
-        line_values_list = self._prepare_tax_base_line_values(sign=sign)
+        line_values_list = self._prepare_tax_base_line_values()
         invoice_lines = []
         for line_values in line_values_list:
             line = line_values['record']
@@ -309,7 +312,8 @@ class PosOrder(models.Model):
     picking_type_id = fields.Many2one('stock.picking.type', related='session_id.config_id.picking_type_id', string="Operation Type", readonly=False)
     procurement_group_id = fields.Many2one('procurement.group', 'Procurement Group', copy=False)
 
-    note = fields.Text(string='Internal Notes')
+    floating_order_name = fields.Char(string='Order Name')
+    general_note = fields.Text(string='General Note')
     nb_print = fields.Integer(string='Number of Print', readonly=True, copy=False, default=0)
     pos_reference = fields.Char(string='Receipt Number', readonly=True, copy=False, index=True)
     sale_journal = fields.Many2one('account.journal', related='session_id.config_id.journal_id', string='Sales Journal', store=True, readonly=True, ondelete='restrict')
@@ -329,7 +333,7 @@ class PosOrder(models.Model):
     has_refundable_lines = fields.Boolean('Has Refundable Lines', compute='_compute_has_refundable_lines')
     ticket_code = fields.Char(help='5 digits alphanumeric code to be used by portal user to request an invoice')
     tracking_number = fields.Char(string="Order Number", compute='_compute_tracking_number', search='_search_tracking_number')
-    uuid = fields.Char(string='Uuid', readonly=True, copy=False)
+    uuid = fields.Char(string='Uuid', readonly=True, default=lambda self: str(uuid4()), copy=False)
     email = fields.Char(string='Email', compute="_compute_contact_details", readonly=False, store=True)
     mobile = fields.Char(string='Mobile', compute="_compute_contact_details", readonly=False, store=True)
     is_edited = fields.Boolean(string='Edited', compute='_compute_is_edited')
@@ -486,7 +490,7 @@ class PosOrder(models.Model):
     @api.model
     def _complete_values_from_session(self, session, values):
         if values.get('state') and values['state'] == 'paid' and not values.get('name'):
-            values['name'] = self._compute_order_name()
+            values['name'] = self._compute_order_name(session)
         values.setdefault('pricelist_id', session.config_id.pricelist_id.id)
         values.setdefault('fiscal_position_id', session.config_id.default_fiscal_position_id.id)
         values.setdefault('company_id', session.config_id.company_id.id)
@@ -512,6 +516,8 @@ class PosOrder(models.Model):
                     raise UserError(_('The paid amount is different from the total amount of the order.'))
                 elif totally_paid_or_more > 0 and order.state == 'paid':
                     list_line.append(_("Warning, the paid amount is higher than the total amount. (Difference: %s)", formatLang(self.env, order.amount_paid - order.amount_total, currency_obj=order.currency_id)))
+                if order.nb_print > 0 and vals.get('payment_ids'):
+                    raise UserError(_('You cannot change the payment of a printed order.'))
 
         if len(list_line) > 0:
             body = _("Payment changes:")
@@ -583,11 +589,12 @@ class PosOrder(models.Model):
         body += Markup("</ul>")
         return body
 
-    def _compute_order_name(self):
+    def _compute_order_name(self, session=None):
+        session = session or self.session_id
         if self.refunded_order_id.exists():
             return _('%(refunded_order)s REFUND', refunded_order=self.refunded_order_id.name)
         else:
-            return self.session_id.config_id.sequence_id._next()
+            return session.config_id.sequence_id._next()
 
     def action_stock_picking(self):
         self.ensure_one()
@@ -771,57 +778,50 @@ class PosOrder(models.Model):
         if self.refunded_order_id.account_move:
             vals['ref'] = _('Reversal of: %s', self.refunded_order_id.account_move.name)
             vals['reversed_entry_id'] = self.refunded_order_id.account_move.id
-        if self.note:
-            vals.update({'narration': self.note})
+        if self.floating_order_name:
+            vals.update({'narration': self.floating_order_name})
         return vals
 
     def _prepare_aml_values_list_per_nature(self):
         self.ensure_one()
+        AccountTax = self.env['account.tax']
         sign = 1 if self.amount_total < 0 else -1
         commercial_partner = self.partner_id.commercial_partner_id
         company_currency = self.company_id.currency_id
         rate = self.currency_id._get_conversion_rate(self.currency_id, company_currency, self.company_id, self.date_order)
 
         # Concert each order line to a dictionary containing business values. Also, prepare for taxes computation.
-        base_line_vals_list = self._prepare_tax_base_line_values(sign=-1)
-        tax_results = self.env['account.tax']._compute_taxes(base_line_vals_list, self.company_id)
+        base_lines = self._prepare_tax_base_line_values()
+        AccountTax._add_tax_details_in_base_lines(base_lines, self.company_id)
+        AccountTax._round_base_lines_tax_details(base_lines, self.company_id)
+        AccountTax._add_accounting_data_in_base_lines_tax_details(base_lines, self.company_id)
+        tax_results = AccountTax._prepare_tax_lines(base_lines, self.company_id)
 
         total_balance = 0.0
         total_amount_currency = 0.0
         aml_vals_list_per_nature = defaultdict(list)
 
         # Create the tax lines
-        for tax_line_vals in tax_results['tax_lines_to_add']:
-            tax_rep = self.env['account.tax.repartition.line'].browse(tax_line_vals['tax_repartition_line_id'])
-            amount_currency = tax_line_vals['tax_amount']
-            balance = company_currency.round(amount_currency * rate)
+        for tax_line in tax_results['tax_lines_to_add']:
+            tax_rep = self.env['account.tax.repartition.line'].browse(tax_line['tax_repartition_line_id'])
             aml_vals_list_per_nature['tax'].append({
-                'name': tax_rep.tax_id.name,
-                'account_id': tax_line_vals['account_id'],
-                'partner_id': tax_line_vals['partner_id'],
-                'currency_id': tax_line_vals['currency_id'],
-                'tax_repartition_line_id': tax_line_vals['tax_repartition_line_id'],
-                'tax_ids': tax_line_vals['tax_ids'],
-                'tax_tag_ids': tax_line_vals['tax_tag_ids'],
-                'group_tax_id': None if tax_rep.tax_id.id == tax_line_vals['tax_id'] else tax_line_vals['tax_id'],
-                'amount_currency': amount_currency,
-                'balance': balance,
-                'tax_tag_invert': tax_rep.document_type != 'refund',
+                **tax_line,
+                'tax_tag_invert': tax_rep.document_type == 'invoice',
             })
-            total_amount_currency += amount_currency
-            total_balance += balance
+            total_amount_currency += tax_line['amount_currency']
+            total_balance += tax_line['balance']
 
         # Create the aml values for order lines.
         for base_line_vals, update_base_line_vals in tax_results['base_lines_to_update']:
             order_line = base_line_vals['record']
-            amount_currency = update_base_line_vals['price_subtotal']
+            amount_currency = update_base_line_vals['amount_currency']
             balance = company_currency.round(amount_currency * rate)
             aml_vals_list_per_nature['product'].append({
                 'name': order_line.full_product_name,
-                'account_id': base_line_vals['account'].id,
-                'partner_id': base_line_vals['partner'].id,
-                'currency_id': base_line_vals['currency'].id,
-                'tax_ids': [(6, 0, base_line_vals['taxes'].ids)],
+                'account_id': base_line_vals['account_id'].id,
+                'partner_id': base_line_vals['partner_id'].id,
+                'currency_id': base_line_vals['currency_id'].id,
+                'tax_ids': [(6, 0, base_line_vals['tax_ids'].ids)],
                 'tax_tag_ids': update_base_line_vals['tax_tag_ids'],
                 'amount_currency': amount_currency,
                 'balance': balance,
@@ -910,7 +910,6 @@ class PosOrder(models.Model):
                     'currency_id': self.currency_id.id,
                     'amount_currency': payment_id.amount,
                     'balance': self.session_id._amount_converter(payment_id.amount, self.date_order, False),
-                    'blocked': False,  # Payment related entries should not be excluded from follow-ups
                 })
 
         return aml_vals_list_per_nature
@@ -937,7 +936,7 @@ class PosOrder(models.Model):
             'journal_id': self.config_id.journal_id.id,
             'date': fields.Date.context_today(self),
             'ref': _('Reversal of POS closing entry %(entry)s for order %(order)s from session %(session)s', entry=self.session_move_id.name, order=self.name, session=self.session_id.name),
-            'invoice_line_ids': [(0, 0, aml_value) for aml_value in move_lines],
+            'line_ids': [(0, 0, aml_value) for aml_value in move_lines],
             'reversed_pos_order_id': self.id
         })
         reversal_entry.action_post()
@@ -983,9 +982,7 @@ class PosOrder(models.Model):
 
             # Send and Print
             if self.env.context.get('generate_pdf', True):
-                template = self.env.ref(new_move._get_mail_template())
-                new_move.with_context(skip_invoice_sync=True)._generate_pdf_and_send_invoice(template)
-
+                new_move.with_context(skip_invoice_sync=True)._generate_and_send()
 
             if order.session_id.state == 'closed':  # If the session isn't closed this isn't needed.
                 # If a client requires the invoice later, we need to revers the amount from the closing entry, by making a new entry for that.
@@ -1037,22 +1034,18 @@ class PosOrder(models.Model):
         order_ids = []
         session_ids = set({order.get('session_id') for order in orders})
         for order in orders:
-            existing_draft_order = self.env["pos.order"].search(
-                ['&', ('id', '=', order.get('id', False)), ('state', '=', 'draft')], limit=1) if isinstance(order.get('id'), int) else False
-
             if len(self._get_refunded_orders(order)) > 1:
                 raise ValidationError(_('You can only refund products from the same order.'))
 
-            if existing_draft_order:
-                order_ids.append(self._process_order(order, existing_draft_order))
-            else:
-                existing_paid_orders = self.env['pos.order'].search([('uuid', '=', order['uuid'])])
-                if not existing_paid_orders:
-                    order_ids.append(self._process_order(order, False))
+            existing_order = self.env['pos.order'].search([('uuid', '=', order.get('uuid'))])
+            if existing_order and existing_order.state == 'draft':
+                order_ids.append(self._process_order(order, existing_order))
+            elif not existing_order:
+                order_ids.append(self._process_order(order, False))
 
         # Sometime pos_orders_ids can be empty.
         pos_order_ids = self.env['pos.order'].browse(order_ids)
-        config_id = pos_order_ids[0].config_id.id if pos_order_ids else False
+        config_id = pos_order_ids.config_id.ids[0] if pos_order_ids else False
 
         for order in pos_order_ids:
             order._ensure_access_token()
@@ -1113,7 +1106,7 @@ class PosOrder(models.Model):
             'is_total_cost_computed': False
         }
 
-    def _prepare_mail_values(self, email, ticket):
+    def _prepare_mail_values(self, email, ticket, basic_ticket):
         message = Markup(
             _("<p>Dear %(client_name)s,<br/>Here is your Receipt %(is_invoiced)sfor \
             %(pos_name)s amounting in %(amount)s from %(company_name)s. </p>")
@@ -1131,7 +1124,7 @@ class PosOrder(models.Model):
             'author_id': self.env.user.partner_id.id,
             'email_from': self.env.company.email or self.env.user.email_formatted,
             'email_to': email,
-            'attachment_ids': self._add_mail_attachment(self.name, ticket),
+            'attachment_ids': self._add_mail_attachment(self.name, ticket, basic_ticket),
         }
 
     def _refund(self):
@@ -1180,7 +1173,8 @@ class PosOrder(models.Model):
             'target': 'new'
         }
 
-    def _add_mail_attachment(self, name, ticket):
+    def _add_mail_attachment(self, name, ticket, basic_ticket):
+        attachment = []
         filename = 'Receipt-' + name + '.jpg'
         receipt = self.env['ir.attachment'].create({
             'name': filename,
@@ -1190,7 +1184,19 @@ class PosOrder(models.Model):
             'res_id': self.ids[0],
             'mimetype': 'image/jpeg',
         })
-        attachment = [(4, receipt.id)]
+        attachment += [(4, receipt.id)]
+        if basic_ticket:
+            filename = 'Receipt-' + name + '-1' + '.jpg'
+            basic_receipt = self.env['ir.attachment'].create({
+                'name': filename,
+                'type': 'binary',
+                'datas': basic_ticket,
+                'res_model': 'pos.order',
+                'res_id': self.ids[0],
+                'mimetype': 'image/jpeg',
+            })
+            attachment += [(4, basic_receipt.id)]
+
 
         if self.mapped('account_move'):
             report = self.env['ir.actions.report']._render_qweb_pdf("account.account_invoices", self.account_move.ids[0])
@@ -1207,8 +1213,8 @@ class PosOrder(models.Model):
 
         return attachment
 
-    def action_send_receipt(self, email, ticket_image):
-        self.env['mail.mail'].sudo().create(self._prepare_mail_values(email, ticket_image)).send()
+    def action_send_receipt(self, email, ticket_image, basic_image):
+        self.env['mail.mail'].sudo().create(self._prepare_mail_values(email, ticket_image, basic_image)).send()
         self.email = email
 
     @api.model
@@ -1283,9 +1289,9 @@ class PosOrderLine(models.Model):
     price_unit = fields.Float(string='Unit Price', digits=0)
     qty = fields.Float('Quantity', digits='Product Unit of Measure', default=1)
     price_subtotal = fields.Float(string='Tax Excl.', digits=0,
-        readonly=True, store=True, compute='_compute_amount_line_all')
+        readonly=True, required=True)
     price_subtotal_incl = fields.Float(string='Tax Incl.', digits=0,
-        readonly=True, store=True, compute='_compute_amount_line_all')
+        readonly=True, required=True)
     price_extra = fields.Float(string="Price extra")
     price_type = fields.Selection([
         ('original', 'Original'),
@@ -1308,8 +1314,8 @@ class PosOrderLine(models.Model):
     refund_orderline_ids = fields.One2many('pos.order.line', 'refunded_orderline_id', 'Refund Order Lines', help='Orderlines in this field are the lines that refunded this orderline.')
     refunded_orderline_id = fields.Many2one('pos.order.line', 'Refunded Order Line', help='If this orderline is a refund, then the refunded orderline is specified in this field.')
     refunded_qty = fields.Float('Refunded Quantity', compute='_compute_refund_qty', help='Number of items refunded in this orderline.')
-    uuid = fields.Char(string='Uuid', readonly=True, copy=False)
-    note = fields.Char('Internal Note')
+    uuid = fields.Char(string='Uuid', readonly=True, default=lambda self: str(uuid4()), copy=False)
+    note = fields.Char('Product Note')
 
     combo_parent_id = fields.Many2one('pos.order.line', string='Combo Parent') # FIXME rename to parent_line_id
     combo_line_ids = fields.One2many('pos.order.line', 'combo_parent_id', string='Combo Lines') # FIXME rename to child_line_ids
@@ -1408,15 +1414,22 @@ class PosOrderLine(models.Model):
         if self.filtered(lambda x: x.order_id.state not in ["draft", "cancel"]):
             raise UserError(_("You can only unlink PoS order lines that are related to orders in new or cancelled state."))
 
-    @api.depends('price_unit', 'tax_ids', 'qty', 'discount', 'product_id')
+    @api.onchange('price_unit', 'tax_ids', 'qty', 'discount', 'product_id')
+    def _onchange_amount_line_all(self):
+        for line in self:
+            res = line._compute_amount_line_all()
+            line.update(res)
+
     def _compute_amount_line_all(self):
-        for orderline in self:
-            fpos = orderline.order_id.fiscal_position_id
-            tax_ids_after_fiscal_position = fpos.map_tax(orderline.tax_ids)
-            price = orderline.price_unit * (1 - (orderline.discount or 0.0) / 100.0)
-            taxes = tax_ids_after_fiscal_position.compute_all(price, orderline.order_id.currency_id, orderline.qty, product=orderline.product_id, partner=orderline.order_id.partner_id)
-            orderline.price_subtotal_incl = taxes['total_included']
-            orderline.price_subtotal = taxes['total_excluded']
+        self.ensure_one()
+        fpos = self.order_id.fiscal_position_id
+        tax_ids_after_fiscal_position = fpos.map_tax(self.tax_ids)
+        price = self.price_unit * (1 - (self.discount or 0.0) / 100.0)
+        taxes = tax_ids_after_fiscal_position.compute_all(price, self.order_id.currency_id, self.qty, product=self.product_id, partner=self.order_id.partner_id)
+        return {
+            'price_subtotal_incl': taxes['total_included'],
+            'price_subtotal': taxes['total_excluded'],
+        }
 
     @api.onchange('product_id')
     def _onchange_product_id(self):
@@ -1560,11 +1573,11 @@ class PosOrderLine(models.Model):
             line.margin = line.price_subtotal - line.total_cost
             line.margin_percent = not float_is_zero(line.price_subtotal, precision_rounding=line.currency_id.rounding) and line.margin / line.price_subtotal or 0
 
-    def _prepare_tax_base_line_values(self, sign=1):
+    def _prepare_tax_base_line_values(self):
         """ Convert pos order lines into dictionaries that would be used to compute taxes later.
 
         :param sign: An optional parameter to force the sign of amounts.
-        :return: A list of python dictionaries (see '_convert_to_tax_base_line_dict' in account.tax).
+        :return: A list of python dictionaries (see '_prepare_base_line_for_taxes_computation' in account.tax).
         """
         base_line_vals_list = []
         for line in self:
@@ -1581,7 +1594,8 @@ class PosOrderLine(models.Model):
             if fiscal_position:
                 account = fiscal_position.map_account(account)
 
-            is_refund = line.qty * line.price_unit < 0
+            is_refund_order = line.order_id.amount_total < 0.0
+            is_refund_line = line.qty * line.price_unit < 0
 
             product_name = line.product_id\
                 .with_context(lang=line.order_id.partner_id.lang or self.env.user.lang)\
@@ -1589,20 +1603,20 @@ class PosOrderLine(models.Model):
 
             base_line_vals_list.append(
                 {
-                    **self.env['account.tax']._convert_to_tax_base_line_dict(
+                    **self.env['account.tax']._prepare_base_line_for_taxes_computation(
                         line,
-                        partner=commercial_partner,
-                        currency=self.order_id.currency_id,
-                        product=line.product_id,
-                        taxes=line.tax_ids_after_fiscal_position,
+                        partner_id=commercial_partner,
+                        currency_id=self.order_id.currency_id,
+                        product_id=line.product_id,
+                        tax_ids=line.tax_ids_after_fiscal_position,
                         price_unit=line.price_unit,
-                        quantity=sign * line.qty,
-                        price_subtotal=sign * line.price_subtotal,
+                        quantity=line.qty * (-1 if is_refund_order else 1),
                         discount=line.discount,
-                        account=account,
-                        is_refund=is_refund,
+                        account_id=account,
+                        is_refund=is_refund_line,
+                        sign=1 if is_refund_order else -1,
                     ),
-                    'uom': line.product_uom_id,
+                    'uom_id': line.product_uom_id,
                     'name': product_name,
                 }
             )

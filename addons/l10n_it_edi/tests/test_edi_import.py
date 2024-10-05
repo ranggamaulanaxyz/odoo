@@ -206,7 +206,7 @@ class TestItEdiImport(TestItEdi):
             'proxy_type': 'l10n_it_edi',
             'id_client': str(uuid.uuid4()),
             'edi_identification': ProxyUser._get_proxy_identification(self.company, 'l10n_it_edi'),
-            'private_key': str(uuid.uuid4()),
+            'private_key_id': self.private_key_id.id,
         })
 
         filename = 'IT01234567890_FPR02.xml'
@@ -285,7 +285,7 @@ class TestItEdiImport(TestItEdi):
             </xpath>
 
             <xpath expr="//FatturaElettronicaBody/DatiBeniServizi/DettaglioLinee[1]/PrezzoTotale" position="replace">
-                <PrezzoTotale>1.50</PrezzoTotale>
+                <PrezzoTotale>1.50000000</PrezzoTotale>
             </xpath>
         """
 

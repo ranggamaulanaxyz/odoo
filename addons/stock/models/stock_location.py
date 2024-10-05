@@ -49,7 +49,7 @@ class Location(models.Model):
              "\n* Production: Virtual counterpart location for production operations: this location consumes the components and produces finished products"
              "\n* Transit Location: Counterpart location that should be used in inter-company or inter-warehouses operations")
     location_id = fields.Many2one(
-        'stock.location', 'Parent Location', index=True, ondelete='cascade', check_company=True,
+        'stock.location', 'Parent Location', index=True, check_company=True,
         help="The parent location that includes this location. Example : The 'Dispatch Zone' is the 'Gate 1' parent location.")
     child_ids = fields.One2many('stock.location', 'location_id', 'Contains')
     child_internal_location_ids = fields.Many2many(
@@ -69,7 +69,6 @@ class Location(models.Model):
         default=lambda self: self.env.company, index=True,
         help='Let this field empty if this location is shared between companies')
     scrap_location = fields.Boolean('Is a Scrap Location?', default=False, help='Check this box to allow using this location to put scrapped/damaged goods.')
-    return_location = fields.Boolean('Is a Return Location?', help='Check this box to allow using this location as a return location.')
     replenish_location = fields.Boolean('Replenish Location', copy=False, compute="_compute_replenish_location", readonly=False, store=True,
                                         help='Activate this function to get all quantities to replenish at this particular location')
     removal_strategy_id = fields.Many2one(
@@ -261,6 +260,9 @@ class Location(models.Model):
         self.invalidate_model(['warehouse_id'])
         return res
 
+    def unlink(self):
+        return super(Location, self.search([('id', 'child_of', self.ids)])).unlink()
+
     @api.model
     def name_create(self, name):
         if name:
@@ -399,7 +401,7 @@ class Location(models.Model):
 
     def should_bypass_reservation(self):
         self.ensure_one()
-        return self.usage in ('supplier', 'customer', 'inventory', 'production') or self.scrap_location or (self.usage == 'transit' and not self.company_id)
+        return self.usage in ('supplier', 'customer', 'inventory', 'production') or self.scrap_location
 
     def _check_access_putaway(self):
         return self
@@ -453,6 +455,14 @@ class Location(models.Model):
     def _child_of(self, other_location):
         self.ensure_one()
         return other_location.parent_path in self.parent_path
+
+    def _is_outgoing(self):
+        self.ensure_one()
+        if self.usage == 'customer':
+            return True
+        # Can also be True if location is inter-company transit
+        inter_comp_location = self.env.ref('stock.stock_location_inter_company', raise_if_not_found=False)
+        return self._child_of(inter_comp_location)
 
     def _get_weight(self, excluded_sml_ids=False):
         """Returns a dictionary with the net and forecasted weight of the location.

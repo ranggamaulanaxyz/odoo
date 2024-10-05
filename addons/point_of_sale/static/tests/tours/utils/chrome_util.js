@@ -62,3 +62,13 @@ export function clickBtn(name) {
         run: "click",
     };
 }
+export function fillTextArea(target, value) {
+    return {
+        content: `Fill text area with ${value}`,
+        trigger: `textarea${target}`,
+        run: `edit ${value}`,
+    };
+}
+export function createFloatingOrder() {
+    return { trigger: ".pos-leftheader .list-plus-btn", run: "click" };
+}

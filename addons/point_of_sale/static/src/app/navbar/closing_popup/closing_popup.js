@@ -13,9 +13,10 @@ import { useAsyncLockedMethod } from "@point_of_sale/app/utils/hooks";
 import { ask } from "@point_of_sale/app/store/make_awaitable_dialog";
 import { deduceUrl } from "@point_of_sale/utils";
 import { FormViewDialog } from "@web/views/view_dialogs/form_view_dialog";
+import { PaymentMethodBreakdown } from "@point_of_sale/app/components/payment_method_breakdown/payment_method_breakdown";
 
 export class ClosePosPopup extends Component {
-    static components = { SaleDetailsButton, Input, Dialog };
+    static components = { SaleDetailsButton, Input, Dialog, PaymentMethodBreakdown };
     static template = "point_of_sale.ClosePosPopup";
     static props = [
         "orders_details",
@@ -32,8 +33,34 @@ export class ClosePosPopup extends Component {
         this.report = useService("report");
         this.hardwareProxy = useService("hardware_proxy");
         this.dialog = useService("dialog");
+        this.ui = useState(useService("ui"));
         this.state = useState(this.getInitialState());
         this.confirm = useAsyncLockedMethod(this.confirm);
+    }
+    autoFillCashCount() {
+        const count = this.props.default_cash_details.amount;
+        this.state.payments[this.props.default_cash_details.id].counted = count.toString();
+        this.setManualCashInput(count);
+    }
+    get cashMoveData() {
+        const { total, moves } = this.props.default_cash_details.moves.reduce(
+            (acc, move, i) => {
+                acc.total += move.amount;
+                acc.moves.push({
+                    id: i,
+                    name: move.name,
+                    amount: move.amount,
+                });
+                return acc;
+            },
+            { total: 0, moves: [] }
+        );
+        return { total, moves };
+    }
+    async cashMove() {
+        await this.pos.cashMove();
+        this.dialog.closeAll();
+        this.pos.closeSession();
     }
     getInitialState() {
         const initialState = { notes: "", payments: {} };

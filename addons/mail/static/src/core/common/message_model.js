@@ -8,10 +8,8 @@ import {
 import { rpc } from "@web/core/network/rpc";
 
 import { browser } from "@web/core/browser/browser";
-import { deserializeDateTime } from "@web/core/l10n/dates";
 import { _t } from "@web/core/l10n/translation";
 import { user } from "@web/core/user";
-import { omit } from "@web/core/utils/objects";
 import { url } from "@web/core/utils/urls";
 import { stateToUrl } from "@web/core/browser/router";
 import { toRaw } from "@odoo/owl";
@@ -48,6 +46,18 @@ export class Message extends Record {
     date = Record.attr(undefined, { type: "datetime" });
     /** @type {string} */
     default_subject;
+    /** @type {boolean} */
+    edited = Record.attr(false, {
+        compute() {
+            return Boolean(
+                new DOMParser()
+                    .parseFromString(this.body, "text/html")
+                    // ".o-mail-Message-edited" is the class added by the mail.thread in _message_update_content
+                    // when the message is edited
+                    .querySelector(".o-mail-Message-edited")
+            );
+        },
+    });
     hasEveryoneSeen = Record.attr(false, {
         /** @this {import("models").Message} */
         compute() {
@@ -119,7 +129,14 @@ export class Message extends Record {
      * @type {() => {} | undefined}
      */
     postFailRedo = undefined;
-    reactions = Record.many("MessageReactions", { inverse: "message" });
+    reactions = Record.many("MessageReactions", {
+        inverse: "message",
+        /**
+         * @param {import("models").MessageReactions} r1
+         * @param {import("models").MessageReactions} r2
+         */
+        sort: (r1, r2) => r1.sequence - r2.sequence,
+    });
     notifications = Record.many("Notification", { inverse: "message" });
     recipients = Record.many("Persona");
     thread = Record.one("Thread");
@@ -166,12 +183,6 @@ export class Message extends Record {
     /** @type {undefined|Boolean} */
     needaction;
     starred = false;
-
-    /**
-     * We exclude the milliseconds because datetime string from the server don't
-     * have them. Message without date like transient message can be missordered
-     */
-    now = DateTime.now().set({ milliseconds: 0 });
 
     /**
      * True if the backend would technically allow edition
@@ -279,12 +290,8 @@ export class Message extends Record {
         );
     }
 
-    get editDate() {
-        return this.write_date !== this.create_date ? this.write_date : false;
-    }
-
     get hasTextContent() {
-        return /*(this.editDate && this.attachment_ids.length) || */ !this.isBodyEmpty;
+        return !this.isBodyEmpty;
     }
 
     isEmpty = Record.attr(false, {
@@ -303,7 +310,9 @@ export class Message extends Record {
             return (
                 !this.body ||
                 ["", "<p></p>", "<p><br></p>", "<p><br/></p>"].includes(
-                    this.body.replace(/\s/g, "")
+                    this.body
+                        .replace('<span class="o-mail-Message-edited"></span>', "")
+                        .replace(/\s/g, "")
                 )
             );
         },
@@ -347,12 +356,6 @@ export class Message extends Record {
         return this.notifications.filter((notification) => notification.isFailure);
     }
 
-    get editDatetimeHuge() {
-        return deserializeDateTime(this.editDate).toLocaleString(
-            omit(DateTime.DATETIME_HUGE, "timeZoneName")
-        );
-    }
-
     get scheduledDateSimple() {
         return this.scheduledDatetime.toLocaleString(DateTime.TIME_24_SIMPLE, {
             locale: user.lang,
@@ -360,7 +363,12 @@ export class Message extends Record {
     }
 
     get canToggleStar() {
-        return Boolean(!this.is_transient && this.thread && this.store.self.type === "partner");
+        return Boolean(
+            !this.is_transient &&
+                this.thread &&
+                this.store.self.type === "partner" &&
+                this.store.self.isInternalUser
+        );
     }
 
     /** @param {import("models").Thread} thread the thread where the message is shown */
@@ -411,6 +419,7 @@ export class Message extends Record {
             body: await prettifyMessageContent(body, validMentions),
             message_id: this.id,
             partner_ids: validMentions?.partners?.map((partner) => partner.id),
+            ...this.thread.rpcParams,
         });
         this.store.insert(data, { html: true });
         if (this.hasLink && this.store.hasLinkPreviewFeature) {
@@ -426,6 +435,7 @@ export class Message extends Record {
                     action: "add",
                     content,
                     message_id: this.id,
+                    ...this.thread.rpcParams,
                 },
                 { silent: true }
             )
@@ -438,6 +448,7 @@ export class Message extends Record {
             attachment_tokens: [],
             body: "",
             message_id: this.id,
+            ...this.thread.rpcParams,
         });
         this.body = "";
         this.attachment_ids = [];

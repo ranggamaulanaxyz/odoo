@@ -52,7 +52,7 @@ test("simple chatter on a record", async () => {
     await contains(".o-mail-Chatter-topbar");
     await contains(".o-mail-Thread");
     await assertSteps([
-        `/mail/thread/data - {"request_list":["activities","followers","attachments","suggestedRecipients"],"thread_id":${partnerId},"thread_model":"res.partner"}`,
+        `/mail/thread/data - {"request_list":["activities","attachments","followers","scheduledMessages","suggestedRecipients"],"thread_id":${partnerId},"thread_model":"res.partner"}`,
         `/mail/thread/messages - {"thread_id":${partnerId},"thread_model":"res.partner","limit":30}`,
     ]);
 });
@@ -245,7 +245,7 @@ test("should not display user notification messages in chatter", async () => {
     });
     await start();
     await openFormView("res.partner", partnerId);
-    await contains(".o-mail-Thread", { text: "There are no messages in this conversation." });
+    await contains(".o-mail-Thread", { text: "The conversation is empty." });
     await contains(".o-mail-Message", { count: 0 });
 });
 

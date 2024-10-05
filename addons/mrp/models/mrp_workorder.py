@@ -133,7 +133,7 @@ class MrpWorkorder(models.Model):
 
     scrap_ids = fields.One2many('stock.scrap', 'workorder_id')
     scrap_count = fields.Integer(compute='_compute_scrap_move_count', string='Scrap Move')
-    production_date = fields.Datetime('Production Date', related='production_id.date_start', store=True)
+    production_date = fields.Datetime('Production Date', compute='_compute_production_date', store=True)
     json_popover = fields.Char('Popover Data JSON', compute='_compute_json_popover')
     show_json_popover = fields.Boolean('Show Popover?', compute='_compute_json_popover')
     consumption = fields.Selection(related='production_id.consumption')
@@ -172,6 +172,11 @@ class MrpWorkorder(models.Model):
                 workorder.state = 'ready'
             elif workorder.production_availability != 'assigned' and workorder.state == 'ready':
                 workorder.state = 'waiting'
+
+    @api.depends('production_id.date_start', 'date_start')
+    def _compute_production_date(self):
+        for workorder in self:
+            workorder.production_date = workorder.date_start or workorder.production_id.date_start
 
     @api.depends('production_state', 'date_start', 'date_finished')
     def _compute_json_popover(self):
@@ -276,9 +281,12 @@ class MrpWorkorder(models.Model):
             wo.barcode = f"{wo.production_id.name}/{wo.id}"
 
     @api.depends('production_id', 'product_id')
+    @api.depends_context('prefix_product')
     def _compute_display_name(self):
         for wo in self:
             wo.display_name = f"{wo.production_id.name} - {wo.name}"
+            if self.env.context.get('prefix_product'):
+                wo.display_name = f"{wo.product_id.name} - {wo.production_id.name} - {wo.name}"
 
     def unlink(self):
         # Removes references to workorder to avoid Validation Error
@@ -336,6 +344,8 @@ class MrpWorkorder(models.Model):
             delta_duration = new_order_duration - old_order_duration
 
             if delta_duration > 0:
+                if order.state not in ('progress', 'done'):
+                    order.state = 'progress'
                 enddate = datetime.now()
                 date_start = enddate - timedelta(seconds=_float_duration_to_second(delta_duration))
                 if order.duration_expected >= new_order_duration or old_order_duration >= order.duration_expected:
@@ -558,10 +568,17 @@ class MrpWorkorder(models.Model):
         vals['leave_id'] = leave.id
         self.write(vals)
 
-    def _cal_cost(self):
+    def _cal_cost(self, date=False):
+        """Returns total cost of time spent on workorder.
+
+        :param date datetime: Only calculate for time_ids that ended before this date
+        """
         total = 0
         for wo in self:
-            duration = sum(wo.time_ids.mapped('duration'))
+            if date:
+                duration = sum(wo.time_ids.filtered(lambda t: t.date_end <= date).mapped('duration'))
+            else:
+                duration = sum(wo.time_ids.mapped('duration'))
             total += (duration / 60.0) * wo.workcenter_id.costs_hour
         return total
 
@@ -880,8 +897,11 @@ class MrpWorkorder(models.Model):
                 wo.duration = wo.duration_expected
                 wo.duration_percent = 100
 
-    def _compute_expected_operation_cost(self):
+    def _compute_expected_operation_cost(self, without_employee_cost=False):
         return (self.duration_expected / 60.0) * (self.costs_hour or self.workcenter_id.costs_hour)
 
     def _compute_current_operation_cost(self):
+        return (self.get_duration() / 60.0) * (self.costs_hour or self.workcenter_id.costs_hour)
+
+    def _get_current_theorical_operation_cost(self, without_employee_cost=False):
         return (self.get_duration() / 60.0) * (self.costs_hour or self.workcenter_id.costs_hour)

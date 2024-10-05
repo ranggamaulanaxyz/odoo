@@ -6,12 +6,12 @@
         <field name="arch" type="xml">
             <kanban class="o_kanban_mobile">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div class="d-flex">
                             <field name="name" class="fw-bold fs-5 mb-1"/>
                             <span class="badge rounded-pill ms-auto mt-1"><strong>Min qty:</strong><field name="product_min_qty"/></span>
                         </div>
-                        <footer class="fs-6 pt-0">
+                        <footer class="pt-0">
                             <field name="product_id"/>
                             <span class="badge rounded-pill ms-auto"><strong>Max qty:</strong><field name="product_max_qty"/></span>
                         </footer>
@@ -88,6 +88,7 @@
                 <searchpanel>
                     <field name="location_id" string="Locations" groups="stock.group_stock_multi_locations" enable_counters="1"/>
                     <field name="trigger" string="Trigger" enable_counters="1"/>
+                    <field name="product_category_id" icon="fa-filter" string="Category" select="multi" enable_counters="1"/>
                 </searchpanel>
             </search>
         </field>
@@ -120,9 +121,6 @@
         <field name="model">stock.warehouse.orderpoint</field>
         <field name="arch" type="xml">
             <form string="Reordering Rules">
-                <div class="alert alert-info" role="alert">
-                    <a style="cursor: pointer" class="alert-link o_form_uri" type="action" name="%(action_procurement_compute)d">Run the scheduler</a> manually to trigger the reordering rules right now.
-                </div>
                 <sheet>
                     <widget name="web_ribbon" title="Archived" bg_color="text-bg-danger" invisible="active"/>
                     <div class="oe_title">

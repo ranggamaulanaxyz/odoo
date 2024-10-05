@@ -2,9 +2,6 @@ import * as ProductScreen from "@point_of_sale/../tests/tours/utils/product_scre
 import { inLeftSide } from "@point_of_sale/../tests/tours/utils/common";
 import { isSyncStatusConnected } from "@point_of_sale/../tests/tours/utils/chrome_util";
 
-export function clickNewTicket() {
-    return [{ trigger: ".ticket-screen .highlight", run: "click" }];
-}
 export function clickDiscard() {
     return {
         content: "go back",
@@ -16,6 +13,14 @@ export function selectOrder(orderName) {
     return [
         {
             trigger: `.ticket-screen .order-row > .col:contains("${orderName}")`,
+            run: "click",
+        },
+    ];
+}
+export function selectOrderByPrice(price) {
+    return [
+        {
+            trigger: `.ticket-screen .order-row > .col:contains("${price}")`,
             run: "click",
         },
     ];
@@ -193,4 +198,13 @@ export function back() {
         trigger: ".back-button",
         run: "click",
     };
+}
+
+export function nthColumnContains(nRow, nCol, string) {
+    return [
+        {
+            trigger: `.ticket-screen .order-row:nth-last-child(${nRow}) > .col:nth-child(${nCol}):contains("${string}")`,
+            run: () => {},
+        },
+    ];
 }

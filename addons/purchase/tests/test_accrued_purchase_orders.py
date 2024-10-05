@@ -128,7 +128,7 @@ class TestAccruedPurchaseOrders(AccountTestInvoicingCommon):
             'name': 'Tax 10% included',
             'amount': 10.0,
             'type_tax_use': 'purchase',
-            'price_include': True,
+            'price_include_override': 'tax_included',
         })
         self.purchase_order.order_line.taxes_id = tax_10_included
         self.purchase_order.order_line.qty_received = 5
@@ -141,4 +141,40 @@ class TestAccruedPurchaseOrders(AccountTestInvoicingCommon):
             {'account_id': self.account_expense.id, 'debit': 4545.45, 'credit': 0.0},
             {'account_id': self.alt_exp_account.id, 'debit': 909.09, 'credit': 0.0},
             {'account_id': self.account_revenue.id, 'debit': 0.0, 'credit': 5454.54},
+        ])
+
+    def test_accrued_order_returned(self):
+        self.purchase_order.order_line.qty_received = 10
+        # received products billed, nothing to bill left
+        move = self.env['account.move'].browse(self.purchase_order.action_create_invoice()['res_id'])
+        move.invoice_date = '2020-01-01'
+        move.action_post()
+
+        with self.assertRaises(UserError):
+            self.wizard.create_entries()
+
+        self.purchase_order.order_line.qty_received = 5
+        res = self.env['account.move'].search(self.wizard.create_entries()['domain']).line_ids
+        self.assertRecordValues(res, [
+            # reverse move lines
+            {'account_id': self.account_expense.id, 'debit': 5000.0, 'credit': 0.0},
+            {'account_id': self.alt_exp_account.id, 'debit': 1000.0, 'credit': 0.0},
+            {'account_id': self.account_revenue.id, 'debit': 0.0, 'credit': 6000.0},
+            # move lines
+            {'account_id': self.account_expense.id, 'debit': 0.0, 'credit': 5000.0},
+            {'account_id': self.alt_exp_account.id, 'debit': 0.0, 'credit': 1000.0},
+            {'account_id': self.account_revenue.id, 'debit': 6000.0, 'credit': 0.0},
+        ])
+
+        self.purchase_order.order_line.qty_received = 0
+        res = self.env['account.move'].search(self.wizard.create_entries()['domain']).line_ids
+        self.assertRecordValues(res, [
+            # reverse move lines
+            {'account_id': self.account_expense.id, 'debit': 5000.0, 'credit': 0.0},
+            {'account_id': self.alt_exp_account.id, 'debit': 1000.0, 'credit': 0.0},
+            {'account_id': self.account_revenue.id, 'debit': 0.0, 'credit': 6000.0},
+            # move lines
+            {'account_id': self.account_expense.id, 'debit': 0.0, 'credit': 5000.0},
+            {'account_id': self.alt_exp_account.id, 'debit': 0.0, 'credit': 1000.0},
+            {'account_id': self.account_revenue.id, 'debit': 6000.0, 'credit': 0.0},
         ])

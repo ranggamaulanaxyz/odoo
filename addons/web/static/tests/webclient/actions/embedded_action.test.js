@@ -18,7 +18,8 @@ import {
 import { browser } from "@web/core/browser/browser";
 import { WebClient } from "@web/webclient/webclient";
 import { router } from "@web/core/browser/router";
-import { runAllTimers } from "@odoo/hoot-mock";
+import { user } from "@web/core/user";
+import { runAllTimers, mockTouch } from "@odoo/hoot-mock";
 
 describe.current.tags("desktop");
 
@@ -65,7 +66,7 @@ class Partner extends models.Model {
         "kanban,1": `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -88,7 +89,7 @@ class Pony extends models.Model {
         "list,false": `<list><field name="name"/></list>`,
         "kanban,false": `<kanban>
                             <templates>
-                                <t t-name="kanban-card">
+                                <t t-name="card">
                                     <field name="name"/>
                                 </t>
                             </templates>
@@ -204,9 +205,7 @@ test("can click on a embedded action and execute the corresponding action (with 
     await contains(
         ".o_popover.dropdown-menu .dropdown-item > div > span:contains('Embedded Action 2')"
     ).click();
-    await contains(
-        ".o_embedded_actions > button > span:contains('Embedded Action 2')"
-    ).click();
+    await contains(".o_embedded_actions > button > span:contains('Embedded Action 2')").click();
     await runAllTimers();
     expect(router.current.action).toBe(3, {
         message: "the current action should be the one of the embedded action previously clicked",
@@ -236,9 +235,7 @@ test("can click on a embedded action and execute the corresponding action (with 
     await contains(
         ".o_popover.dropdown-menu .dropdown-item > div > span:contains('Embedded Action 3')"
     ).click();
-    await contains(
-        ".o_embedded_actions > button > span:contains('Embedded Action 3')"
-    ).click();
+    await contains(".o_embedded_actions > button > span:contains('Embedded Action 3')").click();
     await runAllTimers();
     expect(router.current.action).toBe(4, {
         message: "the current action should be the one of the embedded action previously clicked",
@@ -273,9 +270,7 @@ test("breadcrumbs are updated when clicking on embeddeds", async () => {
     ).click();
     expect(".o_control_panel .breadcrumb-item").toHaveCount(0);
     expect(".o_control_panel .o_breadcrumb .active").toHaveText("Partners Action 1");
-    await contains(
-        ".o_embedded_actions > button > span:contains('Embedded Action 2')"
-    ).click();
+    await contains(".o_embedded_actions > button > span:contains('Embedded Action 2')").click();
     await runAllTimers();
     expect(router.current.action).toBe(3, {
         message: "the current action should be the one of the embedded action previously clicked",
@@ -284,9 +279,7 @@ test("breadcrumbs are updated when clicking on embeddeds", async () => {
         "Partners Action 1",
         "Favorite Ponies",
     ]);
-    await contains(
-        ".o_embedded_actions > button > span:contains('Embedded Action 3')"
-    ).click();
+    await contains(".o_embedded_actions > button > span:contains('Embedded Action 3')").click();
     await runAllTimers();
     expect(router.current.action).toBe(4, {
         message: "the current action should be the one of the embedded action previously clicked",
@@ -299,8 +292,11 @@ test("breadcrumbs are updated when clicking on embeddeds", async () => {
 
 test("a view coming from a embedded can be saved in the embedded actions", async () => {
     onRpc("create", ({ args }) => {
-        expect(args[0][0].name).toBe("Custom Embedded Action 2");
-        return [4, args[0][0].name]; // Fake new embedded action id
+        const values = args[0][0];
+        expect(values.name).toBe("Custom Embedded Action 2");
+        expect(values.action_id).toBe(3);
+        expect(values).not.toInclude("python_method");
+        return [4, values.name]; // Fake new embedded action id
     });
     onRpc("create_or_replace", ({ args }) => {
         expect(args[0].domain).toBe(`[["name", "=", "Applejack"]]`);
@@ -316,11 +312,68 @@ test("a view coming from a embedded can be saved in the embedded actions", async
     await contains(
         ".o_popover.dropdown-menu .dropdown-item > div > span:contains('Embedded Action 2')"
     ).click();
-    await contains(
-        ".o_embedded_actions > button > span:contains('Embedded Action 2')"
-    ).click();
+    await contains(".o_embedded_actions > button > span:contains('Embedded Action 2')").click();
     await runAllTimers();
     expect(router.current.action).toBe(3, {
+        message: "the current action should be the one of the embedded action previously clicked",
+    });
+    expect(".o_list_view").toHaveCount(1, { message: "the view should be a list view" });
+    await contains("button.o_switch_view.o_kanban").click();
+    expect(".o_kanban_view").toHaveCount(1, { message: "the view should be a kanban view" });
+    await toggleSearchBarMenu();
+    await toggleMenuItem("My filter");
+    await toggleSearchBarMenu();
+    expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(1, {
+        message: "There should be one record",
+    });
+    await contains(".o_embedded_actions .dropdown").click();
+    await contains(".o_save_current_view ").click();
+    await contains("input.form-check-input").click();
+    await contains(".o_save_favorite ").click();
+    expect(".o_embedded_actions > button").toHaveCount(4, {
+        message: "Should have 2 embedded actions in the embedded + the dropdown button",
+    });
+});
+
+test("a view coming from a embedded with python_method can be saved in the embedded actions", async () => {
+    onRpc(({ args, method }) => {
+        let values;
+        if (method === "create") {
+            values = args[0][0];
+            expect(values.name).toBe("Custom Embedded Action 3");
+            expect(values.python_method).toBe("do_python_method");
+            expect(values).not.toInclude("action_id");
+            return [4, values.name]; // Fake new embedded action id
+        } else if (method === "create_or_replace") {
+            values = args[0][0];
+            expect(args[0].domain).toBe(`[["name", "=", "Applejack"]]`);
+            expect(args[0].embedded_action_id).toBe(4);
+            expect(args[0].user_id).toBe(false);
+            return 5; // Fake new filter id
+        } else if (method === "do_python_method") {
+            return {
+                id: 4,
+                name: "Favorite Ponies from python action",
+                res_model: "pony",
+                type: "ir.actions.act_window",
+                views: [
+                    [false, "list"],
+                    [false, "kanban"],
+                ],
+            };
+        }
+    });
+    await mountWithCleanup(WebClient);
+    await getService("action").doAction(1);
+    browser.localStorage.clear();
+    await contains(".o_control_panel_navigation > button > i.fa-sliders").click();
+    await contains(".o_embedded_actions .dropdown").click();
+    await contains(
+        ".o_popover.dropdown-menu .dropdown-item > div > span:contains('Embedded Action 3')"
+    ).click();
+    await contains(".o_embedded_actions > button > span:contains('Embedded Action 3')").click();
+    await runAllTimers();
+    expect(router.current.action).toBe(4, {
         message: "the current action should be the one of the embedded action previously clicked",
     });
     expect(".o_list_view").toHaveCount(1, { message: "the view should be a list view" });
@@ -355,5 +408,60 @@ test("the embedded actions should not be displayed when switching view", async (
     await contains("button.o_switch_view.o_kanban").click();
     expect(".o_embedded_actions").toHaveCount(0, {
         message: "The embedded actions menu should not be displayed",
+    });
+});
+
+test("User can move the main (first) embedded action", async () => {
+    await mountWithCleanup(WebClient);
+    await getService("action").doAction(1);
+    browser.localStorage.clear();
+    await contains(".o_control_panel_navigation > button > i.fa-sliders").click();
+    await contains(".o_embedded_actions .dropdown").click();
+    await contains(
+        ".o_popover.dropdown-menu .dropdown-item > div > span:contains('Embedded Action 2')"
+    ).click();
+    mockTouch(true);
+    await contains(".o_embedded_actions > button:first-child").dragAndDrop(
+        ".o_embedded_actions > button:nth-child(2)"
+    );
+    expect(".o_embedded_actions > button:nth-child(2) > span").toHaveText("Partners Action 1", {
+        message: "Main embedded action should've been moved to 2nd position",
+    });
+});
+
+test("User can unselect the main (first) embedded action", async () => {
+    await mountWithCleanup(WebClient);
+    await getService("action").doAction(1);
+    browser.localStorage.clear();
+    await contains(".o_control_panel_navigation > button > i.fa-sliders").click();
+    await contains(".o_embedded_actions .dropdown").click();
+    const dropdownItem =
+        ".o_popover.dropdown-menu .dropdown-item > div > span:contains('Partners Action 1')";
+    expect(dropdownItem).not.toHaveClass("text-muted", {
+        message: "Main embedded action should not be displayed in muted",
+    });
+    await contains(dropdownItem).click();
+    expect(dropdownItem).not.toHaveClass("selected", {
+        message: "Main embedded action should be unselected",
+    });
+});
+
+test("User should be redirected to the first embedded action set in localStorage", async () => {
+    await mountWithCleanup(WebClient);
+    browser.localStorage.clear();
+    browser.localStorage.setItem(`orderEmbedded1++${user.userId}`, JSON.stringify([2, false, 3])); // set embedded action 2 in first
+    await getService("action").doActionButton({
+        name: 1,
+        type: "action",
+    });
+    await contains(".o_control_panel_navigation > button > i.fa-sliders").click();
+    expect(".o_embedded_actions > button:first-child").toHaveClass("active", {
+        message: "First embedded action in order should have the 'active' class",
+    });
+    expect(".o_embedded_actions > button:first-child > span").toHaveText("Embedded Action 2", {
+        message: "First embedded action in order should be 'Embedded Action 2'",
+    });
+    expect(".o_last_breadcrumb_item > span").toHaveText("Favorite Ponies", {
+        message: "'Favorite Ponies' view should be loaded",
     });
 });

@@ -1,7 +1,7 @@
 /** @odoo-module **/
 
 import {
-    dragNDrop,
+    insertSnippet,
     registerWebsitePreviewTour,
 } from "@website/js/tours/tour_utils";
 import { browser } from "@web/core/browser/browser";
@@ -34,7 +34,7 @@ registerWebsitePreviewTour('edit_link_popover_1', {
     edition: true,
 }, () => [
     // 1. Test links in page content (web_editor)
-    ...dragNDrop({
+    ...insertSnippet({
         id: 's_text_image',
         name: 'Text - Image',
         groupName: "Content",
@@ -152,7 +152,7 @@ registerWebsitePreviewTour('edit_link_popover_2', {
     edition: true,
 }, () => [
     // 1. Test links in page content (web_editor)
-    ...dragNDrop({
+    ...insertSnippet({
         id: 's_text_image',
         name: 'Text - Image',
         groupName: "Content",
@@ -192,15 +192,15 @@ registerWebsitePreviewTour('edit_link_popover_2', {
     {
         content: "Double click on link",
         trigger: ':iframe footer a[href="/"]',
-        run(actions) {
+        async run(actions) {
             // Create range to simulate real double click, see pull request
             const range = document.createRange();
             range.selectNodeContents(this.anchor);
             const sel = window.getSelection();
             sel.removeAllRanges();
             sel.addRange(range);
-            actions.click();
-            actions.dblclick();
+            await actions.click();
+            await actions.dblclick();
         },
     },
     {

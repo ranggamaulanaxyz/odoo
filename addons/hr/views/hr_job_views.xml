@@ -7,6 +7,7 @@
             <field name="model">hr.job</field>
             <field name="arch" type="xml">
                 <form string="Job">
+                    <header/> <!-- inherited in other module -->
                     <field name="active" invisible="1"/>
                     <field name="company_id" invisible="1"/>
                     <sheet>
@@ -60,7 +61,7 @@
             <field name="arch" type="xml">
                 <kanban class="o_kanban_mobile" sample="1">
                     <templates>
-                        <t t-name="kanban-card">
+                        <t t-name="card">
                             <field class="fw-bold" name="name"/>
                             <field name="department_id"/>
                             <span t-if="!selection_mode">Vacancies: <field name="expected_employees"/></span>

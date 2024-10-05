@@ -11,6 +11,7 @@ from odoo.tools import format_list, SQL
 from odoo.tools.mail import is_html_empty
 from odoo.tools.misc import format_date
 from odoo.addons.account.models.account_move import MAX_HASH_VERSION
+from odoo.addons.base_vat.models.res_partner import _ref_vat
 
 
 MONTH_SELECTION = [
@@ -99,8 +100,6 @@ class ResCompany(models.Model):
     default_cash_difference_income_account_id = fields.Many2one('account.account', string="Cash Difference Income", check_company=True)
     default_cash_difference_expense_account_id = fields.Many2one('account.account', string="Cash Difference Expense", check_company=True)
     account_journal_suspense_account_id = fields.Many2one('account.account', string='Journal Suspense Account', check_company=True)
-    account_journal_payment_debit_account_id = fields.Many2one('account.account', string='Journal Outstanding Receipts', check_company=True)
-    account_journal_payment_credit_account_id = fields.Many2one('account.account', string='Journal Outstanding Payments', check_company=True)
     account_journal_early_pay_discount_gain_account_id = fields.Many2one(comodel_name='account.account', string='Cash Discount Write-Off Gain Account', check_company=True)
     account_journal_early_pay_discount_loss_account_id = fields.Many2one(comodel_name='account.account', string='Cash Discount Write-Off Loss Account', check_company=True)
     transfer_account_code_prefix = fields.Char(string='Prefix of the transfer accounts')
@@ -116,7 +115,7 @@ class ResCompany(models.Model):
         string="Gain Exchange Rate Account",
         check_company=True,
         domain="[('deprecated', '=', False),\
-                ('account_type', 'in', ('income', 'income_other'))]")
+                ('internal_group', '=', 'income')]")
     expense_currency_exchange_account_id = fields.Many2one(
         comodel_name='account.account',
         string="Loss Exchange Rate Account",
@@ -130,8 +129,6 @@ class ResCompany(models.Model):
 
     qr_code = fields.Boolean(string='Display QR-code on invoices')
 
-    invoice_is_email = fields.Boolean('Email by default', default=True)
-    invoice_is_download = fields.Boolean('Download by default', default=True)
     display_invoice_amount_total_words = fields.Boolean(string='Total amount of invoice in letters')
     display_invoice_tax_company_currency = fields.Boolean(
         string="Taxes in company currency",
@@ -253,6 +250,7 @@ class ResCompany(models.Model):
         required=True,
         help="Default on whether the sales price used on the product and invoices with this Company includes its taxes."
     )
+    company_vat_placeholder = fields.Char(compute='_compute_company_vat_placeholder')
 
     def get_next_batch_payment_communication(self):
         '''
@@ -300,10 +298,9 @@ class ResCompany(models.Model):
 
     @api.constrains('check_account_audit_trail')
     def _check_audit_trail_records(self):
-        if not self.check_account_audit_trail:
-            move_count = self.env['account.move'].search_count([('company_id', '=', self.id)], limit=1)
-            if move_count:
-                raise UserError(_("Can't disable audit trail when there are existing records."))
+        companies = self.filtered(lambda c: not c.check_account_audit_trail)
+        if self.env['account.move'].search_count([('company_id', 'in', companies.ids)], limit=1):
+            raise UserError(_("Can't disable audit trail when there are existing records."))
 
     @api.depends('fiscal_position_ids.foreign_vat')
     def _compute_multi_vat_foreign_country(self):
@@ -532,12 +529,13 @@ class ResCompany(models.Model):
                           (soft_lock_date_field, '<', company[soft_lock_date_field]),
                           ('company_id', '=', company.id),
                         ],
-                        order=f'{soft_lock_date_field} asc',
+                        order='lock_date asc NULLS FIRST',
                         limit=1,
                     )
                 if exception:
                     # The search domain of the exception ensures `exception[soft_lock_date_field] < company[soft_lock_date_field]`
-                    soft_lock_date = max(soft_lock_date, exception[soft_lock_date_field])
+                    # or `exception[soft_lock_date_field] is False`
+                    soft_lock_date = max(soft_lock_date, exception[soft_lock_date_field] or date.min)
                 else:
                     soft_lock_date = max(soft_lock_date, company[soft_lock_date_field])
         return soft_lock_date
@@ -661,7 +659,17 @@ class ResCompany(models.Model):
                 if company.root_id._existing_accounting():
                     raise UserError(_('You cannot change the currency of the company since some journal items already exist'))
 
-        return super(ResCompany, self).write(values)
+        companies = super().write(values)
+
+        # We revoke all active exceptions affecting the changed lock dates and recreate them (with the updated lock dates)
+        changed_soft_lock_fields = [field for field in SOFT_LOCK_DATE_FIELDS if field in values]
+        for company in self:
+            active_exceptions = self.env['account.lock_exception'].search(
+                self.env['account.lock_exception']._get_active_exceptions_domain(company, changed_soft_lock_fields),
+            )
+            active_exceptions._recreate()
+
+        return companies
 
     @api.model
     def setting_init_bank_account_action(self):
@@ -969,7 +977,7 @@ class ResCompany(models.Model):
         }
 
     @api.model
-    def _with_locked_records(self, records):
+    def _with_locked_records(self, records, allow_raising=True):
         """ To avoid sending the same records multiple times from different transactions,
         we use this generic method to lock the records passed as parameter.
 
@@ -977,8 +985,11 @@ class ResCompany(models.Model):
         """
         self._cr.execute(f'SELECT * FROM {records._table} WHERE id IN %s FOR UPDATE SKIP LOCKED', [tuple(records.ids)])
         available_ids = {r[0] for r in self._cr.fetchall()}
-        if available_ids != set(records.ids):
+        all_locked = available_ids == set(records.ids)
+        if not all_locked and allow_raising:
             raise UserError(_("Some documents are being sent by another process already."))
+        else:
+            return all_locked
 
     def compute_fiscalyear_dates(self, current_date):
         """
@@ -992,3 +1003,16 @@ class ResCompany(models.Model):
 
         return {'date_from': datetime(year=current_date.year, month=1, day=1).date(),
                 'date_to': datetime(year=current_date.year, month=12, day=31).date()}
+
+    @api.depends('country_id', 'account_fiscal_country_id')
+    def _compute_company_vat_placeholder(self):
+        for company in self:
+            placeholder = _("/ if not applicable")
+            if company.country_id or company.account_fiscal_country_id:
+                expected_vat = _ref_vat.get(
+                    company.country_id.code.lower() or company.account_fiscal_country_id.code.lower()
+                )
+                if expected_vat:
+                    placeholder = _("%s, or / if not applicable", expected_vat)
+
+            company.company_vat_placeholder = placeholder

@@ -21,7 +21,7 @@ import { Component, onRendered, onWillRender, xml } from "@odoo/owl";
 import {
     MockServer,
     clickKanbanLoadMore,
-    clickSave,
+    clickModalButton,
     contains,
     createKanbanRecord,
     defineModels,
@@ -70,7 +70,6 @@ import { FileInput } from "@web/core/file_input/file_input";
 
 import { currencies } from "@web/core/currency";
 import { registry } from "@web/core/registry";
-import { user } from "@web/core/user";
 import { RelationalModel } from "@web/model/relational_model/relational_model";
 import { SampleServer } from "@web/model/sample_server";
 import { KanbanCompiler } from "@web/views/kanban/kanban_compiler";
@@ -232,7 +231,7 @@ test("basic ungrouped rendering", async () => {
         arch: `
             <kanban class="o_kanban_test">
             <templates>
-                <t t-name="kanban-card">
+                <t t-name="card">
                     <field name="foo"/>
                 </t>
             </templates>
@@ -254,7 +253,7 @@ test("kanban rendering with class and style attributes", async () => {
         arch: `
             <kanban class="myCustomClass" style="border: 1px solid red;">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -278,7 +277,7 @@ test("generic tags are case insensitive", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <Div class="test">Hello</Div>
                     </t>
                 </templates>
@@ -295,7 +294,7 @@ test("kanban records are clickable by default", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -315,7 +314,7 @@ test("kanban records with global_click='0'", async () => {
         arch: `
             <kanban can_open="0">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -336,7 +335,7 @@ test("float fields are formatted properly without using a widget", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="float_field" digits="[0,5]"/>
                         <field name="float_field" digits="[0,3]"/>
                     </t>
@@ -344,7 +343,7 @@ test("float fields are formatted properly without using a widget", async () => {
             </kanban>`,
     });
 
-    expect(queryFirst(".o_kanban_record")).toHaveText("0.40000\n0.400");
+    expect(".o_kanban_record:first").toHaveText("0.40000\n0.400");
 });
 
 test("field with widget and attributes in kanban", async () => {
@@ -377,7 +376,7 @@ test("field with widget and attributes in kanban", async () => {
             <kanban>
                 <field name="foo"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="int_field" widget="my_field"
                             str="some string"
                             bool="true"
@@ -397,7 +396,7 @@ test("kanban with integer field with human_readable option", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="int_field" options="{'human_readable': true}"/>
                     </t>
                 </templates>
@@ -416,7 +415,7 @@ test.tags("desktop")("Hide tooltip when user click inside a kanban headers item"
             <kanban default_group_by="product_id">
                 <field name="product_id" options='{"group_by_tooltip": {"name": "Name"}}'/>
                 <templates>
-                    <t t-name="kanban-card"/>
+                    <t t-name="card"/>
                 </templates>
             </kanban>`,
     });
@@ -424,7 +423,7 @@ test.tags("desktop")("Hide tooltip when user click inside a kanban headers item"
     expect(".o_column_title").toHaveCount(2);
     expect(".o-tooltip").toHaveCount(0);
 
-    hover(".o_kanban_group:first-child .o_kanban_header_title .o_column_title");
+    await hover(".o_kanban_group:first-child .o_kanban_header_title .o_column_title");
     await runAllTimers();
     expect(".o-tooltip").toHaveCount(1);
 
@@ -433,7 +432,7 @@ test.tags("desktop")("Hide tooltip when user click inside a kanban headers item"
     ).click();
     expect(".o-tooltip").toHaveCount(0);
 
-    hover(".o_kanban_group:first-child .o_kanban_header_title .o_column_title");
+    await hover(".o_kanban_group:first-child .o_kanban_header_title .o_column_title");
     await runAllTimers();
     expect(".o-tooltip").toHaveCount(1);
 
@@ -441,24 +440,6 @@ test.tags("desktop")("Hide tooltip when user click inside a kanban headers item"
         visible: false,
     }).click();
     expect(".o-tooltip").toHaveCount(0);
-});
-
-test("display full is supported on fields", async () => {
-    await mountView({
-        type: "kanban",
-        resModel: "partner",
-        arch: `
-        <kanban class="o_kanban_test">
-            <templates>
-                <t t-name="kanban-card">
-                    <field name="foo" display="full"/>
-                </t>
-            </templates>
-        </kanban>`,
-    });
-
-    expect(".o_kanban_record span.o_text_block").toHaveCount(4);
-    expect(queryFirst("span.o_text_block").textContent).toBe("yop");
 });
 
 test.tags("desktop")("basic grouped rendering", async () => {
@@ -484,7 +465,7 @@ test.tags("desktop")("basic grouped rendering", async () => {
         arch: `
             <kanban class="o_kanban_test">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" />
                     </t>
                 </templates>
@@ -514,7 +495,7 @@ test.tags("desktop")("basic grouped rendering", async () => {
     );
 
     // focuses the search bar and closes the dropdown
-    click(".o_searchview input");
+    await click(".o_searchview input");
 
     // the next line makes sure that reload works properly.  It looks useless,
     // but it actually test that a grouped local record can be reloaded without
@@ -533,7 +514,7 @@ test("basic grouped rendering with no record", async () => {
         arch: `
             <kanban class="o_kanban_test">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" />
                     </t>
                 </templates>
@@ -558,7 +539,7 @@ test("grouped rendering with active field (archivable by default)", async () => 
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -595,7 +576,7 @@ test("grouped rendering with active field (archivable true)", async () => {
         arch: `
             <kanban archivable="true">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -633,7 +614,7 @@ test.tags("desktop")("empty group when grouped by date", async () => {
         resModel: "partner",
         arch: `<kanban>
             <templates>
-                <t t-name="kanban-card">
+                <t t-name="card">
                     <field name="foo"/>
                 </t>
             </templates>
@@ -645,7 +626,7 @@ test.tags("desktop")("empty group when grouped by date", async () => {
 
     Partner._records.shift(); // remove only record of the first group
 
-    press("Enter"); // reload
+    await press("Enter"); // reload
     await animationFrame();
 
     expect(queryAllTexts(".o_kanban_header")).toEqual(["January 2017\n(0)", "February 2017\n(3)"]);
@@ -664,7 +645,7 @@ test("grouped rendering with active field (archivable false)", async () => {
         arch: `
             <kanban archivable="false">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -693,7 +674,7 @@ test.tags("desktop")("m2m grouped rendering with active field (archivable true)"
         arch: `
             <kanban archivable="true">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -711,7 +692,7 @@ test.tags("desktop")("m2m grouped rendering with active field (archivable true)"
         "silver\n(2)\nyop\ngnap",
     ]);
 
-    click(getKanbanColumn(0));
+    await click(getKanbanColumn(0));
     await animationFrame();
     await toggleKanbanColumnActions(0);
 
@@ -731,7 +712,7 @@ test("kanban grouped by date field", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -749,33 +730,12 @@ test("context can be used in kanban template", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field t-if="context.some_key" name="foo"/>
                     </t>
                 </templates>
             </kanban>`,
         context: { some_key: 1 },
-        domain: [["id", "=", 1]],
-    });
-
-    expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(1);
-    expect(".o_kanban_record span:contains(yop)").toHaveCount(1);
-});
-
-test("user context can be used in kanban template", async () => {
-    patchWithCleanup(user, { context: { some_key: true } });
-
-    await mountView({
-        type: "kanban",
-        resModel: "partner",
-        arch: `
-            <kanban>
-                <templates>
-                    <div t-name="kanban-card">
-                        <field t-if="user_context.some_key" name="foo"/>
-                    </div>
-                </templates>
-            </kanban>`,
         domain: [["id", "=", 1]],
     });
 
@@ -790,7 +750,7 @@ test("kanban with sub-template", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <t t-call="another-template"/>
                     </t>
                     <t t-name="another-template">
@@ -816,7 +776,7 @@ test("kanban with t-set outside card", async () => {
             <kanban>
                 <field name="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <t t-set="x" t-value="record.int_field.value"/>
                         <div>
                             <t t-esc="x"/>
@@ -836,7 +796,7 @@ test("kanban with t-if/t-else on field", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field t-if="record.int_field.value > -1" name="int_field"/>
                         <t t-else="">Negative value</t>
                     </t>
@@ -859,7 +819,7 @@ test("kanban with t-if/t-else on field with widget", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field t-if="record.int_field.value > -1" name="int_field" widget="integer"/>
                         <t t-else="">Negative value</t>
                     </t>
@@ -897,7 +857,7 @@ test("field with widget and dynamic attributes in kanban", async () => {
             <kanban>
                 <field name="foo"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="int_field" widget="my_field"
                             t-att-dyn-bool="record.foo.value.length > 3"
                             t-attf-interp-str="hello {{record.foo.value}}"
@@ -931,7 +891,7 @@ test("view button and string interpolated attribute in kanban", async () => {
             <kanban>
                 <field name="foo"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <a name="one" type="object" class="hola"/>
                         <a name="two" type="object" class="hola" t-attf-class="hello"/>
                         <a name="sri" type="object" class="hola" t-attf-class="{{record.foo.value}}"/>
@@ -942,26 +902,26 @@ test("view button and string interpolated attribute in kanban", async () => {
             </kanban>`,
     });
     expect.verifySteps([
-        "[one] className: 'hola oe_kanban_action oe_kanban_action_a'",
-        "[two] className: 'hola oe_kanban_action oe_kanban_action_a hello'",
-        "[sri] className: 'hola oe_kanban_action oe_kanban_action_a yop'",
-        "[foa] className: 'hola oe_kanban_action oe_kanban_action_a yop olleh'",
-        "[fye] className: 'hola oe_kanban_action oe_kanban_action_a hello yop'",
-        "[one] className: 'hola oe_kanban_action oe_kanban_action_a'",
-        "[two] className: 'hola oe_kanban_action oe_kanban_action_a hello'",
-        "[sri] className: 'hola oe_kanban_action oe_kanban_action_a blip'",
-        "[foa] className: 'hola oe_kanban_action oe_kanban_action_a blip olleh'",
-        "[fye] className: 'hola oe_kanban_action oe_kanban_action_a hello blip'",
-        "[one] className: 'hola oe_kanban_action oe_kanban_action_a'",
-        "[two] className: 'hola oe_kanban_action oe_kanban_action_a hello'",
-        "[sri] className: 'hola oe_kanban_action oe_kanban_action_a gnap'",
-        "[foa] className: 'hola oe_kanban_action oe_kanban_action_a gnap olleh'",
-        "[fye] className: 'hola oe_kanban_action oe_kanban_action_a hello gnap'",
-        "[one] className: 'hola oe_kanban_action oe_kanban_action_a'",
-        "[two] className: 'hola oe_kanban_action oe_kanban_action_a hello'",
-        "[sri] className: 'hola oe_kanban_action oe_kanban_action_a blip'",
-        "[foa] className: 'hola oe_kanban_action oe_kanban_action_a blip olleh'",
-        "[fye] className: 'hola oe_kanban_action oe_kanban_action_a hello blip'",
+        "[one] className: 'hola oe_kanban_action'",
+        "[two] className: 'hola oe_kanban_action hello'",
+        "[sri] className: 'hola oe_kanban_action yop'",
+        "[foa] className: 'hola oe_kanban_action yop olleh'",
+        "[fye] className: 'hola oe_kanban_action hello yop'",
+        "[one] className: 'hola oe_kanban_action'",
+        "[two] className: 'hola oe_kanban_action hello'",
+        "[sri] className: 'hola oe_kanban_action blip'",
+        "[foa] className: 'hola oe_kanban_action blip olleh'",
+        "[fye] className: 'hola oe_kanban_action hello blip'",
+        "[one] className: 'hola oe_kanban_action'",
+        "[two] className: 'hola oe_kanban_action hello'",
+        "[sri] className: 'hola oe_kanban_action gnap'",
+        "[foa] className: 'hola oe_kanban_action gnap olleh'",
+        "[fye] className: 'hola oe_kanban_action hello gnap'",
+        "[one] className: 'hola oe_kanban_action'",
+        "[two] className: 'hola oe_kanban_action hello'",
+        "[sri] className: 'hola oe_kanban_action blip'",
+        "[foa] className: 'hola oe_kanban_action blip olleh'",
+        "[fye] className: 'hola oe_kanban_action hello blip'",
     ]);
 });
 
@@ -972,7 +932,7 @@ test("pager should be hidden in grouped mode", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -992,7 +952,7 @@ test("there should be no limit on the number of fetched groups", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1016,7 +976,7 @@ test("pager, ungrouped, with default limit", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1033,7 +993,7 @@ test.tags("desktop")("pager, ungrouped, with default limit on desktop", async ()
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1056,7 +1016,7 @@ test("pager, ungrouped, with limit given in options", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1072,7 +1032,7 @@ test.tags("desktop")("pager, ungrouped, with limit given in options on desktop",
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1097,7 +1057,7 @@ test("pager, ungrouped, with limit set on arch and given in options", async () =
         arch: `
             <kanban limit="3">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1116,7 +1076,7 @@ test.tags("desktop")(
             arch: `
             <kanban limit="3">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1140,7 +1100,7 @@ test.tags("desktop")("pager, ungrouped, with count limit reached", async () => {
         arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1176,7 +1136,7 @@ test("pager, ungrouped, with count limit reached, click next", async () => {
         arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1208,7 +1168,7 @@ test.tags("desktop")(
             arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1238,7 +1198,7 @@ test("pager, ungrouped, with count limit reached, click next (2)", async () => {
         arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1277,7 +1237,7 @@ test.tags("desktop")(
             arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1312,7 +1272,7 @@ test("pager, ungrouped, with count limit reached, click previous", async () => {
         arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1346,7 +1306,7 @@ test.tags("desktop")(
             arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1375,7 +1335,7 @@ test.tags("desktop")("pager, ungrouped, with count limit reached, edit pager", a
         arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1418,7 +1378,7 @@ test.tags("desktop")("count_limit attrs set in arch", async () => {
         arch: `
             <kanban limit="2" count_limit="3">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1450,7 +1410,7 @@ test.tags("desktop")("pager, ungrouped, deleting all records from last page", as
         arch: `
             <kanban limit="3">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <a role="menuitem" type="delete" class="dropdown-item">Delete</a>
                         <field name="foo"/>
                     </t>
@@ -1502,7 +1462,7 @@ test.tags("desktop")("pager, update calls onUpdatedPager", async () => {
         arch: `
             <kanban js_class="test_kanban_view">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1525,7 +1485,7 @@ test("click on a button type='delete' to delete a record in a column", async () 
         arch: `
             <kanban limit="3">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <a role="menuitem" type="delete" class="dropdown-item o_delete">Delete</a>
                         <field name="foo"/>
                     </t>
@@ -1536,7 +1496,7 @@ test("click on a button type='delete' to delete a record in a column", async () 
     expect(queryAll(".o_kanban_record", { root: getKanbanColumn(0) })).toHaveCount(2);
     expect(queryAll(".o_kanban_load_more", { root: getKanbanColumn(0) })).toHaveCount(0);
 
-    click(queryFirst(".o_kanban_record .o_delete", { root: getKanbanColumn(0) }));
+    await click(queryFirst(".o_kanban_record .o_delete", { root: getKanbanColumn(0) }));
     await animationFrame();
     expect(".modal").toHaveCount(1);
 
@@ -1558,7 +1518,7 @@ test("click on a button type='archive' to archive a record in a column", async (
         arch: `
             <kanban limit="3">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <a role="menuitem" type="archive" class="dropdown-item o_archive">archive</a>
                         <field name="foo"/>
                     </t>
@@ -1591,7 +1551,7 @@ test("click on a button type='unarchive' to unarchive a record in a column", asy
         arch: `
             <kanban limit="3">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <a role="menuitem" type="unarchive" class="dropdown-item o_unarchive">unarchive</a>
                         <field name="foo"/>
                     </t>
@@ -1626,7 +1586,7 @@ test.tags("desktop")("kanban with an action id as on_create attrs", async () => 
         arch: `
             <kanban on_create="some.action">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1653,7 +1613,7 @@ test.tags("desktop")("grouped kanban with quick_create attrs set to false", asyn
         arch: `
             <kanban quick_create="false" on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1678,7 +1638,7 @@ test.tags("desktop")("create in grouped on m2o", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1703,7 +1663,7 @@ test("create in grouped on char", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1727,7 +1687,7 @@ test("prevent deletion when grouped by many2many field", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <t t-if="widget.deletable"><span class="thisisdeletable">delete</span></t>
                     </t>
@@ -1757,7 +1717,7 @@ test.tags("desktop")("kanban grouped by many2one: false column is folded by defa
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1775,8 +1735,8 @@ test.tags("desktop")("kanban grouped by many2one: false column is folded by defa
     expect(queryAllTexts(".o_kanban_header")).toEqual(["None\n(1)", "hello\n(1)", "xmo\n(2)"]);
 
     // reload -> None column should remain open
-    click(".o_searchview_input");
-    press("Enter");
+    await click(".o_searchview_input");
+    await press("Enter");
     await animationFrame();
 
     expect(".o_column_folded").toHaveCount(0);
@@ -1790,7 +1750,7 @@ test.tags("desktop")("quick created records in grouped kanban are on displayed t
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -1806,7 +1766,7 @@ test.tags("desktop")("quick created records in grouped kanban are on displayed t
     expect(".o_kanban_group:first .o_kanban_record").toHaveCount(2);
     expect(".o_kanban_group:first .o_kanban_quick_create").toHaveCount(1);
 
-    edit("new record");
+    await edit("new record");
     await validateKanbanRecord();
 
     expect(".o_kanban_group:first .o_kanban_record").toHaveCount(3);
@@ -1818,8 +1778,8 @@ test.tags("desktop")("quick created records in grouped kanban are on displayed t
         "gnap",
     ]);
 
-    click(".o_kanban_quick_create input"); // FIXME: should not be necessary
-    edit("another record");
+    await click(".o_kanban_quick_create input"); // FIXME: should not be necessary
+    await edit("another record");
     await validateKanbanRecord();
 
     expect(".o_kanban_group:first .o_kanban_record").toHaveCount(4);
@@ -1844,7 +1804,7 @@ test.tags("desktop")("quick create record without quick_create_view", async () =
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1907,7 +1867,7 @@ test.tags("desktop")("quick create record with quick_create_view", async () => {
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1932,7 +1892,7 @@ test.tags("desktop")("quick create record with quick_create_view", async () => {
     // fill the quick create and validate
     await editKanbanRecordQuickCreateInput("foo", "new partner");
     await editKanbanRecordQuickCreateInput("int_field", "4");
-    click(".o_kanban_quick_create .o_field_widget[name=state] .o_priority_star:first-child");
+    await click(".o_kanban_quick_create .o_field_widget[name=state] .o_priority_star:first-child");
     await validateKanbanRecord();
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(2);
 
@@ -1975,7 +1935,7 @@ test.tags("desktop")("quick create record flickering", async () => {
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -1996,7 +1956,7 @@ test.tags("desktop")("quick create record flickering", async () => {
     await editKanbanRecordQuickCreateInput("foo", "new partner");
     await editKanbanRecordQuickCreateInput("int_field", "4");
 
-    click(".o_kanban_quick_create .o_field_widget[name=state] .o_priority_star:first-child");
+    await click(".o_kanban_quick_create .o_field_widget[name=state] .o_priority_star:first-child");
     def = new Deferred();
     await validateKanbanRecord();
 
@@ -2022,7 +1982,7 @@ test.tags("desktop")("quick create record flickering (load more)", async () => {
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2057,7 +2017,7 @@ test.tags("desktop")("quick create record should focus default field", async fun
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2067,7 +2027,7 @@ test.tags("desktop")("quick create record should focus default field", async fun
 
     await createKanbanRecord();
 
-    expect(queryFirst(".o_field_widget[name=int_field] input")).toBeFocused();
+    expect(".o_field_widget[name=int_field] input:first").toBeFocused();
 });
 
 test.tags("desktop")("quick create record should focus first field input", async function () {
@@ -2084,7 +2044,7 @@ test.tags("desktop")("quick create record should focus first field input", async
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2094,7 +2054,7 @@ test.tags("desktop")("quick create record should focus first field input", async
 
     await createKanbanRecord();
 
-    expect(queryFirst(".o_field_widget[name=foo] input")).toBeFocused();
+    expect(".o_field_widget[name=foo] input:first").toBeFocused();
 });
 
 test.tags("desktop")("quick_create_view without quick_create option", async () => {
@@ -2109,7 +2069,7 @@ test.tags("desktop")("quick_create_view without quick_create option", async () =
         arch: `
             <kanban quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2151,7 +2111,7 @@ test.tags("desktop")("quick create record in grouped on m2o (no quick_create_vie
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2211,7 +2171,7 @@ test.tags("desktop")("quick create record in grouped on m2o (with quick_create_v
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2262,7 +2222,7 @@ test("quick create record in grouped on m2m (no quick_create_view)", async () =>
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2306,7 +2266,7 @@ test.tags("desktop")("quick create record in grouped on m2m in the None column",
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2361,7 +2321,7 @@ test("quick create record in grouped on m2m (field not in template)", async () =
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2415,7 +2375,7 @@ test("quick create record in grouped on m2m (field in the form view)", async () 
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2461,7 +2421,7 @@ test.tags("desktop")("quick create record validation: stays open when invalid", 
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2514,7 +2474,7 @@ test.tags("desktop")("quick create record with default values and onchanges", as
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2563,7 +2523,7 @@ test("quick create record with quick_create_view: modifiers", async () => {
         arch: `
             <kanban quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2609,7 +2569,7 @@ test("quick create record with onchange of field marked readonly", async () => {
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2652,7 +2612,7 @@ test("quick create record and change state in grouped mode", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                         <footer>
                             <field name="kanban_state" widget="state_selection"/>
@@ -2669,11 +2629,11 @@ test("quick create record and change state in grouped mode", async () => {
     await validateKanbanRecord();
 
     // Select state in kanban
-    click(getKanbanRecord({ index: 0 }).querySelector(".o_status"));
+    await click(".o_status", { root: getKanbanRecord({ index: 0 }) });
     await animationFrame();
     await contains(".dropdown-item:nth-child(2)").click();
 
-    expect(queryFirst(".o_status")).toHaveClass("o_status_green");
+    expect(".o_status:first").toHaveClass("o_status_green");
 });
 
 test("window resize should not change quick create form size", async () => {
@@ -2683,7 +2643,7 @@ test("window resize should not change quick create form size", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2695,7 +2655,7 @@ test("window resize should not change quick create form size", async () => {
 
     expect(".o_kanban_quick_create .o_form_view").toHaveClass("o_xxs_form_view");
 
-    resize({ width: 800, height: 400 });
+    await resize({ width: 800, height: 400 });
 
     expect(".o_kanban_quick_create .o_form_view").toHaveClass("o_xxs_form_view");
 });
@@ -2709,7 +2669,7 @@ test("quick create record: cancel and validate without using the buttons", async
         arch: `
             <kanban quick_create_view="some_view_ref" on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2724,7 +2684,7 @@ test("quick create record: cancel and validate without using the buttons", async
 
     expect(".o_kanban_quick_create").toHaveCount(1);
 
-    press("Escape");
+    await press("Escape");
     await animationFrame();
 
     expect(".o_kanban_quick_create").toHaveCount(0);
@@ -2736,9 +2696,9 @@ test("quick create record: cancel and validate without using the buttons", async
 
     // click to input and drag the mouse outside, should not cancel the quick creation
     await quickCreateKanbanRecord();
-    drag(".o_kanban_quick_create input").drop(
-        ".o_kanban_group:first-child .o_kanban_record:last-of-type"
-    );
+    await (
+        await drag(".o_kanban_quick_create input")
+    ).drop(".o_kanban_group:first-child .o_kanban_record:last-of-type");
     await animationFrame();
     expect(".o_kanban_quick_create").toHaveCount(1, {
         message: "the quick create should not have been destroyed after clicking outside",
@@ -2755,7 +2715,7 @@ test("quick create record: cancel and validate without using the buttons", async
     });
 
     // confirm by pressing ENTER
-    press("Enter");
+    await press("Enter");
     await animationFrame();
 
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(5);
@@ -2775,7 +2735,7 @@ test("quick create record: validate with ENTER", async () => {
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2813,7 +2773,7 @@ test("quick create record: prevent multiple adds with ENTER", async () => {
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2826,7 +2786,7 @@ test("quick create record: prevent multiple adds with ENTER", async () => {
     // add an element and press ENTER twice
     await quickCreateKanbanRecord();
     await editKanbanRecordQuickCreateInput("foo", "new partner");
-    press("Enter");
+    await press("Enter");
     await animationFrame();
 
     expect(".o_kanban_record").toHaveCount(4);
@@ -2862,7 +2822,7 @@ test("quick create record: prevent multiple adds with Add clicked", async () => 
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2906,7 +2866,7 @@ test.tags("desktop")("save a quick create record and create a new one simultaneo
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -2971,7 +2931,7 @@ test("quick create record: prevent multiple adds with ENTER, with onchange", asy
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -2987,9 +2947,9 @@ test("quick create record: prevent multiple adds with ENTER, with onchange", asy
     await quickCreateKanbanRecord();
     shouldDelayOnchange = true;
     await editKanbanRecordQuickCreateInput("foo", "new partner");
-    press("Enter");
+    await press("Enter");
     await animationFrame();
-    press("Enter");
+    await press("Enter");
     await animationFrame();
 
     expect(".o_kanban_record").toHaveCount(4, {
@@ -3051,7 +3011,7 @@ test("quick create record: click Add to create, with delayed onchange", async ()
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <field name="int_field"/>
                     </t>
@@ -3102,7 +3062,7 @@ test.tags("desktop")("quick create when first column is folded", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3140,7 +3100,7 @@ test("quick create record: cancel when not dirty", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3177,7 +3137,7 @@ test("quick create record: cancel when not dirty", async () => {
     });
 
     // press ESC: should remove the quick create
-    press("Escape");
+    await press("Escape");
     await animationFrame();
 
     expect(".o_kanban_quick_create").toHaveCount(0, {
@@ -3230,7 +3190,7 @@ test.tags("desktop")("quick create record: cancel when modal is opened", async (
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3241,12 +3201,12 @@ test.tags("desktop")("quick create record: cancel when modal is opened", async (
     await quickCreateKanbanRecord();
     expect(".o_kanban_quick_create").toHaveCount(1);
 
-    press("t");
-    press("e");
-    press("s");
-    press("t");
+    await press("t");
+    await press("e");
+    await press("s");
+    await press("t");
     await runAllTimers();
-    click(".o_m2o_dropdown_option_create_edit"); // open create and edit dialog
+    await click(".o_m2o_dropdown_option_create_edit"); // open create and edit dialog
     await animationFrame();
 
     // When focusing out of the many2one, a modal to add a 'product' will appear.
@@ -3257,7 +3217,7 @@ test.tags("desktop")("quick create record: cancel when modal is opened", async (
     // Check odoo/odoo#61981 for more details.
     expect(".o_dialog").toHaveCount(1, { message: "modal should be opening after m2o focusout" });
     expect(document.body).toHaveClass("modal-open");
-    click(document.body);
+    await click(document.body);
     await animationFrame();
     expect(".o_kanban_quick_create").toHaveCount(1, {
         message: "quick create should stay open while modal is opening",
@@ -3271,7 +3231,7 @@ test("quick create record: cancel when dirty", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3300,7 +3260,7 @@ test("quick create record: cancel when dirty", async () => {
     });
 
     // press ESC: should remove the quick create
-    press("Escape");
+    await press("Escape");
     await animationFrame();
 
     expect(".o_kanban_quick_create").toHaveCount(0, {
@@ -3341,7 +3301,7 @@ test("quick create record and edit in grouped mode", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3377,7 +3337,7 @@ test.tags("desktop")("quick create several records in a row", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3427,7 +3387,7 @@ test("quick create is disabled until record is created and read", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3482,7 +3442,7 @@ test.tags("desktop")("quick create record fail in grouped by many2one", async ()
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3498,15 +3458,14 @@ test.tags("desktop")("quick create record fail in grouped by many2one", async ()
     await editKanbanRecordQuickCreateInput("display_name", "test");
     await validateKanbanRecord();
     expect(".modal .o_form_view .o_form_editable").toHaveCount(1);
-    expect(queryFirst(".modal .o_field_many2one input").value).toBe("hello");
+    expect(".modal .o_field_many2one input:first").toHaveValue("hello");
 
     // specify a name and save
     await contains(".modal .o_field_widget[name=foo] input").edit("test");
     await contains(".modal .o_form_button_save").click();
     expect(".modal").toHaveCount(0);
     expect(".o_kanban_group:first .o_kanban_record").toHaveCount(3);
-    const firstRecord = queryFirst(".o_kanban_group .o_kanban_record");
-    expect(firstRecord.innerText).toBe("test");
+    expect(".o_kanban_group .o_kanban_record:first").toHaveText("test");
     expect(".o_kanban_quick_create:not(.o_disabled)").toHaveCount(1);
 });
 
@@ -3514,7 +3473,7 @@ test("quick create record and click Edit, name_create fails", async () => {
     Partner._views["kanban,false"] = `
         <kanban sample="1">
             <templates>
-                <t t-name="kanban-card">
+                <t t-name="card">
                     <field name="foo"/>
                 </t>
             </templates>
@@ -3552,15 +3511,14 @@ test("quick create record and click Edit, name_create fails", async () => {
     await editKanbanRecordQuickCreateInput("display_name", "test");
     await editKanbanRecord();
     expect(".modal .o_form_view .o_form_editable").toHaveCount(1);
-    expect(queryFirst(".modal .o_field_many2one input").value).toBe("hello");
+    expect(".modal .o_field_many2one input:first").toHaveValue("hello");
 
     // specify a name and save
     await contains(".modal .o_field_widget[name=foo] input").edit("test");
     await contains(".modal .o_form_button_save").click();
     expect(".modal").toHaveCount(0);
     expect(".o_kanban_group:first .o_kanban_record").toHaveCount(3);
-    const firstRecord = queryFirst(".o_kanban_group .o_kanban_record");
-    expect(firstRecord.innerText).toBe("test");
+    expect(".o_kanban_group .o_kanban_record:first").toHaveText("test");
     expect(".o_kanban_quick_create:not(.o_disabled)").toHaveCount(1);
 });
 
@@ -3581,7 +3539,7 @@ test.tags("desktop")("quick create record is re-enabled after discard on failure
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3631,7 +3589,7 @@ test("quick create record fails in grouped by char", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3645,7 +3603,7 @@ test("quick create record fails in grouped by char", async () => {
     await validateKanbanRecord();
 
     expect(".modal .o_form_view .o_form_editable").toHaveCount(1);
-    expect(queryFirst(".modal .o_field_widget[name=foo] input").value).toBe("blip");
+    expect(".modal .o_field_widget[name=foo] input").toHaveValue("blip");
     await contains(".modal .o_form_button_save").click();
 
     expect(".modal .o_form_view .o_form_editable").toHaveCount(0);
@@ -3679,7 +3637,7 @@ test("quick create record fails in grouped by selection", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="state"/>
                     </t>
                 </templates>
@@ -3693,7 +3651,7 @@ test("quick create record fails in grouped by selection", async () => {
     await validateKanbanRecord();
 
     expect(".modal .o_form_view .o_form_editable").toHaveCount(1);
-    expect(queryFirst(".modal .o_field_widget[name=state] select").value).toBe('"abc"');
+    expect(".modal .o_field_widget[name=state] select:first").toHaveValue('"abc"');
 
     await contains(".modal .o_form_button_save").click();
 
@@ -3729,7 +3687,7 @@ test.tags("desktop")("quick create record in empty grouped kanban", async () => 
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3754,7 +3712,7 @@ test.tags("desktop")("quick create record in grouped on date(time) field", async
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -3802,7 +3760,7 @@ test("quick create record feature is properly enabled/disabled at reload", async
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -3848,7 +3806,7 @@ test("quick create record in grouped by char field", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -3879,7 +3837,7 @@ test("quick create record in grouped by boolean field", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -3910,7 +3868,7 @@ test("quick create record in grouped on selection field", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -3950,7 +3908,7 @@ test("quick create record in grouped by char field (within quick_create_view)", 
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -3962,7 +3920,7 @@ test("quick create record in grouped by char field (within quick_create_view)", 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(2);
 
     await quickCreateKanbanRecord();
-    expect(queryFirst(".o_kanban_quick_create input").value).toBe("blip", {
+    expect(".o_kanban_quick_create input:first").toHaveValue("blip", {
         message: "should have set the correct foo value by default",
     });
     await validateKanbanRecord();
@@ -3986,7 +3944,7 @@ test("quick create record in grouped by boolean field (within quick_create_view)
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="bar"/>
                     </t>
                 </templates>
@@ -4025,7 +3983,7 @@ test("quick create record in grouped by selection field (within quick_create_vie
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="state"/>
                     </t>
                 </templates>
@@ -4042,7 +4000,7 @@ test("quick create record in grouped by selection field (within quick_create_vie
 
     quickCreateKanbanRecord();
     await animationFrame();
-    expect(queryFirst(".o_kanban_quick_create select").value).toBe('"abc"', {
+    expect(".o_kanban_quick_create select:first").toHaveValue('"abc"', {
         message: "should have set the correct state value by default",
     });
     await contains(".o_kanban_quick_create .o_kanban_add").click();
@@ -4066,7 +4024,7 @@ test.tags("desktop")("quick create record while adding a new column", async () =
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -4089,7 +4047,7 @@ test.tags("desktop")("quick create record while adding a new column", async () =
 
     await animationFrame();
 
-    expect(queryFirst(".o_column_quick_create input").value).toBe("");
+    expect(".o_column_quick_create input:first").toHaveValue("");
     expect(".o_kanban_group").toHaveCount(2);
 
     // click to add a new record
@@ -4127,7 +4085,7 @@ test.tags("desktop")("close a column while quick creating a record", async () =>
         arch: `
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -4174,7 +4132,7 @@ test("quick create record: open on a column while another column has already one
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -4218,7 +4176,7 @@ test("many2many_tags in kanban views", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="category_ids" widget="many2many_tags" options="{'color_field': 'color'}"/>
                         <field name="foo"/>
                         <field name="state" widget="priority"/>
@@ -4254,8 +4212,7 @@ test("many2many_tags in kanban views", async () => {
     expect(".o_kanban_record:nth-child(2) .o_tag").toHaveCount(1, {
         message: "there should be only one tag in second record",
     });
-    const tag = queryFirst(".o_kanban_record:nth-child(2) .o_tag");
-    expect(tag.innerText).toBe("silver");
+    expect(".o_kanban_record:nth-child(2) .o_tag:first").toHaveText("silver");
 
     // Write on the record using the priority widget to trigger a re-render in readonly
     await contains(".o_kanban_record:first-child .o_priority_star:first-child").click();
@@ -4265,8 +4222,8 @@ test("many2many_tags in kanban views", async () => {
         message: "first record should still contain only 2 tags",
     });
     const tags = queryAll(".o_kanban_record:first-child .o_tag");
-    expect(tags[0].innerText).toBe("gold");
-    expect(tags[1].innerText).toBe("silver");
+    expect(tags[0]).toHaveText("gold");
+    expect(tags[1]).toHaveText("silver");
 
     // click on a tag (should trigger switch_view)
     await contains(".o_kanban_record:first-child .o_tag:first-child").click();
@@ -4279,7 +4236,7 @@ test("priority field should not be editable when missing access rights", async (
         arch: `
             <kanban edit="0">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <field name="state" widget="priority"/>
                     </t>
@@ -4312,7 +4269,7 @@ test("Do not open record when clicking on `a` with `href`", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <a class="o_test_link" href="#">test link</a>
                     </t>
@@ -4323,8 +4280,7 @@ test("Do not open record when clicking on `a` with `href`", async () => {
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(1);
     expect(".o_kanban_record a").toHaveCount(1);
 
-    const testLink = queryFirst(".o_kanban_record a");
-    expect(!!testLink.href).toBe(true, {
+    expect(".o_kanban_record a").toHaveAttribute("href", null, {
         message: "link inside kanban record should have non-empty href",
     });
 
@@ -4334,6 +4290,7 @@ test("Do not open record when clicking on `a` with `href`", async () => {
     // Note that we should not specify a click listener on 'a', otherwise
     // it may influence the kanban record global click handler to not open
     // the record.
+    const testLink = queryFirst(".o_kanban_record a");
     testLink.addEventListener("click", (ev) => {
         expect(ev.defaultPrevented).toBe(false, {
             message: "should not prevented browser default behaviour beforehand",
@@ -4344,7 +4301,8 @@ test("Do not open record when clicking on `a` with `href`", async () => {
         ev.preventDefault();
     });
 
-    click(testLink);
+    await click(".o_kanban_record a");
+
     expect.verifySteps([]);
 });
 
@@ -4359,7 +4317,7 @@ test("Open record when clicking on widget field", async function (assert) {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="salary" widget="monetary"/>
                     </t>
                 </templates>
@@ -4371,7 +4329,7 @@ test("Open record when clicking on widget field", async function (assert) {
 
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(4);
 
-    click(queryFirst(".o_field_monetary[name=salary]"));
+    await click(".o_field_monetary[name=salary]");
 });
 
 test("o2m loaded in only one batch", async () => {
@@ -4398,7 +4356,7 @@ test("o2m loaded in only one batch", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="subtask_ids" widget="many2many_tags"/>
                     </t>
                 </templates>
@@ -4429,7 +4387,7 @@ test.tags("desktop")("kanban with many2many, load and reload", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="category_ids" widget="many2many_tags"/>
                     </t>
                 </templates>
@@ -4437,7 +4395,7 @@ test.tags("desktop")("kanban with many2many, load and reload", async () => {
         groupBy: ["product_id"],
     });
 
-    press("Enter"); // reload
+    await press("Enter"); // reload
     await animationFrame();
 
     expect.verifySteps([
@@ -4467,14 +4425,14 @@ test.tags("desktop")("kanban with reference field", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="ref_product"/>
                     </t>
                 </templates>
             </kanban>`,
     });
 
-    press("Enter"); // reload
+    await press("Enter"); // reload
     await animationFrame();
 
     expect.verifySteps([
@@ -4498,7 +4456,7 @@ test.tags("desktop")("drag and drop a record with load more", async () => {
         arch: `
             <kanban limit="1">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -4509,9 +4467,7 @@ test.tags("desktop")("drag and drop a record with load more", async () => {
     expect(queryAllTexts(".o_kanban_group:eq(0) .o_kanban_record")).toEqual(["4"]);
     expect(queryAllTexts(".o_kanban_group:eq(1) .o_kanban_record")).toEqual(["1"]);
 
-    await contains(".o_kanban_group:eq(1) .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:eq(0)")
-    );
+    await contains(".o_kanban_group:eq(1) .o_kanban_record").dragAndDrop(".o_kanban_group:eq(0)");
     expect(queryAllTexts(".o_kanban_group:eq(0) .o_kanban_record")).toEqual(["4", "1"]);
     expect(queryAllTexts(".o_kanban_group:eq(1) .o_kanban_record")).toEqual(["2"]);
 });
@@ -4527,7 +4483,7 @@ test.tags("desktop")("can drag and drop a record from one column to the next", a
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <t t-if="widget.editable">
                             <span class="thisiseditable">edit</span>
@@ -4545,7 +4501,7 @@ test.tags("desktop")("can drag and drop a record from one column to the next", a
 
     // first record of first column moved to the bottom of second column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(1);
@@ -4570,7 +4526,7 @@ test.tags("desktop")(
             arch: `
                 <kanban>
                     <templates>
-                        <t t-name="kanban-card">
+                        <t t-name="card">
                             <field name="foo"/>
                         </t>
                     </templates>
@@ -4604,7 +4560,7 @@ test.tags("desktop")(
             arch: `
                 <kanban>
                     <templates>
-                        <t t-name="kanban-card">
+                        <t t-name="card">
                             <field name="foo"/>
                         </t>
                     </templates>
@@ -4639,7 +4595,7 @@ test.tags("desktop")("drag and drop highlight on hover", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -4667,7 +4623,7 @@ test("drag and drop outside of a column", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -4679,7 +4635,7 @@ test("drag and drop outside of a column", async () => {
 
     // first record of first column moved to the right of a column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_column_quick_create")
+        ".o_column_quick_create"
     );
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(2);
 });
@@ -4703,7 +4659,7 @@ test.tags("desktop")("drag and drop a record, grouped by selection", async () =>
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="state"/>
                     </t>
                 </templates>
@@ -4715,7 +4671,7 @@ test.tags("desktop")("drag and drop a record, grouped by selection", async () =>
 
     // first record of second column moved to the bottom of first column
     await contains(".o_kanban_group:nth-child(2) .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:first-child")
+        ".o_kanban_group:first-child"
     );
 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(2);
@@ -4753,7 +4709,7 @@ test.tags("desktop")("prevent drag and drop of record if grouped by readonly", a
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div>
                             <field name="foo"/>
                             <field name="product_id" readonly="0" invisible="1"/>
@@ -4777,7 +4733,7 @@ test.tags("desktop")("prevent drag and drop of record if grouped by readonly", a
 
     // first record of first column moved to the bottom of second column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     // should not be draggable
@@ -4794,7 +4750,7 @@ test.tags("desktop")("prevent drag and drop of record if grouped by readonly", a
 
     // first record of first column moved to the bottom of second column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     // should not be draggable
@@ -4806,7 +4762,7 @@ test.tags("desktop")("prevent drag and drop of record if grouped by readonly", a
 
     // second record of first column moved at first place
     await contains(".o_kanban_group:first-child .o_kanban_record:last-of-type").dragAndDrop(
-        queryFirst(".o_kanban_group:first-child .o_kanban_record")
+        ".o_kanban_group:first-child .o_kanban_record"
     );
 
     // should still be able to resequence
@@ -4824,7 +4780,7 @@ test.tags("desktop")("prevent drag and drop of record if grouped by readonly", a
 
     // first record of first column moved to the bottom of second column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     // should not be draggable
@@ -4846,7 +4802,7 @@ test.tags("desktop")("prevent drag and drop of record if grouped by readonly", a
 
     // first record of first column moved to the bottom of second column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     // should not be draggable
@@ -4874,7 +4830,7 @@ test("prevent drag and drop if grouped by date/datetime field", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -4896,7 +4852,7 @@ test("prevent drag and drop if grouped by date/datetime field", async () => {
 
     // drag&drop a record in another column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     // should not drag&drop record
@@ -4921,7 +4877,7 @@ test("prevent drag and drop if grouped by date/datetime field", async () => {
 
     // drag&drop a record in another column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     // should not drag&drop record
@@ -4943,7 +4899,7 @@ test.tags("desktop")("prevent drag and drop if grouped by many2many field", asyn
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -4956,10 +4912,10 @@ test.tags("desktop")("prevent drag and drop if grouped by many2many field", asyn
     });
 
     expect(".o_kanban_group").toHaveCount(2);
-    expect(queryFirst(".o_kanban_group:first-child .o_column_title").innerText).toBe("gold\n(2)", {
+    expect(".o_kanban_group:first-child .o_column_title:first").toHaveText("gold\n(2)", {
         message: "first column should have correct title",
     });
-    expect(queryFirst(".o_kanban_group:last-child .o_column_title").innerText).toBe("silver\n(3)", {
+    expect(".o_kanban_group:last-child .o_column_title:first").toHaveText("silver\n(3)", {
         message: "second column should have correct title",
     });
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(2);
@@ -4967,7 +4923,7 @@ test.tags("desktop")("prevent drag and drop if grouped by many2many field", asyn
 
     // drag&drop a record in another column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(2);
@@ -4991,7 +4947,7 @@ test.tags("desktop")("prevent drag and drop if grouped by many2many field", asyn
     });
 
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:last-child")
+        ".o_kanban_group:last-child"
     );
 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(0, {
@@ -5031,7 +4987,7 @@ test("Ensuring each progress bar has some space", async () => {
             <kanban>
                 <progressbar field="state" colors='{"abc": "success", "def": "warning", "ghi": "danger"}' />
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="state" widget="state_selection" />
                         <field name="foo" />
                     </div>
@@ -5050,7 +5006,7 @@ test("completely prevent drag and drop if records_draggable set to false", async
         arch: `
             <kanban records_draggable="false">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5066,7 +5022,7 @@ test("completely prevent drag and drop if records_draggable set to false", async
 
     // attempt to drag&drop a record in another column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     // should not drag&drop record
@@ -5082,7 +5038,7 @@ test("completely prevent drag and drop if records_draggable set to false", async
 
     // attempt to drag&drop a record in the same column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:first-child .o_kanban_record:last-of-type")
+        ".o_kanban_group:first-child .o_kanban_record:last-of-type"
     );
 
     expect(getKanbanRecordTexts()).toEqual(["yop", "gnap", "blip", "blip"], {
@@ -5104,7 +5060,7 @@ test.tags("desktop")("prevent drag and drop of record if save fails", async () =
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <field name="product_id"/>
                     </t>
@@ -5118,7 +5074,7 @@ test.tags("desktop")("prevent drag and drop of record if save fails", async () =
 
     // drag&drop a record in another column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     // should not be dropped, card should reset back to first column
@@ -5152,7 +5108,7 @@ test("kanban view with default_group_by", async () => {
         arch: `
             <kanban default_group_by="bar">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5189,7 +5145,7 @@ test.tags("desktop")("kanban view not groupable", async () => {
         arch: `
             <kanban default_group_by="bar">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5219,7 +5175,7 @@ test("kanban view with create=False", async () => {
         arch: `
             <kanban create="0">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5236,7 +5192,7 @@ test("kanban view with create=False and groupby", async () => {
         arch: `
             <kanban create="0">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5256,7 +5212,7 @@ test("clicking on a link triggers correct event", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <a type="edit">Edit</a>
                     </t>
                 </templates>
@@ -5276,7 +5232,7 @@ test.tags("desktop")("environment is updated when (un)folding groups", async () 
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -5316,7 +5272,7 @@ test.tags("desktop")("create a column in grouped on m2o", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5339,7 +5295,7 @@ test.tags("desktop")("create a column in grouped on m2o", async () => {
     });
 
     // discard the column creation and click it again
-    press("Escape");
+    await press("Escape");
     await animationFrame();
 
     expect(".o_column_quick_create input").toHaveCount(0, {
@@ -5375,7 +5331,7 @@ test.tags("desktop")("create a column in grouped on m2o", async () => {
 
     expect(getKanbanColumn(2)).toHaveClass("o_column_folded");
 
-    click(getKanbanColumn(2));
+    await click(getKanbanColumn(2));
     await animationFrame();
 
     expect(getKanbanColumn(1)).not.toHaveClass("o_column_folded");
@@ -5407,7 +5363,7 @@ test("create a column in grouped on m2o without sequence field on view model", a
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5452,7 +5408,7 @@ test.tags("desktop")("auto fold group when reach the limit", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5515,7 +5471,7 @@ test.tags("desktop")("auto fold group when reach the limit (2)", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5559,7 +5515,7 @@ test.tags("desktop")("show/hide help message (ESC) in quick create [REQUIRE FOCU
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5573,7 +5529,7 @@ test.tags("desktop")("show/hide help message (ESC) in quick create [REQUIRE FOCU
     expect(".o_discard_msg").toHaveCount(1, { message: "the ESC to discard message is visible" });
 
     // click outside the column (to lose focus)
-    click(queryFirst(".o_kanban_header"));
+    await click(".o_kanban_header");
     await animationFrame();
 
     expect(".o_discard_msg").toHaveCount(0, {
@@ -5598,7 +5554,7 @@ test.tags("desktop")("delete a column in grouped on m2o", async () => {
         arch: `
             <kanban class="o_kanban_test" on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5652,12 +5608,12 @@ test.tags("desktop")("delete a column in grouped on m2o", async () => {
 
     expect(queryText(".o_column_title", { root: getKanbanColumn(1) })).toBe("hello\n(2)");
     expect(".o_kanban_group").toHaveCount(2, { message: "should still have two columns" });
-    expect(getKanbanColumn(0).querySelector(".o_column_title").innerText).toBe("None\n(2)", {
+    expect(getKanbanColumn(0).querySelector(".o_column_title")).toHaveText("None\n(2)", {
         message: "first column should have no id (Undefined column)",
     });
 
     // check available actions on 'Undefined' column
-    click(getKanbanColumn(0));
+    await click(getKanbanColumn(0));
     await animationFrame();
     await toggleKanbanColumnActions(0);
 
@@ -5739,7 +5695,7 @@ test("create a column, delete it and create another one", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5768,7 +5724,7 @@ test("create a column, delete it and create another one", async () => {
     await validateKanbanColumn();
 
     expect(".o_kanban_group").toHaveCount(3);
-    expect(getKanbanColumn(2).querySelector("div").innerText).toBe("new column 2\n(0)", {
+    expect(getKanbanColumn(2).querySelector("div")).toHaveText("new column 2\n(0)", {
         message: "the last column should be the newly created one",
     });
 });
@@ -5797,7 +5753,7 @@ test("delete an empty column, then a column with records.", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5846,7 +5802,7 @@ test.tags("desktop")("edit a column in grouped on m2o", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5887,7 +5843,7 @@ test.tags("desktop")("edit a column in grouped on m2o", async () => {
     await clickColumnAction("Edit");
     await contains(".modal .o_form_editable input").edit("ged");
     nbRPCs = 0;
-    click(".modal .o_form_button_save"); // click on save
+    await click(".modal .o_form_button_save"); // click on save
     await animationFrame();
 
     expect(".modal").toHaveCount(0, { message: "the modal should be closed" });
@@ -5923,7 +5879,7 @@ test("edit a column propagates right context", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5942,7 +5898,7 @@ test("quick create column should be opened if there is no column", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5958,14 +5914,14 @@ test("quick create column should be opened if there is no column", async () => {
     });
 });
 
-test("quick create column should not be closed on window click if there is no column", async () => {
+test("quick create column should close on window click if there is no column", async () => {
     await mountView({
         type: "kanban",
         resModel: "partner",
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -5981,8 +5937,8 @@ test("quick create column should not be closed on window click if there is no co
     });
     // click outside should not discard quick create column
     await contains(".o_kanban_example_background_container").click();
-    expect(".o_column_quick_create input").toHaveCount(1, {
-        message: "the quick create should still be opened",
+    expect(".o_column_quick_create input").toHaveCount(0, {
+        message: "the quick create should be closed",
     });
 });
 
@@ -5993,7 +5949,7 @@ test("quick create several columns in a row", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6043,7 +5999,7 @@ test.tags("desktop")("quick create column with enter", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6052,11 +6008,11 @@ test.tags("desktop")("quick create column with enter", async () => {
     });
 
     await quickCreateKanbanColumn();
-    edit("New Column 1");
+    await edit("New Column 1");
     await animationFrame();
     expect(".o_kanban_group").toHaveCount(2);
 
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     expect(".o_kanban_group").toHaveCount(3);
 });
@@ -6085,7 +6041,7 @@ test.tags("desktop")("quick create column and examples", async () => {
         arch: `
             <kanban examples="test">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6122,11 +6078,10 @@ test.tags("desktop")("quick create column and examples", async () => {
 
     const firstPane = queryFirst(".modal .o_notebook_content .tab-pane");
     expect(queryAll(".o_kanban_examples_group", { root: firstPane })).toHaveCount(3);
-    expect([...firstPane.querySelectorAll("h6")].map((e) => e.textContent).join("")).toBe(
-        "Column 1Column 2Column 3",
-        { message: "column titles should be correct" }
-    );
-    expect(firstPane.querySelector(".o_kanban_examples_description").innerHTML).toBe(
+    expect(queryAllTexts("h6", { root: firstPane })).toEqual(["Column 1", "Column 2", "Column 3"], {
+        message: "column titles should be correct",
+    });
+    expect(queryFirst(".o_kanban_examples_description", { root: firstPane })).toHaveInnerHTML(
         "A weak description.",
         { message: "An escaped description should be displayed" }
     );
@@ -6134,10 +6089,9 @@ test.tags("desktop")("quick create column and examples", async () => {
     await contains(".nav-item:nth-child(2) .nav-link").click();
     const secondPane = queryFirst(".o_notebook_content");
     expect(queryAll(".o_kanban_examples_group", { root: firstPane })).toHaveCount(2);
-    expect([...secondPane.querySelectorAll("h6")].map((e) => e.textContent).join("")).toBe(
-        "Col 1Col 2",
-        { message: "column titles should be correct" }
-    );
+    expect(queryAllTexts("h6", { root: secondPane })).toEqual(["Col 1", "Col 2"], {
+        message: "column titles should be correct",
+    });
     expect(secondPane.querySelector(".o_kanban_examples_description").innerHTML).toBe(
         "A fantastic description.",
         { message: "A formatted description should be displayed." }
@@ -6165,7 +6119,7 @@ test("quick create column with x_name as _rec_name", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6204,7 +6158,7 @@ test.tags("desktop")("count of folded groups in empty kanban with sample data", 
         arch: `
             <kanban sample="1">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                     </div>
                 </templates>
@@ -6219,7 +6173,7 @@ test.tags("desktop")("count of folded groups in empty kanban with sample data", 
         message: "should contain sample records",
     });
     expect(getKanbanColumn(1)).toHaveClass("o_column_folded");
-    expect(queryAllTexts(".o_kanban_group")).toEqual(["New\n(8)", "In Progress"]);
+    expect(queryAllTexts(".o_kanban_group")).toEqual(["New", "In Progress"]);
 });
 
 test.tags("desktop")("quick create column and examples: with folded columns", async () => {
@@ -6252,7 +6206,7 @@ test.tags("desktop")("quick create column and examples: with folded columns", as
         arch: `
             <kanban examples="test">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6306,7 +6260,7 @@ test.tags("desktop")("quick create column's apply button's display text", async 
         arch: `
             <kanban examples="test">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6350,7 +6304,7 @@ test.tags("desktop")("create column and examples background with ghostColumns ti
         arch: `
             <kanban examples="test">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6384,7 +6338,7 @@ test("create column and examples background without ghostColumns titles", async 
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6430,7 +6384,7 @@ test("nocontent helper after adding a record (kanban with progressbar)", async (
             <kanban >
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6478,7 +6432,7 @@ test.tags("desktop")("ungrouped kanban view can be grouped, then ungrouped", asy
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6513,7 +6467,7 @@ test("no content helper when archive all records in kanban group", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6545,7 +6499,7 @@ test.tags("desktop")("no content helper when no data", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6560,7 +6514,7 @@ test.tags("desktop")("no content helper when no data", async () => {
     });
 
     MockServer.env["partner"].create([{ foo: "new record" }]);
-    press("Enter");
+    await press("Enter");
     await animationFrame();
 
     expect(".o_view_nocontent").toHaveCount(0, {
@@ -6586,7 +6540,7 @@ test("no nocontent helper for grouped kanban with empty groups", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6608,7 +6562,7 @@ test("no nocontent helper for grouped kanban with no records", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6636,7 +6590,7 @@ test("no nocontent helper is shown when no longer creating column", async () => 
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6658,7 +6612,7 @@ test("no nocontent helper is shown when no longer creating column", async () => 
     });
 
     // leaving column creation mode
-    press("Escape");
+    await press("Escape");
     await animationFrame();
 
     expect(".o_view_nocontent").toHaveCount(1, { message: "there should be a nocontent helper" });
@@ -6686,7 +6640,7 @@ test("no nocontent helper is hidden when quick creating a column", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6726,7 +6680,7 @@ test("remove nocontent helper after adding a record", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6768,7 +6722,7 @@ test("remove nocontent helper when adding a record", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6809,7 +6763,7 @@ test("nocontent helper is displayed again after canceling quick create", async (
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6819,7 +6773,7 @@ test("nocontent helper is displayed again after canceling quick create", async (
     });
 
     await quickCreateKanbanRecord();
-    press("Escape");
+    await press("Escape");
     await animationFrame();
 
     expect(".o_view_nocontent").toHaveCount(1, {
@@ -6836,7 +6790,7 @@ test("nocontent helper for grouped kanban (on m2o field) with no records with no
         arch: `
             <kanban group_create="false">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6864,7 +6818,7 @@ test("nocontent helper for grouped kanban (on date field) with no records with n
         arch: `
             <kanban group_create="false">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6887,7 +6841,7 @@ test("empty grouped kanban with sample data and no columns", async () => {
         arch: `
             <kanban sample="1">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                     </div>
                 </templates>
@@ -6934,7 +6888,7 @@ test("empty kanban with sample data grouped by date range (fill temporal)", asyn
             <kanban sample="1">
                 <progressbar field="state" sum_field="int_field" help="progress" colors="{}"/>
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                         <field name="int_field"/>
                     </div>
@@ -6970,7 +6924,7 @@ test("empty grouped kanban with sample data and click quick create", async () =>
         arch: `
             <kanban sample="1">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -6980,24 +6934,27 @@ test("empty grouped kanban with sample data and click quick create", async () =>
     });
 
     expect(".o_kanban_group").toHaveCount(2, { message: "there should be two columns" });
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_view_nocontent").toHaveCount(1);
     expect(".o_kanban_record").toHaveCount(16, {
         message: "there should be 8 sample records by column",
     });
+    expect(queryAllTexts(".o_column_title")).toEqual(["hello", "xmo"]);
 
     await quickCreateKanbanRecord();
-    expect(queryFirst(".o_content")).not.toHaveClass("o_view_sample_data");
+    expect(".o_content").not.toHaveClass("o_view_sample_data");
     expect(".o_kanban_record").toHaveCount(0);
     expect(".o_view_nocontent").toHaveCount(0);
     expect(queryAll(".o_kanban_quick_create", { root: getKanbanColumn(0) })).toHaveCount(1);
+    expect(queryAllTexts(".o_column_title")).toEqual(["hello\n(0)", "xmo\n(0)"]);
 
     await editKanbanRecordQuickCreateInput("display_name", "twilight sparkle");
     await validateKanbanRecord();
 
-    expect(queryFirst(".o_content")).not.toHaveClass("o_view_sample_data");
+    expect(".o_content").not.toHaveClass("o_view_sample_data");
     expect(queryAll(".o_kanban_record", { root: getKanbanColumn(0) })).toHaveCount(1);
     expect(".o_view_nocontent").toHaveCount(0);
+    expect(queryAllTexts(".o_column_title")).toEqual(["hello\n(1)", "xmo\n(0)"]);
 });
 
 test.tags("desktop")("quick create record in grouped kanban with sample data", async () => {
@@ -7018,7 +6975,7 @@ test.tags("desktop")("quick create record in grouped kanban with sample data", a
         arch: `
             <kanban sample="1" on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -7028,14 +6985,14 @@ test.tags("desktop")("quick create record in grouped kanban with sample data", a
     });
 
     expect(".o_kanban_group").toHaveCount(2, { message: "there should be two columns" });
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_view_nocontent").toHaveCount(1);
     expect(".o_kanban_record").toHaveCount(16, {
         message: "there should be 8 sample records by column",
     });
 
     await createKanbanRecord();
-    expect(queryFirst(".o_content")).not.toHaveClass("o_view_sample_data");
+    expect(".o_content").not.toHaveClass("o_view_sample_data");
     expect(".o_kanban_record").toHaveCount(0);
     expect(".o_kanban_load_more").toHaveCount(0);
     expect(".o_view_nocontent").toHaveCount(0);
@@ -7060,7 +7017,7 @@ test("empty grouped kanban with sample data and cancel quick create", async () =
         arch: `
             <kanban sample="1">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -7069,20 +7026,20 @@ test("empty grouped kanban with sample data and cancel quick create", async () =
         noContentHelp: "No content helper",
     });
     expect(".o_kanban_group").toHaveCount(2, { message: "there should be two columns" });
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_view_nocontent").toHaveCount(1);
     expect(".o_kanban_record").toHaveCount(16, {
         message: "there should be 8 sample records by column",
     });
 
     await quickCreateKanbanRecord();
-    expect(queryFirst(".o_content")).not.toHaveClass("o_view_sample_data");
+    expect(".o_content").not.toHaveClass("o_view_sample_data");
     expect(".o_kanban_record").toHaveCount(0);
     expect(".o_view_nocontent").toHaveCount(0);
     expect(queryAll(".o_kanban_quick_create", { root: getKanbanColumn(0) })).toHaveCount(1);
 
     await contains(".o_kanban_view").click();
-    expect(queryFirst(".o_content")).not.toHaveClass("o_view_sample_data");
+    expect(".o_content").not.toHaveClass("o_view_sample_data");
     expect(".o_kanban_quick_create").toHaveCount(0);
     expect(".o_kanban_record").toHaveCount(0);
     expect(".o_view_nocontent").toHaveCount(1);
@@ -7101,7 +7058,7 @@ test.tags("desktop")("empty grouped kanban with sample data: keynav", async () =
         arch: `
             <kanban sample="1">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                         <field name="state" widget="priority"/>
                     </div>
@@ -7113,7 +7070,7 @@ test.tags("desktop")("empty grouped kanban with sample data: keynav", async () =
     expect(".o_kanban_record").toHaveCount(16);
     expect(document.activeElement).toHaveClass("o_searchview_input");
 
-    press("ArrowDown");
+    await press("ArrowDown");
     await animationFrame();
 
     expect(document.activeElement).toHaveClass("o_searchview_input");
@@ -7128,7 +7085,7 @@ test.tags("desktop")("empty kanban with sample data", async () => {
         arch: `
             <kanban sample="1">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -7140,7 +7097,7 @@ test.tags("desktop")("empty kanban with sample data", async () => {
         noContentHelp: "No content helper",
     });
 
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(10, {
         message: "there should be 10 sample records",
     });
@@ -7149,7 +7106,7 @@ test.tags("desktop")("empty kanban with sample data", async () => {
     await toggleSearchBarMenu();
     await toggleMenuItem("Match nothing");
 
-    expect(queryFirst(".o_content")).not.toHaveClass("o_view_sample_data");
+    expect(".o_content").not.toHaveClass("o_view_sample_data");
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(0);
     expect(".o_view_nocontent").toHaveCount(1);
 });
@@ -7173,7 +7130,7 @@ test("empty grouped kanban with sample data and many2many_tags", async () => {
         arch: `
             <kanban sample="1">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="int_field"/>
                         <field name="category_ids" widget="many2many_tags"/>
                     </t>
@@ -7183,7 +7140,7 @@ test("empty grouped kanban with sample data and many2many_tags", async () => {
     });
 
     expect(".o_kanban_group").toHaveCount(2, { message: "there should be 2 'real' columns" });
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(queryAll(".o_kanban_record").length >= 1).toBe(true, {
         message: "there should be sample records",
     });
@@ -7203,7 +7160,7 @@ test.tags("desktop")("sample data does not change after reload with sample data"
     Partner._views["kanban,false"] = `
         <kanban sample="1">
             <templates>
-                <t t-name="kanban-card">
+                <t t-name="card">
                     <field name="int_field"/>
                 </t>
             </templates>
@@ -7235,12 +7192,11 @@ test.tags("desktop")("sample data does not change after reload with sample data"
         },
     });
 
-    const columns = queryAll(".o_kanban_group");
-    expect(columns.length >= 1).toBe(true, { message: "there should be at least 1 sample column" });
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_kanban_group").toHaveCount();
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_kanban_record").toHaveCount(16);
 
-    const kanbanText = queryFirst(".o_kanban_view").innerText;
+    const kanbanText = queryText(".o_kanban_view");
     await contains(".o_control_panel .o_switch_view.o_kanban").click();
 
     expect(".o_kanban_view").toHaveText(kanbanText, {
@@ -7255,7 +7211,7 @@ test.tags("desktop")("non empty kanban with sample data", async () => {
         arch: `
             <kanban sample="1">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -7267,14 +7223,14 @@ test.tags("desktop")("non empty kanban with sample data", async () => {
         noContentHelp: "No content helper",
     });
 
-    expect(queryFirst(".o_content")).not.toHaveClass("o_view_sample_data");
+    expect(".o_content").not.toHaveClass("o_view_sample_data");
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(4);
     expect(".o_view_nocontent").toHaveCount(0);
 
     await toggleSearchBarMenu();
     await toggleMenuItem("Match nothing");
 
-    expect(queryFirst(".o_content")).not.toHaveClass("o_view_sample_data");
+    expect(".o_content").not.toHaveClass("o_view_sample_data");
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(0);
 });
 
@@ -7296,7 +7252,7 @@ test("empty grouped kanban with sample data: add a column", async () => {
         arch: `
             <kanban sample="1">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                     </div>
                 </templates>
@@ -7306,7 +7262,7 @@ test("empty grouped kanban with sample data: add a column", async () => {
         type: "kanban",
     });
 
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_kanban_group").toHaveCount(2);
     expect(queryAll(".o_kanban_record").length > 0).toBe(true, {
         message: "should contain sample records",
@@ -7316,7 +7272,7 @@ test("empty grouped kanban with sample data: add a column", async () => {
     await editKanbanColumnName("Yoohoo");
     await validateKanbanColumn();
 
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_kanban_group").toHaveCount(3);
     expect(queryAll(".o_kanban_record").length > 0).toBe(true, {
         message: "should contain sample records",
@@ -7340,7 +7296,7 @@ test.tags("desktop")("empty grouped kanban with sample data: cannot fold a colum
         arch: `
             <kanban sample="1">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                     </div>
                 </templates>
@@ -7348,7 +7304,7 @@ test.tags("desktop")("empty grouped kanban with sample data: cannot fold a colum
         groupBy: ["product_id"],
     });
 
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_kanban_group").toHaveCount(1);
     expect(queryAll(".o_kanban_record").length > 0).toBe(true, {
         message: "should contain sample records",
@@ -7386,7 +7342,7 @@ test("empty grouped kanban with sample data: delete a column", async () => {
         arch: `
             <kanban sample="1">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                     </div>
                 </templates>
@@ -7394,7 +7350,7 @@ test("empty grouped kanban with sample data: delete a column", async () => {
         groupBy: ["product_id"],
     });
 
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_kanban_group").toHaveCount(1);
     expect(queryAll(".o_kanban_record").length > 0).toBe(true, {
         message: "should contain sample records",
@@ -7430,7 +7386,7 @@ test("empty grouped kanban with sample data: add a column and delete it right aw
         arch: `
             <kanban sample="1">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                     </div>
                 </templates>
@@ -7438,7 +7394,7 @@ test("empty grouped kanban with sample data: add a column and delete it right aw
         groupBy: ["product_id"],
     });
 
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_kanban_group").toHaveCount(2);
     expect(queryAll(".o_kanban_record").length > 0).toBe(true, {
         message: "should contain sample records",
@@ -7449,7 +7405,7 @@ test("empty grouped kanban with sample data: add a column and delete it right aw
     await editKanbanColumnName("Yoohoo");
     await validateKanbanColumn();
 
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_kanban_group").toHaveCount(3);
     expect(queryAll(".o_kanban_record").length > 0).toBe(true, {
         message: "should contain sample records",
@@ -7460,7 +7416,7 @@ test("empty grouped kanban with sample data: add a column and delete it right aw
     await clickColumnAction("Delete");
     await contains(".o_dialog footer .btn-primary").click();
 
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_kanban_group").toHaveCount(2);
     expect(queryAll(".o_kanban_record").length > 0).toBe(true, {
         message: "should contain sample records",
@@ -7488,14 +7444,14 @@ test.tags("desktop")("kanban with sample data: do an on_create action", async ()
         arch: `
             <kanban sample="1" on_create="myCreateAction">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                     </div>
                 </templates>
             </kanban>`,
     });
 
-    expect(queryFirst(".o_content")).toHaveClass("o_view_sample_data");
+    expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(10, {
         message: "there should be 10 sample records",
     });
@@ -7505,7 +7461,7 @@ test.tags("desktop")("kanban with sample data: do an on_create action", async ()
     expect(".modal").toHaveCount(1);
 
     await contains(".modal .o_form_button_save").click();
-    expect(queryFirst(".o_content")).not.toHaveClass("o_view_sample_data");
+    expect(".o_content").not.toHaveClass("o_view_sample_data");
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(1);
     expect(".o_view_nocontent").toHaveCount(0);
 });
@@ -7532,7 +7488,7 @@ test("kanban with sample data grouped by m2o and existing groups", async () => {
         arch: `
             <kanban sample="1">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="product_id"/>
                     </div>
                 </templates>
@@ -7542,7 +7498,7 @@ test("kanban with sample data grouped by m2o and existing groups", async () => {
 
     expect(".o_content").toHaveClass("o_view_sample_data");
     expect(".o_view_nocontent").toHaveCount(1);
-    expect(".o_kanban_group:first .o_column_title").toHaveText("hello\n(16)");
+    expect(".o_kanban_group:first .o_column_title").toHaveText("hello");
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(16);
     expect(".o_kanban_record").toHaveText("hello");
 });
@@ -7554,7 +7510,7 @@ test.tags("desktop")("bounce create button when no data and click on empty area"
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -7567,13 +7523,13 @@ test.tags("desktop")("bounce create button when no data and click on empty area"
     });
 
     await contains(".o_kanban_view").click();
-    expect(queryFirst(".o-kanban-button-new")).not.toHaveClass("o_catch_attention");
+    expect(".o-kanban-button-new").not.toHaveClass("o_catch_attention");
 
     await toggleSearchBarMenu();
     await toggleMenuItem("Match nothing");
 
     await contains(".o_kanban_renderer").click();
-    expect(queryFirst(".o-kanban-button-new")).toHaveClass("o_catch_attention");
+    expect(".o-kanban-button-new").toHaveClass("o_catch_attention");
 });
 
 test("buttons with modifiers", async () => {
@@ -7588,7 +7544,7 @@ test("buttons with modifiers", async () => {
                 <field name="bar"/>
                 <field name="state"/>
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <button class="o_btn_test_1" type="object" name="a1" invisible="foo != 'yop'"/>
                         <button class="o_btn_test_2" type="object" name="a2" invisible="bar and state not in ['abc', 'def']"/>
                     </div>
@@ -7617,7 +7573,7 @@ test("support styling of anchor tags with action type", async function (assert) 
         arch: `
             <kanban>
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                         <a type="action" name="42" class="btn-primary" style="margin-left: 10px"><i class="oi oi-arrow-right"/> Click me !</a>
                     </div>
@@ -7625,8 +7581,8 @@ test("support styling of anchor tags with action type", async function (assert) 
             </kanban>`,
     });
 
-    await click(queryFirst("a[type='action']"));
-    expect(queryFirst("a[type='action']")).toHaveClass("btn-primary");
+    await click("a[type='action']");
+    expect("a[type='action']:first").toHaveClass("btn-primary");
     expect(queryFirst("a[type='action']").style.marginLeft).toBe("10px");
 });
 
@@ -7635,8 +7591,9 @@ test("button executes action and reloads", async () => {
 
     let count = 0;
     mockService("action", {
-        doActionButton({ onClose }) {
+        async doActionButton({ onClose }) {
             count++;
+            await animationFrame();
             onClose();
         },
     });
@@ -7647,9 +7604,11 @@ test("button executes action and reloads", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
-                        <button type="object" name="a1" class="a1"/>
+                        <button type="object" name="a1" class="a1">
+                            A1
+                        </button>
                     </div>
                 </templates>
             </kanban>`,
@@ -7662,11 +7621,15 @@ test("button executes action and reloads", async () => {
         "web_search_read",
     ]);
     expect("button.a1").toHaveCount(4);
+    expect("button.a1:first").not.toHaveAttribute("disabled");
 
-    click(queryFirst("button.a1"));
-    expect(!!queryFirst("button.a1").disabled).toBe(true);
+    await click("button.a1");
+
+    expect("button.a1:first").toHaveAttribute("disabled");
+
     await animationFrame();
 
+    expect("button.a1:first").not.toHaveAttribute("disabled");
     expect(count).toBe(1, { message: "should have triggered an execute action only once" });
     // the records should be reloaded after executing a button action
     expect.verifySteps(["web_search_read"]);
@@ -7691,7 +7654,7 @@ test("button executes action and check domain", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="foo"/>
                         <button type="object" name="a1" />
                         <button type="object" name="toggle_active" class="toggle-active" />
@@ -7716,7 +7679,7 @@ test("field tag with modifiers but no widget", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" invisible="id == 1"/>
                     </t>
                 </templates>
@@ -7734,7 +7697,7 @@ test("field tag with widget and class attributes", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" widget="char" class="hi"/>
                     </t>
                 </templates>
@@ -7754,7 +7717,7 @@ test("rendering date and datetime (value)", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field class="date" name="date"/>
                         <field class="datetime" name="datetime"/>
                     </t>
@@ -7762,8 +7725,8 @@ test("rendering date and datetime (value)", async () => {
             </kanban>`,
     });
 
-    expect(getKanbanRecord({ index: 0 }).querySelector(".date").innerText).toBe("01/25/2017");
-    expect(getKanbanRecord({ index: 1 }).querySelector(".datetime").innerText).toBe(
+    expect(getKanbanRecord({ index: 0 }).querySelector(".date")).toHaveText("01/25/2017");
+    expect(getKanbanRecord({ index: 1 }).querySelector(".datetime")).toHaveText(
         "12/12/2016 11:55:05"
     );
 });
@@ -7780,7 +7743,7 @@ test("rendering date and datetime (raw value)", async () => {
                 <field name="date"/>
                 <field name="datetime"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <span class="date" t-esc="record.date.raw_value"/>
                         <span class="datetime" t-esc="record.datetime.raw_value"/>
                     </t>
@@ -7788,10 +7751,10 @@ test("rendering date and datetime (raw value)", async () => {
             </kanban>`,
     });
 
-    expect(getKanbanRecord({ index: 0 }).querySelector(".date").innerText).toBe(
+    expect(getKanbanRecord({ index: 0 }).querySelector(".date")).toHaveText(
         "2017-01-25T00:00:00.000+01:00"
     );
-    expect(getKanbanRecord({ index: 1 }).querySelector(".datetime").innerText).toBe(
+    expect(getKanbanRecord({ index: 1 }).querySelector(".datetime")).toHaveText(
         "2016-12-12T11:55:05.000+01:00"
     );
 });
@@ -7805,7 +7768,7 @@ test("rendering many2one (value)", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="product_id" class="product_id"/>
                     </t>
                 </templates>
@@ -7825,7 +7788,7 @@ test("rendering many2one (raw value)", async () => {
             <kanban>
                 <field name="product_id"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <span class="product_id" t-esc="record.product_id.raw_value"/>
                     </t>
                 </templates>
@@ -7846,7 +7809,7 @@ test("evaluate conditions on relational fields", async () => {
                 <field name="product_id"/>
                 <field name="category_ids"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <button t-if="!record.product_id.raw_value" class="btn_a">A</button>
                         <button t-if="!record.category_ids.raw_value.length" class="btn_b">B</button>
                     </t>
@@ -7874,7 +7837,7 @@ test.tags("desktop")("resequence columns in grouped by m2o", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -7883,22 +7846,20 @@ test.tags("desktop")("resequence columns in grouped by m2o", async () => {
     });
 
     expect(".o_kanban_group").toHaveCount(2);
-    expect(getKanbanColumn(0).querySelector(".o_column_title").innerText).toBe("hello\n(2)");
+    expect(getKanbanColumn(0).querySelector(".o_column_title")).toHaveText("hello\n(2)");
     expect(getKanbanRecordTexts()).toEqual(["1", "3", "2", "4"]);
 
-    await contains(".o_kanban_group:first-child").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
-    );
+    await contains(".o_kanban_group:first-child").dragAndDrop(".o_kanban_group:nth-child(2)");
 
     // Drag & drop on column (not title) should not work
-    expect(getKanbanColumn(0).querySelector(".o_column_title").innerText).toBe("hello\n(2)");
+    expect(getKanbanColumn(0).querySelector(".o_column_title")).toHaveText("hello\n(2)");
     expect(getKanbanRecordTexts()).toEqual(["1", "3", "2", "4"]);
 
     await contains(".o_kanban_group:first-child .o_column_title").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
-    expect(getKanbanColumn(0).querySelector(".o_column_title").innerText).toBe("xmo\n(2)");
+    expect(getKanbanColumn(0).querySelector(".o_column_title")).toHaveText("xmo\n(2)");
     expect(getKanbanRecordTexts()).toEqual(["2", "4", "1", "3"]);
 });
 
@@ -7925,7 +7886,7 @@ test.tags("desktop")("resequence all when creating new record + partial resequen
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -7968,7 +7929,7 @@ test("prevent resequence columns if groups_draggable=false", async () => {
         arch: `
             <kanban groups_draggable='0'>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -7977,22 +7938,20 @@ test("prevent resequence columns if groups_draggable=false", async () => {
     });
 
     expect(".o_kanban_group").toHaveCount(2);
-    expect(getKanbanColumn(0).querySelector(".o_column_title").innerText).toBe("hello\n(2)");
+    expect(getKanbanColumn(0).querySelector(".o_column_title")).toHaveText("hello\n(2)");
     expect(getKanbanRecordTexts()).toEqual(["1", "3", "2", "4"]);
 
-    await contains(".o_kanban_group:first-child").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
-    );
+    await contains(".o_kanban_group:first-child").dragAndDrop(".o_kanban_group:nth-child(2)");
 
     // Drag & drop on column (not title) should not work
-    expect(getKanbanColumn(0).querySelector(".o_column_title").innerText).toBe("hello\n(2)");
+    expect(getKanbanColumn(0).querySelector(".o_column_title")).toHaveText("hello\n(2)");
     expect(getKanbanRecordTexts()).toEqual(["1", "3", "2", "4"]);
 
     await contains(".o_kanban_group:first-child .o_column_title").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
-    expect(getKanbanColumn(0).querySelector(".o_column_title").innerText).toBe("hello\n(2)");
+    expect(getKanbanColumn(0).querySelector(".o_column_title")).toHaveText("hello\n(2)");
     expect(getKanbanRecordTexts()).toEqual(["1", "3", "2", "4"]);
 });
 
@@ -8003,7 +7962,7 @@ test("open config dropdown on kanban with records and groups draggable off", asy
         arch: `
             <kanban groups_draggable='0' records_draggable='0'>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -8028,7 +7987,7 @@ test("properly evaluate more complex domains", async () => {
                 <field name="bar"/>
                 <field name="category_ids"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <button type="object" invisible="bar or category_ids" class="btn btn-primary float-end" name="arbitrary">Join</button>
                     </t>
@@ -8036,7 +7995,7 @@ test("properly evaluate more complex domains", async () => {
             </kanban>`,
     });
 
-    expect("button.float-end.oe_kanban_action_button").toHaveCount(1, {
+    expect("button.float-end.oe_kanban_action").toHaveCount(1, {
         message: "only one button should be visible",
     });
 });
@@ -8050,9 +8009,8 @@ test("kanban with color attribute", async () => {
         resModel: "category",
         arch: `
             <kanban highlight_color="color">
-                <field name="color"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                     </t>
                 </templates>
@@ -8076,10 +8034,10 @@ test("edit the kanban color with the colorpicker", async () => {
         arch: `
             <kanban highlight_color="color">
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <field name="color" widget="kanban_color_picker"/>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                     </t>
                 </templates>
@@ -8121,10 +8079,10 @@ test("kanban with colorpicker and node with color attribute", async () => {
         arch: `
             <kanban highlight_color="colorpickerField">
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <field name="colorpickerField" widget="kanban_color_picker"/>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                     </t>
                 </templates>
@@ -8153,10 +8111,10 @@ test("edit the kanban color with translated colors resulting in the same terms",
         arch: `
             <kanban highlight_color="color">
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <field name="color" widget="kanban_color_picker"/>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                     </t>
                 </templates>
@@ -8175,10 +8133,10 @@ test("colorpicker doesn't appear when missing access rights", async () => {
         arch: `
             <kanban edit="0">
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <field name="color" widget="kanban_color_picker"/>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                     </t>
                 </templates>
@@ -8200,7 +8158,7 @@ test("load more records in column", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -8251,7 +8209,7 @@ test("load more records in column with x2many", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="category_ids"/>
                         <field name="foo"/>
                     </t>
@@ -8289,7 +8247,7 @@ test("update buttons after column creation", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -8322,7 +8280,7 @@ test.tags("desktop")("group_by_tooltip option when grouping on a many2one", asyn
             <kanban default_group_by="bar">
                 <field name="product_id" options='{"group_by_tooltip": {"name": "Kikou"}}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -8341,11 +8299,11 @@ test.tags("desktop")("group_by_tooltip option when grouping on a many2one", asyn
     await toggleMenuItem("GroupBy Product");
 
     expect(".o_kanban_group").toHaveCount(3, { message: "should have 3 columns" });
-    expect(queryFirst(".o_kanban_group")).toHaveClass("o_column_folded");
+    expect(".o_kanban_group:first").toHaveClass("o_column_folded");
 
     await contains(".o_kanban_group").click();
     expect(".o_kanban_group").toHaveCount(3, { message: "should have 3 columns" });
-    expect(queryFirst(".o_kanban_group")).not.toHaveClass("o_column_folded");
+    expect(".o_kanban_group:first").not.toHaveClass("o_column_folded");
     expect(queryAll(".o_kanban_record", { root: getKanbanColumn(0) })).toHaveCount(1);
     expect(queryAll(".o_kanban_record", { root: getKanbanColumn(1) })).toHaveCount(2);
     expect(queryAll(".o_kanban_record", { root: getKanbanColumn(2) })).toHaveCount(1);
@@ -8353,7 +8311,7 @@ test.tags("desktop")("group_by_tooltip option when grouping on a many2one", asyn
         message: "first column should have a default title for when no value is provided",
     });
 
-    hover(queryFirst(".o_column_title"));
+    await hover(".o_column_title");
     await runAllTimers();
     expect(".o-tooltip").toHaveCount(0, {
         message:
@@ -8362,17 +8320,16 @@ test.tags("desktop")("group_by_tooltip option when grouping on a many2one", asyn
     // should not have done any read on product because no value
     expect.verifySteps([]);
 
-    hover(queryOne(".o_column_title:eq(1)"));
+    await hover(".o_column_title:eq(1)");
     await runAllTimers();
     expect(".o-tooltip").toHaveCount(1, {
         message:
             "second column should have a tooltip with the group_by_tooltip title and many2one field value",
     });
-    expect(queryFirst(".o-tooltip").textContent).toBe("Kikouhello");
-    expect(queryFirst(".o_kanban_group:nth-child(2) .o_column_title").textContent).toBe(
-        "hello(2)",
-        { message: "second column should have a title with a value from the many2one" }
-    );
+    expect(".o-tooltip:first").toHaveText("Kikou\nhello");
+    expect(".o_kanban_group:nth-child(2) .o_column_title").toHaveText("hello\n(2)", {
+        message: "second column should have a title with a value from the many2one",
+    });
     // should have done one read on product for the second column tooltip
     expect.verifySteps(["read: product"]);
 });
@@ -8390,7 +8347,7 @@ test.tags("desktop")("asynchronous tooltips when grouped", async () => {
             <kanban default_group_by="product_id">
                 <field name="product_id" options='{"group_by_tooltip": {"name": "Name"}}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -8400,15 +8357,15 @@ test.tags("desktop")("asynchronous tooltips when grouped", async () => {
     expect(".o_kanban_renderer").toHaveClass("o_kanban_grouped");
     expect(".o_column_title").toHaveCount(2);
 
-    hover(".o_kanban_group .o_kanban_header_title .o_column_title");
+    await hover(".o_kanban_group .o_kanban_header_title .o_column_title");
     await runAllTimers();
     expect(".o-tooltip").toHaveCount(0);
 
-    leave(".o_kanban_group .o_kanban_header_title .o_column_title");
+    await leave();
     await runAllTimers();
     expect(".o-tooltip").toHaveCount(0);
 
-    hover(".o_kanban_group .o_kanban_header_title .o_column_title");
+    await hover(".o_kanban_group .o_kanban_header_title .o_column_title");
     await runAllTimers();
     expect(".o-tooltip").toHaveCount(0);
 
@@ -8416,7 +8373,7 @@ test.tags("desktop")("asynchronous tooltips when grouped", async () => {
     await animationFrame();
 
     expect(".o-tooltip").toHaveCount(1);
-    expect(queryFirst(".o-tooltip").textContent.trim()).toBe("Namehello");
+    expect(".o-tooltip").toHaveText("Name\nhello");
     expect.verifySteps(["read: product"]);
 });
 
@@ -8432,27 +8389,27 @@ test.tags("desktop")("loads data tooltips only when first opening", async () => 
             <kanban default_group_by="product_id">
                 <field name="product_id" options='{"group_by_tooltip": {"name": "Name"}}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
             </kanban>`,
     });
 
-    hover(".o_kanban_group .o_kanban_header_title .o_column_title");
-    await runAllTimers();
+    await hover(".o_kanban_group .o_kanban_header_title .o_column_title");
+    await await runAllTimers();
     expect(".o-tooltip").toHaveCount(1);
-    expect(queryFirst(".o-tooltip").textContent.trim()).toBe("Namehello");
+    expect(".o-tooltip").toHaveText("Name\nhello");
     expect.verifySteps(["read: product"]);
 
-    leave(".o_kanban_group .o_kanban_header_title .o_column_title");
+    await leave();
     await animationFrame();
     expect(".o-tooltip").toHaveCount(0, { message: "tooltip should be closed" });
 
-    hover(".o_kanban_group .o_kanban_header_title .o_column_title");
+    await hover(".o_kanban_group .o_kanban_header_title .o_column_title");
     await runAllTimers();
     expect(".o-tooltip").toHaveCount(1);
-    expect(queryFirst(".o-tooltip").textContent.trim()).toBe("Namehello");
+    expect(".o-tooltip").toHaveText("Name\nhello");
     expect.verifySteps([]);
 });
 
@@ -8465,7 +8422,7 @@ test.tags("desktop")("move a record then put it again in the same column", async
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -8487,14 +8444,14 @@ test.tags("desktop")("move a record then put it again in the same column", async
     expect(".o_kanban_group:nth-child(2) .o_kanban_record").toHaveCount(1);
 
     await contains(".o_kanban_group:nth-child(2) .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:first-child")
+        ".o_kanban_group:first-child"
     );
 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(1);
     expect(".o_kanban_group:nth-child(2) .o_kanban_record").toHaveCount(0);
 
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(0);
@@ -8515,7 +8472,7 @@ test.tags("desktop")("resequence a record twice", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -8540,9 +8497,7 @@ test.tags("desktop")("resequence a record twice", async () => {
         message: "records should be correctly ordered",
     });
 
-    await contains(".o_kanban_record:nth-child(2)").dragAndDrop(
-        queryFirst(".o_kanban_record:nth-child(3)")
-    );
+    await contains(".o_kanban_record:nth-child(2)").dragAndDrop(".o_kanban_record:nth-child(3)");
     def.resolve();
     await animationFrame();
 
@@ -8551,9 +8506,7 @@ test.tags("desktop")("resequence a record twice", async () => {
         message: "records should be correctly ordered",
     });
 
-    await contains(".o_kanban_record:nth-child(3)").dragAndDrop(
-        queryFirst(".o_kanban_record:nth-child(2)")
-    );
+    await contains(".o_kanban_record:nth-child(3)").dragAndDrop(".o_kanban_record:nth-child(2)");
 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(2);
     expect(getKanbanRecordTexts()).toEqual(["record2", "record1"], {
@@ -8583,7 +8536,7 @@ test("basic support for widgets (being Owl Components)", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <widget name="test"/>
                     </t>
@@ -8591,9 +8544,7 @@ test("basic support for widgets (being Owl Components)", async () => {
             </kanban>`,
     });
 
-    expect(getKanbanRecord({ index: 2 }).querySelector(".o_widget").innerText).toBe(
-        '{"foo":"gnap"}'
-    );
+    expect(getKanbanRecord({ index: 2 }).querySelector(".o_widget")).toHaveText('{"foo":"gnap"}');
 });
 
 test("kanban card: record value should be updated", async () => {
@@ -8616,7 +8567,7 @@ test("kanban card: record value should be updated", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" class="foo"/>
                         <widget name="test"/>
                     </t>
@@ -8626,7 +8577,7 @@ test("kanban card: record value should be updated", async () => {
 
     expect(queryText(".foo", { root: getKanbanRecord({ index: 0 }) })).toBe("yop");
 
-    click(queryOne("button", { root: getKanbanRecord({ index: 0 }) }));
+    await click(queryOne("button", { root: getKanbanRecord({ index: 0 }) }));
     await animationFrame();
     await animationFrame();
 
@@ -8643,7 +8594,7 @@ test("column progressbars properly work", async () => {
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -8679,7 +8630,7 @@ test("filter on progressbar in new groups", async () => {
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -8730,7 +8681,7 @@ test('column progressbars: "false" bar is clickable', async () => {
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -8744,16 +8695,16 @@ test('column progressbars: "false" bar is clickable', async () => {
     expect(".o_kanban_group:last-child .o_column_progress .progress-bar.bg-200").toHaveCount(1, {
         message: "should have false kanban color",
     });
-    expect(
-        queryFirst(".o_kanban_group:last-child .o_column_progress .progress-bar.bg-200")
-    ).toHaveClass("bg-200");
+    expect(".o_kanban_group:last-child .o_column_progress .progress-bar.bg-200:first").toHaveClass(
+        "bg-200"
+    );
 
     await contains(".o_kanban_group:last-child .o_column_progress .progress-bar.bg-200").click();
 
-    expect(
-        queryFirst(".o_kanban_group:last-child .o_column_progress .progress-bar.bg-200")
-    ).toHaveClass("progress-bar-animated");
-    expect(queryFirst(".o_kanban_group:last-child")).toHaveClass("o_kanban_group_show_200");
+    expect(".o_kanban_group:last-child .o_column_progress .progress-bar.bg-200:first").toHaveClass(
+        "progress-bar-animated"
+    );
+    expect(".o_kanban_group:last-child").toHaveClass("o_kanban_group_show_200");
     expect(getKanbanCounters()).toEqual(["1", "1"]);
     expect.verifySteps([
         "/web/webclient/translations",
@@ -8787,7 +8738,7 @@ test('column progressbars: "false" bar with sum_field', async () => {
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -8800,9 +8751,9 @@ test('column progressbars: "false" bar with sum_field', async () => {
 
     await contains(".o_kanban_group:last-child .o_column_progress .progress-bar.bg-200").click();
 
-    expect(
-        queryFirst(".o_kanban_group:last-child .o_column_progress .progress-bar.bg-200")
-    ).toHaveClass("progress-bar-animated");
+    expect(".o_kanban_group:last-child .o_column_progress .progress-bar.bg-200:first").toHaveClass(
+        "progress-bar-animated"
+    );
     expect(getKanbanCounters()).toEqual(["-4", "15"]);
     expect.verifySteps([
         "/web/webclient/translations",
@@ -8830,7 +8781,7 @@ test("column progressbars should not crash in non grouped views", async () => {
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -8864,7 +8815,7 @@ test("column progressbars: creating a new column should create a new progressbar
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -8905,7 +8856,7 @@ test("column progressbars on quick create properly update counter", async () => 
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -8952,7 +8903,7 @@ test("column progressbars are working with load more", async () => {
             <kanban limit="1">
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -8995,7 +8946,7 @@ test("column progressbars with an active filter are working with load more", asy
             <kanban limit="1">
                 <progressbar field="foo" colors='{"blork": "success"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -9038,7 +8989,7 @@ test("column progressbars on archiving records update counter", async () => {
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9088,7 +9039,7 @@ test("kanban with progressbars: correctly update env when archiving records", as
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -9129,7 +9080,7 @@ test("RPCs when (re)loading kanban view progressbars", async () => {
             <kanban>
             <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
             <templates>
-                <t t-name="kanban-card">
+                <t t-name="card">
                     <field name="foo"/>
                 </t>
             </templates>
@@ -9169,7 +9120,7 @@ test("RPCs when (de)activating kanban view progressbar filters", async () => {
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9228,7 +9179,7 @@ test.tags("desktop")("drag & drop records grouped by m2o with progressbar", asyn
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="int_field"/>
                     </t>
                 </templates>
@@ -9242,19 +9193,19 @@ test.tags("desktop")("drag & drop records grouped by m2o with progressbar", asyn
     expect(getKanbanCounters()).toEqual(["1", "1", "2"]);
 
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     expect(getKanbanCounters()).toEqual(["0", "2", "2"]);
 
     await contains(".o_kanban_group:nth-child(2) .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:first-child")
+        ".o_kanban_group:first-child"
     );
 
     expect(getKanbanCounters()).toEqual(["1", "1", "2"]);
 
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(3)")
+        ".o_kanban_group:nth-child(3)"
     );
 
     expect(getKanbanCounters()).toEqual(["0", "1", "3"]);
@@ -9306,7 +9257,7 @@ test.tags("desktop")("d&d records grouped by date with progressbar with aggregat
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="int_field"/>
                     </t>
                 </templates>
@@ -9317,7 +9268,7 @@ test.tags("desktop")("d&d records grouped by date with progressbar with aggregat
     expect(getKanbanCounters()).toEqual(["13", "19"]);
 
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     expect(getKanbanCounters()).toEqual(["-4", "36"]);
@@ -9348,7 +9299,7 @@ test("progress bar subgroup count recompute", async () => {
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9384,7 +9335,7 @@ test.tags("desktop")("progress bar recompute after d&d to and from other column"
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9397,7 +9348,7 @@ test.tags("desktop")("progress bar recompute after d&d to and from other column"
 
     // Drag the last kanban record to the first column
     await contains(".o_kanban_group:last-child .o_kanban_record:nth-child(4)").dragAndDrop(
-        queryFirst(".o_kanban_group:first-child")
+        ".o_kanban_group:first-child"
     );
 
     expect(getKanbanColumnTooltips()).toEqual(["1 gnap", "1 blip", "1 yop", "1 blip"]);
@@ -9431,7 +9382,7 @@ test("progress bar recompute after filter selection", async () => {
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9484,7 +9435,7 @@ test("progress bar recompute after filter selection (aggregates)", async () => {
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9544,7 +9495,7 @@ test("progress bar with aggregates: activate bars (grouped by boolean)", async (
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9580,7 +9531,7 @@ test("progress bar with aggregates: activate bars (grouped by many2one)", async 
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9616,7 +9567,7 @@ test("progress bar with aggregates: activate bars (grouped by date)", async () =
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9656,7 +9607,7 @@ test("progress bar with aggregates: Archive All in a column", async () => {
         arch: `
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
-                <templates><t t-name="kanban-card">
+                <templates><t t-name="card">
                         <field name="foo"/>
                 </t></templates>
             </kanban>`,
@@ -9693,7 +9644,7 @@ test.tags("desktop")("load more should load correct records after drag&drop even
         arch: `
             <kanban limit="1">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                     </t>
                 </templates>
@@ -9706,7 +9657,7 @@ test.tags("desktop")("load more should load correct records after drag&drop even
 
     // Drag the first kanban record on top of the last
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:last-child .o_kanban_record")
+        ".o_kanban_group:last-child .o_kanban_record"
     );
 
     // load more twice to load all records of second column
@@ -9729,7 +9680,7 @@ test.tags("desktop")("column progressbars on quick create with quick_create_view
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9780,7 +9731,7 @@ test.tags("desktop")("progressbars and active filter with quick_create_view", as
             <kanban on_create="quick_create" quick_create_view="some_view_ref">
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9856,7 +9807,7 @@ test.tags("desktop")("quickcreate in first column after moving a record from it"
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9866,14 +9817,14 @@ test.tags("desktop")("quickcreate in first column after moving a record from it"
 
     await createKanbanRecord();
 
-    expect(queryFirst(".o_kanban_quick_create").closest(".o_kanban_group")).toBe(
+    expect(queryFirst(".o_kanban_group:has(.o_kanban_quick_create)")).toBe(
         queryFirst(".o_kanban_group")
     );
 
-    await contains(".o_kanban_record").dragAndDrop(queryFirst(".o_kanban_group:nth-child(2)"));
+    await contains(".o_kanban_record").dragAndDrop(".o_kanban_group:nth-child(2)");
     await createKanbanRecord();
 
-    expect(queryFirst(".o_kanban_quick_create").closest(".o_kanban_group")).toBe(
+    expect(queryFirst(".o_kanban_group:has(.o_kanban_quick_create)")).toBe(
         queryFirst(".o_kanban_group")
     );
 });
@@ -9897,7 +9848,7 @@ test.tags("desktop")("grouped kanban: clear groupby when reloading", async () =>
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9917,8 +9868,8 @@ test.tags("desktop")("grouped kanban: clear groupby when reloading", async () =>
     expect(".o_kanban_renderer").not.toHaveClass("o_kanban_ungrouped");
     expect(queryAllTexts(".o_facet_value")).toEqual(["My Filter", "GroupBy Bar"]);
 
-    await contains(queryFirst(".o_facet_remove")).click();
-    await contains(queryOne(".o_facet_remove")).click();
+    await contains(".o_facet_remove:first").click();
+    await contains(".o_facet_remove:only").click();
     def.resolve(); // simulate slow 1st update of kanban view
     await animationFrame();
 
@@ -9936,7 +9887,7 @@ test.tags("desktop")("quick_create on grouped kanban without column", async () =
         arch: `
             <kanban group_create="0" on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -9958,20 +9909,20 @@ test("keynav: right/left", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
             </kanban>`,
     });
 
-    pointerDown(getKanbanRecord({ index: 0 }));
+    await pointerDown(getKanbanRecord({ index: 0 }));
     expect(getKanbanRecord({ index: 0 })).toBeFocused();
 
-    press("ArrowRight");
+    await press("ArrowRight");
     expect(getKanbanRecord({ index: 1 })).toBeFocused();
 
-    press("ArrowLeft");
+    await press("ArrowLeft");
     expect(getKanbanRecord({ index: 0 })).toBeFocused();
 });
 
@@ -9982,7 +9933,7 @@ test("keynav: down, with focus is inside a card", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <a href="#" class="o-this-is-focussable">ho! this is focussable</a>
                     </t>
@@ -9990,8 +9941,8 @@ test("keynav: down, with focus is inside a card", async () => {
             </kanban>`,
     });
 
-    pointerDown(getKanbanRecord({ index: 0 }).querySelector(".o-this-is-focussable"));
-    press("ArrowDown");
+    await pointerDown(getKanbanRecord({ index: 0 }).querySelector(".o-this-is-focussable"));
+    await press("ArrowDown");
 
     expect(getKanbanRecord({ index: 1 })).toBeFocused();
 });
@@ -10003,40 +9954,40 @@ test.tags("desktop")("keynav: grouped kanban", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
             </kanban>`,
         groupBy: ["bar"],
     });
-    const cardsByColumn = [...queryAll(".o_kanban_group")].map((c) => [
-        ...c.querySelectorAll(".o_kanban_record"),
-    ]);
+    const cardsByColumn = queryAll(".o_kanban_group").map((root) =>
+        queryAll(".o_kanban_record", { root })
+    );
     const firstColumnFirstCard = cardsByColumn[0][0];
     const secondColumnFirstCard = cardsByColumn[1][0];
     const secondColumnSecondCard = cardsByColumn[1][1];
 
     // DOWN should focus the first card
-    press("ArrowDown");
+    await press("ArrowDown");
     expect(firstColumnFirstCard).toBeFocused({
         message: "LEFT should select the first card of the first column",
     });
 
     // RIGHT should select the next column
-    press("ArrowRight");
+    await press("ArrowRight");
     expect(secondColumnFirstCard).toBeFocused({
         message: "RIGHT should select the first card of the next column",
     });
 
     // DOWN should move up one card
-    press("ArrowDown");
+    await press("ArrowDown");
     expect(secondColumnSecondCard).toBeFocused({
         message: "DOWN should select the second card of the current column",
     });
 
     // LEFT should go back to the first column
-    press("ArrowLeft");
+    await press("ArrowLeft");
     expect(firstColumnFirstCard).toBeFocused({
         message: "LEFT should select the first card of the first column",
     });
@@ -10081,7 +10032,7 @@ test.tags("desktop")("keynav: grouped kanban with empty columns", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -10097,26 +10048,26 @@ test.tags("desktop")("keynav: grouped kanban with empty columns", async () => {
      *    |     | yop  |     |     | gnap |
      *    |     | blip |     |     | blip |
      */
-    const cardsByColumn = [...queryAll(".o_kanban_group")].map((c) => [
-        ...c.querySelectorAll(".o_kanban_record"),
-    ]);
+    const cardsByColumn = queryAll(".o_kanban_group").map((root) =>
+        queryAll(".o_kanban_record", { root })
+    );
     const yop = cardsByColumn[1][0];
     const gnap = cardsByColumn[4][0];
 
     // DOWN should focus yop (first card)
-    press("ArrowDown");
+    await press("ArrowDown");
     expect(yop).toBeFocused({
         message: "LEFT should select the first card of the first column that has a card",
     });
 
     // RIGHT should select the next column that has a card
-    press("ArrowRight");
+    await press("ArrowRight");
     expect(gnap).toBeFocused({
         message: "RIGHT should select the first card of the next column that has a card",
     });
 
     // LEFT should go back to the first column that has a card
-    press("ArrowLeft");
+    await press("ArrowLeft");
     expect(yop).toBeFocused({
         message: "LEFT should select the first card of the first column that has a card",
     });
@@ -10129,7 +10080,7 @@ test.tags("desktop")("keynav: no global_click, press ENTER on card with a link",
         arch: `
             <kanban can_open="0">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <a type="archive">Archive</a>
                     </t>
                 </templates>
@@ -10139,9 +10090,9 @@ test.tags("desktop")("keynav: no global_click, press ENTER on card with a link",
         },
     });
 
-    press("ArrowDown");
-    expect(queryFirst(".o_kanban_record")).toBeFocused();
-    press("Enter");
+    await press("ArrowDown");
+    expect(".o_kanban_record:first").toBeFocused();
+    await press("Enter");
 
     await animationFrame();
     expect(".o_dialog").toHaveCount(1);
@@ -10158,7 +10109,7 @@ test.tags("desktop")("keynav: kanban with global_click", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <a name="action_test" type="object" />
                     </t>
@@ -10171,9 +10122,9 @@ test.tags("desktop")("keynav: kanban with global_click", async () => {
         },
     });
 
-    press("ArrowDown");
-    expect(queryFirst(".o_kanban_record")).toBeFocused();
-    press("Enter");
+    await press("ArrowDown");
+    expect(".o_kanban_record:first").toBeFocused();
+    await press("Enter");
 });
 
 test.tags("desktop")(`kanban should ask to scroll to top on page changes`, async () => {
@@ -10194,7 +10145,7 @@ test.tags("desktop")(`kanban should ask to scroll to top on page changes`, async
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -10243,7 +10194,7 @@ test.tags("mobile")(`kanban should ask to scroll to top on page changes (mobile)
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -10300,10 +10251,10 @@ test.tags("desktop")("set cover image", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <a type="set_cover" data-field="displayed_image_id" class="dropdown-item">Set Cover Image</a>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <field name="displayed_image_id" widget="attachment_image"/>
                     </t>
@@ -10346,7 +10297,7 @@ test.tags("desktop")("set cover image", async () => {
     expect(".modal .btn:contains(Discard)").toHaveCount(1);
     expect(".modal .btn:contains(Remove Cover Image)").toHaveCount(0);
 
-    dblclick(".modal .o_kanban_cover_image img"); // doesn't work
+    await dblclick(".modal .o_kanban_cover_image img"); // doesn't work
     await animationFrame();
 
     expect('img[data-src*="/web/image/2"]').toHaveCount(1);
@@ -10382,10 +10333,10 @@ test.tags("desktop")("open file explorer if no cover image", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <a type="set_cover" data-field="displayed_image_id" class="dropdown-item">Set Cover Image</a>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <field name="displayed_image_id" widget="attachment_image"/>
                     </t>
@@ -10397,7 +10348,7 @@ test.tags("desktop")("open file explorer if no cover image", async () => {
     await contains(".oe_kanban_action", {
         root: getDropdownMenu(getKanbanRecord({ index: 0 })),
     }).click();
-    setInputFiles([]);
+    await setInputFiles([]);
     await animationFrame();
 
     expect(`.o_file_input input`).not.toBeEnabled({
@@ -10447,10 +10398,10 @@ test.tags("desktop")("unset cover image", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <a type="set_cover" data-field="displayed_image_id" class="dropdown-item">Set Cover Image</a>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <field name="displayed_image_id" widget="attachment_image"/>
                     </t>
@@ -10486,7 +10437,7 @@ test.tags("desktop")("unset cover image", async () => {
     expect(queryText(coverButton)).toBe("Set Cover Image");
     await contains(coverButton).click();
 
-    dblclick(".modal .o_kanban_cover_image img"); // doesn't work
+    await dblclick(".modal .o_kanban_cover_image img"); // doesn't work
     await animationFrame();
 
     expect(queryAll("img", { root: getKanbanRecord({ index: 1 }) })).toHaveCount(0, {
@@ -10514,7 +10465,7 @@ test.tags("desktop")("ungrouped kanban with handle field", async () => {
             <kanban>
                 <field name="int_field" widget="handle" />
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -10540,7 +10491,7 @@ test("ungrouped kanban without handle field", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -10567,7 +10518,7 @@ test("click on image field in kanban (with default global_click)", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="image" widget="image"/>
                     </t>
                 </templates>
@@ -10591,7 +10542,7 @@ test("kanban view with boolean field", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="bar"/>
                     </t>
                 </templates>
@@ -10610,7 +10561,7 @@ test("kanban view with boolean widget", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="bar" widget="boolean"/>
                     </t>
                 </templates>
@@ -10629,7 +10580,7 @@ test("kanban view with boolean toggle widget", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="bar" widget="boolean_toggle"/>
                     </t>
                 </templates>
@@ -10638,7 +10589,7 @@ test("kanban view with boolean toggle widget", async () => {
     expect(getKanbanRecord({ index: 0 }).querySelector("[name='bar'] input")).toBeChecked();
     expect(getKanbanRecord({ index: 1 }).querySelector("[name='bar'] input")).toBeChecked();
 
-    click(queryOne("[name='bar'] input", { root: getKanbanRecord({ index: 1 }) }));
+    await click("[name='bar'] input:only", { root: getKanbanRecord({ index: 1 }) });
     await animationFrame();
 
     expect(getKanbanRecord({ index: 0 }).querySelector("[name='bar'] input")).toBeChecked();
@@ -10659,7 +10610,7 @@ test("kanban view with monetary and currency fields without widget", async () =>
             <kanban>
                 <field name="currency_id"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="salary"/>
                     </t>
                 </templates>
@@ -10679,7 +10630,7 @@ test.tags("desktop")("quick create: keyboard navigation to buttons", async () =>
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="display_name"/>
                     </div>
                 </templates>
@@ -10697,49 +10648,8 @@ test.tags("desktop")("quick create: keyboard navigation to buttons", async () =>
     await editKanbanRecordQuickCreateInput("display_name", "aaa"); // pressed Tab to trigger "change"
     expect(".o_kanban_add").toBeFocused();
 
-    press("Tab");
+    await press("Tab");
     expect(".o_kanban_edit").toBeFocused();
-});
-
-test("kanban with isHtmlEmpty method", async () => {
-    Product._fields.description = fields.Html();
-    Product._records.push({
-        id: 11,
-        name: "product 11",
-        description: "<span class='text-info'>hello</hello>",
-    });
-    Product._records.push({
-        id: 12,
-        name: "product 12",
-        description: "<p class='a'><span style='color:red;'/><br/></p>",
-    });
-
-    await mountView({
-        type: "kanban",
-        resModel: "product",
-        arch: `
-            <kanban>
-                <templates>
-                    <t t-name="kanban-card">
-                        <field name="display_name"/>
-                        <div class="test" t-if="!widget.isHtmlEmpty(record.description.raw_value)">
-                            <field name="description"/>
-                        </div>
-                    </t>
-                </templates>
-            </kanban>`,
-        domain: [["id", "in", [11, 12]]],
-    });
-    expect(".o_kanban_record:first-child div.test").toHaveCount(1, {
-        message: "the container is displayed if description have actual content",
-    });
-    expect(queryText("span.text-info", { root: getKanbanRecord({ index: 0 }) })).toBe("hello", {
-        message: "the inner html content is rendered properly",
-    });
-    expect(".o_kanban_record:last-child div.test").toHaveCount(0, {
-        message:
-            "the container is not displayed if description just have formatting tags and no actual content",
-    });
 });
 
 test("progressbar filter state is kept unchanged when domain is updated (records still in group)", async () => {
@@ -10752,7 +10662,7 @@ test("progressbar filter state is kept unchanged when domain is updated (records
             <kanban default_group_by="bar">
                 <progressbar field="foo" colors='{"yop": "success", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id"/>
                         <field name="foo"/>
                     </t>
@@ -10826,7 +10736,7 @@ test("progressbar filter state is kept unchanged when domain is updated (emptyin
             <kanban default_group_by="bar">
                 <progressbar field="foo" colors='{"yop": "success", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div>
                             <field name="id"/>
                             <field name="foo"/>
@@ -10913,7 +10823,7 @@ test.tags("desktop")("filtered column counters when dropping in non-matching rec
             <kanban default_group_by="bar">
                 <progressbar field="foo" colors='{"yop": "success", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div>
                             <field name="id"/>
                             <field name="foo"/>
@@ -10981,7 +10891,7 @@ test.tags("desktop")("filtered column is reloaded when dragging out its last rec
             <kanban default_group_by="bar">
                 <progressbar field="foo" colors='{"yop": "success", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div>
                             <field name="id"/>
                             <field name="foo"/>
@@ -11061,7 +10971,7 @@ test("kanban widget can extract props from attrs", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <widget name="widget_test_option" title="Widget with Option"/>
                     </t>
                 </templates>
@@ -11071,7 +10981,7 @@ test("kanban widget can extract props from attrs", async () => {
     });
 
     expect(".o-test-widget-option").toHaveCount(4);
-    expect(queryFirst(".o-test-widget-option").textContent).toBe("Widget with Option");
+    expect(".o-test-widget-option:first").toHaveText("Widget with Option");
 });
 
 test("action/type attributes on kanban arch, type='object'", async () => {
@@ -11090,7 +11000,7 @@ test("action/type attributes on kanban arch, type='object'", async () => {
         arch: `
             <kanban action="a1" type="object">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <p>some value</p><field name="foo"/>
                     </t>
                 </templates>
@@ -11123,7 +11033,7 @@ test("action/type attributes on kanban arch, type='action'", async () => {
         arch: `
             <kanban action="a1" type="action">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <p>some value</p><field name="foo"/>
                     </t>
                 </templates>
@@ -11149,7 +11059,7 @@ test("Missing t-key is automatically filled with a warning", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div>
                             <span t-foreach="[1, 2, 3]" t-as="i" t-esc="i" />
                         </div>
@@ -11159,7 +11069,7 @@ test("Missing t-key is automatically filled with a warning", async () => {
     });
 
     expect.verifySteps(["warning"]);
-    expect(getKanbanRecord({ index: 0 }).innerText).toBe("123");
+    expect(getKanbanRecord({ index: 0 })).toHaveText("123");
 });
 
 test("Quick created record is rendered after load", async () => {
@@ -11179,7 +11089,7 @@ test("Quick created record is rendered after load", async () => {
                 <field name="category_ids" />
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <span t-esc="record.category_ids.raw_value.length" />
                     </t>
                 </templates>
@@ -11211,7 +11121,7 @@ test("Allow use of 'editable'/'deletable' in ungrouped kanban", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <button t-if="widget.editable">EDIT</button>
                         <button t-if="widget.deletable">DELETE</button>
                     </div>
@@ -11232,7 +11142,7 @@ test.tags("desktop")("folded groups kept when leaving/coming back", async () => 
         "kanban,false": `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="int_field"/>
                     </t>
                 </templates>
@@ -11281,7 +11191,7 @@ test.tags("desktop")("filter groups kept when leaving/coming back", async () => 
             <kanban>
                 <progressbar field="state" colors='{"abc": "success", "def": "warning", "ghi": "danger"}' />
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="id" />
                     </t>
                 </templates>
@@ -11339,7 +11249,7 @@ test.tags("desktop")("folded groups kept when leaving/coming back (grouped by da
         "kanban,false": `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="int_field"/>
                     </t>
                 </templates>
@@ -11386,7 +11296,7 @@ test.tags("desktop")("loaded records kept when leaving/coming back", async () =>
         "kanban,false": `
             <kanban limit="1">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="int_field"/>
                     </t>
                 </templates>
@@ -11433,7 +11343,7 @@ test("basic rendering with 2 groupbys", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" />
                     </t>
                 </templates>
@@ -11470,7 +11380,7 @@ test("basic rendering with a date groupby with a granularity", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" />
                     </t>
                 </templates>
@@ -11499,7 +11409,7 @@ test.tags("desktop")("quick create record and click outside (no dirty input)", a
         arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -11555,7 +11465,7 @@ test.tags("desktop")("quick create record and click outside (with dirty input)",
         arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -11620,7 +11530,7 @@ test("quick create record and click on 'Load more'", async () => {
         arch: `
             <kanban limit="2">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -11651,10 +11561,10 @@ test("dropdown is closed on item click", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <a role="menuitem" class="dropdown-item">Item</a>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div/>
                     </t>
                 </templates>
@@ -11682,7 +11592,7 @@ test("can use JSON in kanban template", async () => {
             <kanban>
                 <field name="foo"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div>
                             <span t-foreach="JSON.parse(record.foo.raw_value)" t-as="v" t-key="v_index" t-esc="v"/>
                         </div>
@@ -11708,7 +11618,7 @@ test("Color '200' (gray) can be used twice (for false value and another value) i
             <kanban>
                 <progressbar field="foo" colors='{"yop": "200", "gnap": "warning", "blip": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="state"/>
                     </t>
                 </templates>
@@ -11772,7 +11682,7 @@ test("update field on which progress bars are computed", async () => {
             <kanban>
                 <progressbar field="state" colors='{"abc": "success", "def": "warning", "ghi": "danger"}' />
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="state" widget="state_selection" />
                         <field name="id" />
                     </div>
@@ -11868,7 +11778,7 @@ test("load more button shouldn't be visible when unfiltering column", async () =
             <kanban>
                 <progressbar field="state" colors='{"abc": "success", "def": "warning", "ghi": "danger"}' />
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="state" widget="state_selection" />
                         <field name="id" />
                     </div>
@@ -11925,7 +11835,7 @@ test("click on the progressBar of a new column", async () => {
             <kanban on_create="quick_create">
                 <progressbar field="state" colors='{"abc": "success", "def": "warning", "ghi": "danger"}' />
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="state" widget="state_selection" />
                         <field name="id" />
                     </div>
@@ -11963,7 +11873,7 @@ test.tags("desktop")("keep focus in cp when pressing arrowdown and no kanban car
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -11999,7 +11909,7 @@ test.tags("desktop")("keep focus in cp when pressing arrowdown and no kanban car
     expect(".o_searchview_input").toBeFocused();
 
     // Trigger the ArrowDown hotkey
-    press("ArrowDown");
+    await press("ArrowDown");
     await animationFrame();
     expect(".o_searchview_input").toBeFocused();
 });
@@ -12017,7 +11927,7 @@ test.tags("desktop")("no leak of TransactionInProgress (grouped case)", async ()
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -12060,7 +11970,7 @@ test.tags("desktop")("no leak of TransactionInProgress (grouped case)", async ()
 
     // try again to move "yop" from second to third column
     await contains(".o_kanban_group:nth-child(2) .o_kanban_record:nth-child(3)").dragAndDrop(
-        queryOne(".o_kanban_group:nth-child(3)")
+        ".o_kanban_group:nth-child(3)"
     );
 
     expect(".o_kanban_group:nth-child(1) .o_kanban_record").toHaveCount(0);
@@ -12088,7 +11998,7 @@ test.tags("desktop")("no leak of TransactionInProgress (not grouped case)", asyn
             <kanban records_draggable="1">
                 <field name="int_field" widget="handle" />
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -12105,9 +12015,7 @@ test.tags("desktop")("no leak of TransactionInProgress (not grouped case)", asyn
     expect.verifySteps([]);
 
     // move second "blip" to third place
-    await contains(".o_kanban_record:nth-child(2)").dragAndDrop(
-        queryFirst(".o_kanban_record:nth-child(3)")
-    );
+    await contains(".o_kanban_record:nth-child(2)").dragAndDrop(".o_kanban_record:nth-child(3)");
 
     expect(queryAllTexts(".o_kanban_record:not(.o_kanban_ghost)")).toEqual([
         "blip",
@@ -12118,9 +12026,7 @@ test.tags("desktop")("no leak of TransactionInProgress (not grouped case)", asyn
     expect.verifySteps(["resequence"]);
 
     // try again
-    await contains(".o_kanban_record:nth-child(2)").dragAndDrop(
-        queryFirst(".o_kanban_record:nth-child(3)")
-    );
+    await contains(".o_kanban_record:nth-child(2)").dragAndDrop(".o_kanban_record:nth-child(3)");
     expect.verifySteps([]);
 
     def.resolve();
@@ -12133,9 +12039,7 @@ test.tags("desktop")("no leak of TransactionInProgress (not grouped case)", asyn
         "gnap",
     ]);
 
-    await contains(".o_kanban_record:nth-child(3)").dragAndDrop(
-        queryFirst(".o_kanban_record:nth-child(4)")
-    );
+    await contains(".o_kanban_record:nth-child(3)").dragAndDrop(".o_kanban_record:nth-child(4)");
 
     expect(queryAllTexts(".o_kanban_record:not(.o_kanban_ghost)")).toEqual([
         "blip",
@@ -12163,14 +12067,14 @@ test("fieldDependencies support for fields", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" widget="custom_field"/>
                     </t>
                 </templates>
             </kanban>`,
     });
 
-    expect(queryFirst("[name=foo] span").innerText).toBe("10");
+    expect("[name=foo] span:first").toHaveText("10");
 });
 
 test("fieldDependencies support for fields: dependence on a relational field", async () => {
@@ -12192,14 +12096,14 @@ test("fieldDependencies support for fields: dependence on a relational field", a
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" widget="custom_field"/>
                     </t>
                 </templates>
             </kanban>`,
     });
 
-    expect(queryFirst("[name=foo] span").innerText).toBe("hello");
+    expect("[name=foo] span:first").toHaveText("hello");
     expect.verifySteps([
         "/web/webclient/translations",
         "/web/webclient/load_menus",
@@ -12215,7 +12119,7 @@ test("column quick create - title and placeholder", async function (assert) {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="int_field"/>
                     </t>
                 </templates>
@@ -12239,7 +12143,7 @@ test.tags("desktop")("fold a column and drag record on it should not unfold it",
         arch: `
             <kanban>
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="id"/>
                     </div>
                 </templates>
@@ -12257,15 +12161,13 @@ test.tags("desktop")("fold a column and drag record on it should not unfold it",
 
     expect(queryAll(".o_kanban_record", { root: getKanbanColumn(0) })).toHaveCount(2);
     expect(getKanbanColumn(1)).toHaveClass("o_column_folded");
-    expect(getKanbanColumn(1).innerText).toBe("xmo\n(2)");
+    expect(getKanbanColumn(1)).toHaveText("xmo\n(2)");
 
-    await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_column_folded")
-    );
+    await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(".o_column_folded");
 
     expect(queryAll(".o_kanban_record", { root: getKanbanColumn(0) })).toHaveCount(1);
     expect(getKanbanColumn(1)).toHaveClass("o_column_folded");
-    expect(getKanbanColumn(1).innerText).toBe("xmo\n(3)");
+    expect(getKanbanColumn(1)).toHaveText("xmo\n(3)");
 });
 
 test.tags("desktop")("drag record on initially folded column should not unfold it", async () => {
@@ -12281,7 +12183,7 @@ test.tags("desktop")("drag record on initially folded column should not unfold i
         arch: `
             <kanban>
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="id"/>
                     </div>
                 </templates>
@@ -12293,9 +12195,7 @@ test.tags("desktop")("drag record on initially folded column should not unfold i
     expect(getKanbanColumn(1)).toHaveClass("o_column_folded");
     expect(queryText(getKanbanColumn(1))).toBe("xmo\n(2)");
 
-    await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_column_folded")
-    );
+    await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(".o_column_folded");
 
     expect(queryAll(".o_kanban_record", { root: getKanbanColumn(0) })).toHaveCount(1);
     expect(getKanbanColumn(1)).toHaveClass("o_column_folded");
@@ -12314,7 +12214,7 @@ test.tags("desktop")("drag record to folded column, with progressbars", async ()
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field" />
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="id" />
                     </div>
                 </templates>
@@ -12338,7 +12238,7 @@ test.tags("desktop")("drag record to folded column, with progressbars", async ()
     expect(queryText(getKanbanColumn(1))).toBe("Yes\n(2)");
 
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     expect(queryAll(".o_kanban_record", { root: getKanbanColumn(0) })).toHaveCount(1);
@@ -12374,7 +12274,7 @@ test.tags("desktop")("quick create record in grouped kanban in a form view dialo
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <t t-if="record.foo.raw_value" t-set="foo"/>
                         <field name="foo"/>
                     </t>
@@ -12396,7 +12296,7 @@ test.tags("desktop")("quick create record in grouped kanban in a form view dialo
 
     expect(".modal").toHaveCount(1);
 
-    await clickSave(queryFirst(".modal"));
+    await clickModalButton({ text: "Save & Close" });
 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(3, {
         message: "first column should contain three records",
@@ -12438,7 +12338,7 @@ test.tags("desktop")("no sample data when all groups are folded then one is unfo
         arch: `
             <kanban sample="1">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="id"/>
                     </div>
                 </templates>
@@ -12470,7 +12370,7 @@ test.tags("desktop")("no content helper, all groups folded with (unloaded) recor
         arch: `
             <kanban>
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="id"/>
                     </div>
                 </templates>
@@ -12493,7 +12393,7 @@ test.tags("desktop")("Move multiple records in different columns simultaneously"
         arch: `
             <kanban>
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="id" />
                     </div>
                 </templates>
@@ -12505,14 +12405,14 @@ test.tags("desktop")("Move multiple records in different columns simultaneously"
 
     // Move 3 at end of 1st column
     await contains(".o_kanban_group:last-of-type .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group")
+        ".o_kanban_group:first"
     );
 
     expect(getKanbanRecordTexts()).toEqual(["1", "3", "2", "4"]);
 
     // Move 4 at end of 1st column
     await contains(".o_kanban_group:last-of-type .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group")
+        ".o_kanban_group:first"
     );
 
     expect(getKanbanRecordTexts()).toEqual(["1", "3", "4", "2"]);
@@ -12530,7 +12430,7 @@ test.tags("desktop")("drag & drop: content scrolls when reaching the edges", asy
         arch: `
             <kanban>
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="id" />
                     </div>
                 </templates>
@@ -12539,7 +12439,7 @@ test.tags("desktop")("drag & drop: content scrolls when reaching the edges", asy
     });
 
     const width = 600;
-    const content = queryFirst(".o_content");
+    const content = queryOne(".o_content");
     content.setAttribute("style", `max-width:${width}px;overflow:auto;`);
 
     expect(content.scrollLeft).toBe(0);
@@ -12559,7 +12459,7 @@ test.tags("desktop")("drag & drop: content scrolls when reaching the edges", asy
     expect(content.scrollLeft + width).toBe(content.scrollWidth);
 
     // Cancel drag: press "Escape"
-    press("Escape");
+    await press("Escape");
     await animationFrame();
 
     expect(".o_kanban_record.o_dragged").toHaveCount(0);
@@ -12600,7 +12500,7 @@ test("attribute default_order", async () => {
         arch: `
             <kanban default_order="int">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="int" />
                     </div>
                 </templates>
@@ -12624,7 +12524,7 @@ test.tags("desktop")("d&d records grouped by m2o with m2o displayed in records",
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="product_id" widget="many2one"/>
                     </t>
                 </templates>
@@ -12643,7 +12543,7 @@ test.tags("desktop")("d&d records grouped by m2o with m2o displayed in records",
     expect(queryAllTexts(".o_kanban_record")).toEqual(["hello", "hello", "xmo", "xmo"]);
 
     await contains(".o_kanban_group:nth-child(2) .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:first-child")
+        ".o_kanban_group:first-child"
     );
     expect(queryAllTexts(".o_kanban_record")).toEqual(["hello", "hello", "hello", "xmo"]);
 
@@ -12661,7 +12561,7 @@ test("Can't use KanbanRecord implementation details in arch", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div>
                             <t t-esc="__owl__"/>
                             <t t-esc="props"/>
@@ -12672,7 +12572,7 @@ test("Can't use KanbanRecord implementation details in arch", async () => {
                 </templates>
             </kanban>`,
     });
-    expect(queryFirst(".o_kanban_record").innerHTML).toBe("<div></div>");
+    expect(".o_kanban_record:first").toHaveInnerHTML("<div></div>");
 });
 
 test.tags("desktop")("rerenders only once after resequencing records", async () => {
@@ -12704,7 +12604,7 @@ test.tags("desktop")("rerenders only once after resequencing records", async () 
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -12716,7 +12616,7 @@ test.tags("desktop")("rerenders only once after resequencing records", async () 
 
     // drag yop to the second column
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     expect(renderCounts).toEqual({ 1: 3, 2: 1, 3: 1, 4: 1 });
@@ -12735,7 +12635,7 @@ test.tags("desktop")("rerenders only once after resequencing records", async () 
     saveDef = new Deferred();
     resequenceDef = new Deferred();
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     expect(renderCounts).toEqual({ 1: 5, 2: 1, 3: 2, 4: 1 });
@@ -12805,7 +12705,7 @@ test("sample server: _mockWebReadGroup API", async () => {
         arch: `
             <kanban sample="1">
                 <templates>
-                    <div t-name="kanban-card">
+                    <div t-name="card">
                         <field name="display_name"/>
                     </div>
                 </templates>
@@ -12818,8 +12718,7 @@ test("sample server: _mockWebReadGroup API", async () => {
 
     expect(".o_kanban_view .o_view_sample_data").toHaveCount(1);
     expect(".o_kanban_group").toHaveCount(1);
-    expect(".o_kanban_group .o_column_title").toHaveText("December 2022\n(16)");
-    expect(".o_kanban_group .o_column_title").toHaveText("December 2022\n(16)");
+    expect(".o_kanban_group .o_column_title").toHaveText("December 2022");
     expect(".o_kanban_group .o_kanban_record").toHaveCount(16);
 });
 
@@ -12845,7 +12744,7 @@ test.tags("desktop")("scroll on group unfold and progressbar click", async () =>
             <kanban>
                 <progressbar field="foo" colors='{"yop": "success", "gnap": "warning", "blip": "danger"}' sum_field="int_field" />
                 <templates>
-                    <t t-name="kanban-card">Record</t>
+                    <t t-name="card">Record</t>
                 </templates>
             </kanban>`,
         groupBy: ["product_id"],
@@ -12892,16 +12791,14 @@ test.tags("desktop")(`kanban view: press "hotkey" to execute header button actio
                 </header>
                 <field name="bar" />
                 <templates>
-                    <t t-name="kanban-box">
-                        <div>
-                            <field name="foo" />
-                        </div>
+                    <t t-name="card">
+                        <field name="foo"/>
                     </t>
                 </templates>
             </kanban>`,
     });
 
-    press(["alt", "a"]);
+    await press(["alt", "a"]);
     await tick();
     expect.verifySteps(["execute_action: display"]);
 });
@@ -12948,7 +12845,7 @@ test.tags("desktop")("action button in controlPanel with display='always'", asyn
                     <button name="default-selection" type="object" class="default-selection" string="default-selection"/>
                 </header>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" />
                     </t>
                 </templates>
@@ -12975,7 +12872,7 @@ test.tags("desktop")("Keep scrollTop when loading records with load more", async
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div style="height:1000px;"><field name="id"/></div>
                     </t>
                 </templates>
@@ -13000,7 +12897,7 @@ test("Kanban: no reset of the groupby when a non-empty column is deleted", async
         arch: `
             <kanban default_group_by="product_id">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -13052,7 +12949,7 @@ test.tags("desktop")("searchbar filters are displayed directly", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -13087,7 +12984,7 @@ test("searchbar filters are displayed directly (with progressbar)", async () => 
             <kanban>
                 <progressbar field="state" colors='{"abc": "success", "def": "warning", "ghi": "danger"}' />
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -13223,7 +13120,7 @@ test.tags("desktop")("group by properties and drag and drop", async () => {
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                         <field name="properties"/>
                     </t>
@@ -13237,7 +13134,7 @@ test.tags("desktop")("group by properties and drag and drop", async () => {
     expect(".o_kanban_group:nth-child(3) .o_kanban_record").toHaveCount(1);
 
     await contains(".o_kanban_group:nth-child(2) .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(3)")
+        ".o_kanban_group:nth-child(3)"
     );
 
     expect.verifySteps(["web_save", "resequence"]);
@@ -13282,7 +13179,7 @@ test("kanbans with basic and custom compiler, same arch", async () => {
     Partner._views["kanban,false"] = `
         <kanban js_class="my_kanban">
             <templates>
-                <t t-name="kanban-card">
+                <t t-name="card">
                     <div><field name="foo"/></div>
                 </t>
             </templates>
@@ -13321,7 +13218,7 @@ test("grouped on field with readonly expression depending on context", async () 
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="product_id" readonly="context.get('abc')" />
                     </t>
                 </templates>
@@ -13334,7 +13231,7 @@ test("grouped on field with readonly expression depending on context", async () 
     expect(".o_kanban_group:nth-child(2) .o_kanban_record").toHaveCount(2);
 
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(2);
@@ -13352,7 +13249,7 @@ test.tags("desktop")("grouped on field with readonly expression depending on fie
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" />
                         <field name="product_id" readonly="foo == 'yop'" />
                     </t>
@@ -13365,7 +13262,7 @@ test.tags("desktop")("grouped on field with readonly expression depending on fie
     expect(".o_kanban_group:nth-child(2) .o_kanban_record").toHaveCount(2);
 
     await contains(".o_kanban_group:first-child .o_kanban_record").dragAndDrop(
-        queryFirst(".o_kanban_group:nth-child(2)")
+        ".o_kanban_group:nth-child(2)"
     );
 
     expect(".o_kanban_group:first-child .o_kanban_record").toHaveCount(1);
@@ -13379,7 +13276,7 @@ test.tags("desktop")("quick create a column by pressing enter when input is focu
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -13393,10 +13290,10 @@ test.tags("desktop")("quick create a column by pressing enter when input is focu
 
     // We don't use the editInput helper as it would trigger a change event automatically.
     // We need to wait for the enter key to trigger the event.
-    press("N");
-    press("e");
-    press("w");
-    press("Enter");
+    await press("N");
+    await press("e");
+    await press("w");
+    await press("Enter");
     await animationFrame();
 
     expect(".o_kanban_group").toHaveCount(3);
@@ -13413,7 +13310,7 @@ test("Correct values for progress bar with toggling filter and slow RPC", async 
             <kanban>
                 <progressbar field="state" colors='{"abc": "success", "def": "warning", "ghi": "danger"}' />
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -13472,7 +13369,7 @@ test.tags("desktop")("click on empty kanban must shake the NEW button", async ()
         arch: `
             <kanban on_create="quick_create">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>

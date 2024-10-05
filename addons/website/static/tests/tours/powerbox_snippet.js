@@ -1,11 +1,11 @@
-import {clickOnSnippet, dragNDrop, registerWebsitePreviewTour } from "@website/js/tours/tour_utils";
+import {clickOnSnippet, insertSnippet, registerWebsitePreviewTour } from "@website/js/tours/tour_utils";
 
 registerWebsitePreviewTour("website_powerbox_snippet",{
     edition: true,
     test: true,
 },
 () => [
-...dragNDrop({
+...insertSnippet({
     id: "s_text_block",
     name: "Text",
     groupName: "Text",
@@ -22,8 +22,8 @@ registerWebsitePreviewTour("website_powerbox_snippet",{
 {
     content: "Show the powerbox",
     trigger: ":iframe .s_text_block p:last-child",
-    run(actions) {
-        actions.editor(`/`);
+    async run(actions) {
+        await actions.editor(`/`);
         const wrapwrap = this.anchor.closest("#wrapwrap");
         wrapwrap.dispatchEvent(
             new InputEvent("input", {

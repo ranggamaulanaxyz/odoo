@@ -198,11 +198,11 @@ test("widget many2many_tags_avatar list view - don't crash on keyboard navigatio
     await contains(".o_data_row:nth-child(2) .o_data_cell").click();
 
     // Pressing left arrow should focus on the right-most (second) tag.
-    press("arrowleft");
+    await press("arrowleft");
     expect(".o_data_row:nth-child(2) .o_field_tags span:nth-child(2):first").toBeFocused();
 
     // Pressing left arrow again should not crash and should focus on the first tag.
-    press("arrowleft");
+    await press("arrowleft");
     expect(".o_data_row:nth-child(2) .o_field_tags span:nth-child(1):first").toBeFocused();
 });
 
@@ -238,7 +238,7 @@ test("widget many2many_tags_avatar in kanban view", async () => {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                         <footer>
                             <field name="partner_ids" widget="many2many_tags_avatar"/>
@@ -256,7 +256,7 @@ test("widget many2many_tags_avatar in kanban view", async () => {
 
     expect(
         ".o_kanban_record:nth-child(2) .o_field_many2many_tags_avatar .o_avatar img"
-    ).toHaveCount(2);
+    ).toHaveCount(3);
     expect(
         ".o_kanban_record:nth-child(3) .o_field_many2many_tags_avatar .o_avatar img"
     ).toHaveCount(2);
@@ -283,27 +283,27 @@ test("widget many2many_tags_avatar in kanban view", async () => {
         ".o_kanban_record:nth-child(4) .o_field_many2many_tags_avatar .o_m2m_avatar_empty"
     ).toHaveText("9+");
     expect(".o_field_many2many_tags_avatar .o_field_many2many_selection").toHaveCount(0);
-    await contains(".o_kanban_record:nth-child(2) .o_field_tags > .o_m2m_avatar_empty").click();
+    await contains(".o_kanban_record:nth-child(3) .o_field_tags > .o_m2m_avatar_empty").click();
     await animationFrame();
     expect(".o-overlay-container input").toBeFocused();
-    expect(".o-overlay-container .o_tag").toHaveCount(3);
+    expect(".o-overlay-container .o_tag").toHaveCount(4);
     // delete inside the popover
     await contains(".o-overlay-container .o_tag .o_delete:eq(0)", {
         visible: false,
         displayed: true,
     }).click();
-    expect(".o-overlay-container .o_tag").toHaveCount(2);
-    expect(".o_kanban_record:nth-child(2) .o_tag").toHaveCount(2);
-    // select first non selected input
-    await contains(".o-overlay-container .o-autocomplete--dropdown-item:eq(2)").click();
     expect(".o-overlay-container .o_tag").toHaveCount(3);
-    expect(".o_kanban_record:nth-child(2) .o_tag").toHaveCount(2);
+    expect(".o_kanban_record:nth-child(3) .o_tag").toHaveCount(3);
+    // select first non selected input
+    await contains(".o-overlay-container .o-autocomplete--dropdown-item:eq(4)").click();
+    expect(".o-overlay-container .o_tag").toHaveCount(4);
+    expect(".o_kanban_record:nth-child(3) .o_tag").toHaveCount(2);
     // load more
     await contains(".o-overlay-container .o_m2o_dropdown_option_search_more").click();
     // first non already selected item
     await contains(".o_dialog .o_list_table .o_data_row .o_data_cell:eq(3)").click();
-    expect(".o-overlay-container .o_tag").toHaveCount(4);
-    expect(".o_kanban_record:nth-child(2) .o_tag").toHaveCount(2);
+    expect(".o-overlay-container .o_tag").toHaveCount(5);
+    expect(".o_kanban_record:nth-child(3) .o_tag").toHaveCount(2);
     expect(
         `.o_kanban_record:nth-child(2) img.o_m2m_avatar[data-src='${getOrigin()}/web/image/partner/4/avatar_128']`
     ).toHaveCount(1);
@@ -321,7 +321,7 @@ test("widget many2many_tags_avatar add/remove tags in kanban view", async () => 
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                         <footer>
                             <field name="partner_ids" widget="many2many_tags_avatar"/>
@@ -368,7 +368,7 @@ test("widget many2many_tags_avatar quick add tags and close in kanban view with 
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                         <footer>
                             <field name="partner_ids" widget="many2many_tags_avatar"/>
@@ -379,8 +379,8 @@ test("widget many2many_tags_avatar quick add tags and close in kanban view with 
     });
     await contains(".o_kanban_record:eq(0) .o_quick_assign", { visible: false }).click();
     // add and directly close the dropdown
-    press("Tab");
-    press("Enter");
+    await press("Tab");
+    await press("Enter");
     await animationFrame();
     expect(".o_kanban_record:eq(0) .o_field_many2many_tags_avatar .o_tag").toHaveCount(1);
     expect(".o_kanban_record:eq(0) .o_field_many2many_tags_avatar .o_popover").toHaveCount(0);
@@ -394,7 +394,7 @@ test("widget many2many_tags_avatar in kanban view missing access rights", async 
         arch: `
             <kanban edit="0" create="0">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                         <footer>
                             <field name="partner_ids" widget="many2many_tags_avatar"/>

@@ -30,6 +30,7 @@ class PurchaseOrderLine(models.Model):
     propagate_cancel = fields.Boolean('Propagate cancellation', default=True)
     forecasted_issue = fields.Boolean(compute='_compute_forecasted_issue')
     location_final_id = fields.Many2one('stock.location', 'Location from procurement')
+    group_id = fields.Many2one('procurement.group', 'Procurement group that generated this line')
 
     def _compute_qty_received_method(self):
         super(PurchaseOrderLine, self)._compute_qty_received_method()
@@ -276,7 +277,7 @@ class PurchaseOrderLine(models.Model):
         self._check_orderpoint_picking_type()
         product = self.product_id.with_context(lang=self.order_id.dest_address_id.lang or self.env.user.lang)
         location_dest = self.env['stock.location'].browse(self.order_id._get_destination_location())
-        location_final = self.location_final_id
+        location_final = self.location_final_id or self.order_id._get_final_location_record()
         if location_final and location_final._child_of(location_dest):
             location_dest = location_final
         date_planned = self.date_planned or self.order_id.date_planned
@@ -328,6 +329,11 @@ class PurchaseOrderLine(models.Model):
         res['propagate_cancel'] = values.get('propagate_cancel')
         res['product_description_variants'] = values.get('product_description_variants')
         res['product_no_variant_attribute_value_ids'] = values.get('never_product_template_attribute_value_ids')
+
+        # Need to attach purchase order to procurement group for mtso
+        group = values.get('group_id')
+        if group and not res['move_dest_ids']:
+            res['group_id'] = values['group_id'].id
         return res
 
     def _create_stock_moves(self, picking):

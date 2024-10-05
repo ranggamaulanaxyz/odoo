@@ -13,12 +13,6 @@ import { serializeDate, serializeDateTime } from "../core/l10n/dates";
 
 const debugRegistry = registry.category("debug");
 
-function viewSeparator() {
-    return { type: "separator", sequence: 300 };
-}
-
-debugRegistry.category("view").add("viewSeparator", viewSeparator);
-
 //------------------------------------------------------------------------------
 // Get view
 //------------------------------------------------------------------------------
@@ -35,11 +29,12 @@ class GetViewDialog extends Component {
 export function getView({ component, env }) {
     return {
         type: "item",
-        description: _t("Get View"),
+        description: _t("Computed Arch"),
         callback: () => {
             env.services.dialog.add(GetViewDialog, { arch: component.env.config.rawArch });
         },
-        sequence: 340,
+        sequence: 270,
+        section: "ui",
     };
 }
 
@@ -58,14 +53,15 @@ export function editView({ accessRights, component, env }) {
         return;
     }
     const displayName = type[0].toUpperCase() + type.slice(1);
-    const description = _t("Edit View: %(displayName)s", { displayName });
+    const description = _t("View: %(displayName)s", { displayName });
     return {
         type: "item",
         description,
         callback: () => {
             editModelDebug(env, description, "ir.ui.view", viewId);
         },
-        sequence: 350,
+        sequence: 240,
+        section: "ui",
     };
 }
 
@@ -83,14 +79,15 @@ export function editSearchView({ accessRights, component, env }) {
     if (searchViewId === undefined) {
         return null;
     }
-    const description = _t("Edit SearchView");
+    const description = _t("SearchView");
     return {
         type: "item",
         description,
         callback: () => {
             editModelDebug(env, description, "ir.ui.view", searchViewId);
         },
-        sequence: 360,
+        sequence: 230,
+        section: "ui",
     };
 }
 
@@ -159,14 +156,15 @@ export function viewMetadata({ component, env }) {
     }
     return {
         type: "item",
-        description: _t("View Metadata"),
+        description: _t("Metadata"),
         callback: () => {
             env.services.dialog.add(GetMetadataDialog, {
                 resModel: component.props.resModel,
                 resId,
             });
         },
-        sequence: 320,
+        sequence: 110,
+        section: "record",
     };
 }
 
@@ -178,9 +176,10 @@ debugRegistry.category("form").add("viewMetadata", viewMetadata);
 
 class RawRecordDialog extends Component {
     static template = xml`
-    <Dialog title="props.title">
-        <pre t-esc="content"/>
-    </Dialog>`;
+        <Dialog title="props.title">
+            <pre t-esc="content"/>
+        </Dialog>
+    `;
     static components = { Dialog };
     static props = {
         record: { type: Object },
@@ -198,18 +197,19 @@ export function viewRawRecord({ component, env }) {
     if (!resId) {
         return null;
     }
-    const description = _t("View Raw Record Data");
+    const description = _t("Data");
     return {
         type: "item",
         description,
         callback: async () => {
             const records = await component.model.orm.read(resModel, [resId]);
             env.services.dialog.add(RawRecordDialog, {
-                title: _t("Raw Record Data: %(model)s(%(id)s)", { model: resModel, id: resId }),
+                title: _t("Data: %(model)s(%(id)s)", { model: resModel, id: resId }),
                 record: records[0],
             });
         },
-        sequence: 325,
+        sequence: 120,
+        section: "record",
     };
 }
 
@@ -340,14 +340,15 @@ class SetDefaultDialog extends Component {
 export function setDefaults({ component, env }) {
     return {
         type: "item",
-        description: _t("Set Defaults"),
+        description: _t("Set Default Values"),
         callback: () => {
             env.services.dialog.add(SetDefaultDialog, {
                 record: component.model.root,
                 fieldNodes: component.props.archInfo.fieldNodes,
             });
         },
-        sequence: 310,
+        sequence: 150,
+        section: "record",
     };
 }
 debugRegistry.category("form").add("setDefaults", setDefaults);
@@ -361,7 +362,7 @@ export function manageAttachments({ component, env }) {
     if (!resId) {
         return null; // No record
     }
-    const description = _t("Manage Attachments");
+    const description = _t("Attachments");
     return {
         type: "item",
         description,
@@ -385,7 +386,8 @@ export function manageAttachments({ component, env }) {
                 },
             });
         },
-        sequence: 330,
+        sequence: 140,
+        section: "record",
     };
 }
 

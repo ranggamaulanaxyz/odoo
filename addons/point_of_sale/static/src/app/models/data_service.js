@@ -49,11 +49,16 @@ export class PosData extends Reactive {
         );
 
         browser.addEventListener("online", () => {
-            this.setOnline();
+            if (this.network.offline) {
+                this.network.offline = false;
+                this.network.warningTriggered = false; // Avoid the display of the offline popup multiple times
+            }
+
+            this.syncData();
         });
 
         browser.addEventListener("offline", () => {
-            this.setOffline();
+            this.network.offline = true;
         });
     }
 
@@ -162,8 +167,8 @@ export class PosData extends Reactive {
         }
 
         const preLoadData = await this.preLoadData(data);
-
-        const results = this.models.loadData(preLoadData, [], true);
+        const missing = await this.missingRecursive(preLoadData);
+        const results = this.models.loadData(missing, [], true);
         for (const [model, data] of Object.entries(results)) {
             for (const record of data) {
                 if (record.raw.JSONuiState) {
@@ -179,24 +184,8 @@ export class PosData extends Reactive {
         return results;
     }
 
-    setOffline() {
-        if (!this.network.offline) {
-            this.network.offline = true;
-        }
-    }
-
-    setOnline() {
-        if (this.network.offline) {
-            this.network.offline = false;
-            this.network.warningTriggered = false; // Avoid the display of the offline popup multiple times
-        }
-
-        this.syncData();
-    }
-
     resetUnsyncQueue() {
         this.network.unsyncData = [];
-        this.setOnline();
     }
 
     async loadInitialData() {
@@ -372,28 +361,36 @@ export class PosData extends Reactive {
                 result = results[model];
             }
 
-            return result;
+            return result || true;
         } catch (error) {
+            let throwErr = true;
             const uuids = this.network.unsyncData.map((d) => d.uuid);
-            const skipError = error.constructor.name != "ConnectionLostError";
-            if (queue && !uuids.includes(uuid) && method !== "sync_from_ui" && !skipError) {
+            if (
+                queue &&
+                !uuids.includes(uuid) &&
+                method !== "sync_from_ui" &&
+                error instanceof ConnectionLostError
+            ) {
                 this.network.unsyncData.push({
                     args: [...arguments],
                     date: DateTime.now(),
                     try: 1,
                     uuid: uuidv4(),
                 });
+
+                throwErr = false;
             }
 
-            this.setOffline();
-            throw error;
+            if (throwErr) {
+                throw error;
+            }
         } finally {
             this.network.loading = false;
         }
     }
 
     async missingRecursive(recordMap, idsMap = {}, acc = {}) {
-        const missingRecords = [];
+        const missingRecords = {};
 
         for (const [model, records] of Object.entries(recordMap)) {
             if (!acc[model]) {
@@ -426,13 +423,20 @@ export class PosData extends Reactive {
                 });
 
                 if (missing.length > 0) {
-                    missingRecords.push([rel.relation, Array.from(new Set(missing))]);
+                    if (!missingRecords[rel.relation]) {
+                        missingRecords[rel.relation] = new Set(missing);
+                    } else {
+                        missingRecords[rel.relation] = new Set([
+                            ...missingRecords[rel.relation],
+                            ...missing,
+                        ]);
+                    }
                 }
             }
         }
 
         const newRecordMap = {};
-        for (const [model, ids] of missingRecords) {
+        for (const [model, ids] of Object.entries(missingRecords)) {
             if (!idsMap[model]) {
                 idsMap[model] = new Set(ids);
             } else {
@@ -570,13 +574,15 @@ export class PosData extends Reactive {
             .map(([idx, values]) => values)
             .flat();
 
+        // Delete all children records before main record
         this.indexedDB.delete(recordModel, [record.uuid]);
-        const result = record.delete();
         for (const item of recordsToDelete) {
             this.indexedDB.delete(item.model.modelName, [item.uuid]);
             item.delete();
         }
 
+        // Delete the main record
+        const result = record.delete();
         return result;
     }
 

@@ -1,6 +1,6 @@
 import { expect, test } from "@odoo/hoot";
 import { setupEditor, testEditor } from "../_helpers/editor";
-import { pointerDown, pointerUp } from "@odoo/hoot-dom";
+import { pointerDown, pointerUp, waitUntil } from "@odoo/hoot-dom";
 import { tick } from "@odoo/hoot-mock";
 import { leftPos, rightPos } from "@html_editor/utils/position";
 import { getContent, setSelection } from "../_helpers/selection";
@@ -12,7 +12,7 @@ import { getContent, setSelection } from "../_helpers/selection";
  * @param {boolean} [before=false] whether to place the cursor after the node
  */
 async function simulateMouseClick(node, before = false) {
-    pointerDown(node);
+    await pointerDown(node);
     const pos = before ? leftPos(node) : rightPos(node);
     setSelection({
         anchorNode: pos[0],
@@ -21,7 +21,7 @@ async function simulateMouseClick(node, before = false) {
         focusOffset: pos[1],
     });
     await tick();
-    pointerUp(node);
+    await pointerUp(node);
 }
 
 test("should insert a paragraph at end of editable and place cursor in it (hr)", async () => {
@@ -100,3 +100,17 @@ test("should insert a paragraph before the table, then one after it", async () =
         `<p><br></p><table></table><p placeholder='Type "/" for commands' class="o-we-hint">[]<br></p>`
     );
 });
+
+test.tags("desktop")(
+    "should have collapsed selection when mouse down on a table cell",
+    async () => {
+        const { el } = await setupEditor(
+            `<table class="table table-bordered o_table"><tbody><tr><td><p><br></p></td><td><p><br>[</p></td><td><p>]<br></p></td></tr></tbody></table>`
+        );
+        const lastCell = el.querySelector("td:last-child");
+        pointerDown(lastCell);
+        await waitUntil(() => !document.querySelector(".o-we-toolbar"));
+        const selection = document.getSelection();
+        expect(selection.isCollapsed).toBe(true);
+    }
+);

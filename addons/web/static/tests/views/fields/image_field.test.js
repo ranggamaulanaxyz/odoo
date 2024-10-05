@@ -24,8 +24,8 @@ function getUnique(target) {
 }
 
 async function setFiles(files) {
-    click("input[type=file]", { visible: false });
-    setInputFiles(files);
+    await click("input[type=file]", { visible: false });
+    await setInputFiles(files);
     await waitFor(`div[name=document] img[data-src^="data:image/"]`, { timeout: 1000 });
 }
 
@@ -308,7 +308,7 @@ test("clicking save manually after uploading new image should change the unique 
     });
     expect(getUnique(queryFirst(".o_field_image img"))).toBe("1659688620000");
 
-    click("input[type=file]", { visible: false });
+    await click("input[type=file]", { visible: false });
     await setFiles(
         new File(
             [Uint8Array.from([...atob(MY_IMAGE)].map((c) => c.charCodeAt(0)))],
@@ -321,8 +321,8 @@ test("clicking save manually after uploading new image should change the unique 
         `data:image/png;base64,${MY_IMAGE}`
     );
 
-    click(".o_field_widget[name='foo'] input");
-    edit("grrr");
+    await click(".o_field_widget[name='foo'] input");
+    await edit("grrr");
     await animationFrame();
     expect("div[name=document] img").toHaveAttribute(
         "data-src",
@@ -333,7 +333,7 @@ test("clicking save manually after uploading new image should change the unique 
     expect(getUnique(queryFirst(".o_field_image img"))).toBe("1659692220000");
 
     // Change the image again. After clicking save, it should have the correct new url.
-    click("input[type=file]", { visible: false });
+    await click("input[type=file]", { visible: false });
     await setFiles(
         new File(
             [Uint8Array.from([...atob(PRODUCT_IMAGE)].map((c) => c.charCodeAt(0)))],
@@ -379,8 +379,8 @@ test("save record with image field modified by onchange", async () => {
         `,
     });
     expect(getUnique(queryFirst(".o_field_image img"))).toBe("1659688620000");
-    click("[name='foo'] input");
-    edit("grrr", { confirm: "enter" });
+    await click("[name='foo'] input");
+    await edit("grrr", { confirm: "enter" });
     await animationFrame();
     expect("div[name=document] img").toHaveAttribute(
         "data-src",
@@ -543,7 +543,7 @@ test("ImageField in subviews is loaded correctly", async () => {
                 <field name="timmy" widget="many2many" mode="kanban">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name" />
                             </t>
                         </templates>
@@ -560,7 +560,7 @@ test("ImageField in subviews is loaded correctly", async () => {
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(1);
 
     // Actual flow: click on an element of the m2m to get its form view
-    click(".o_kanban_record:not(.o_kanban_ghost)");
+    await click(".o_kanban_record:not(.o_kanban_ghost)");
     await animationFrame();
     expect(".modal").toHaveCount(1, { message: "The modal should have opened" });
 
@@ -648,7 +648,7 @@ test("ImageField is reset when changing record", async () => {
     );
 
     await clickSave();
-    click(".o_control_panel_main_buttons .o_form_button_create");
+    await click(".o_control_panel_main_buttons .o_form_button_create");
     await runAllTimers();
     await animationFrame();
     expect("img[data-alt='Binary file']").toHaveAttribute(
@@ -698,8 +698,8 @@ test("unique in url doesn't change on onchange", async () => {
     // same unique as before
     expect(getUnique(queryFirst(".o_field_image img"))).toBe("1659688620000");
 
-    click(".o_field_widget[name='foo'] input");
-    edit("grrr", { confirm: "enter" });
+    await click(".o_field_widget[name='foo'] input");
+    await edit("grrr", { confirm: "enter" });
     await animationFrame();
     expect.verifySteps(["onchange"]);
     // also same unique
@@ -755,9 +755,48 @@ test("unique in url does not change on record change if reload option is set to 
         `,
     });
     expect(getUnique(queryFirst(".o_field_image img"))).toBe("1659688620000");
-    click("div[name='write_date'] > div > input");
-    edit("2022-08-05 08:39:00", { confirm: "enter" });
+    await click("div[name='write_date'] > div > input");
+    await edit("2022-08-05 08:39:00", { confirm: "enter" });
     await animationFrame();
     await clickSave();
     expect(getUnique(queryFirst(".o_field_image img"))).toBe("1659688620000");
+});
+
+test("convert image to webp", async () => {
+    onRpc(({ method, model, args }) => {
+        if (method == "create_unique" && model == "ir.attachment") {
+            // This RPC call is done two times - once for storing webp and once for storing jpeg
+            // This handles first RPC call to store webp
+            if (!args[0][0].res_id) {
+                // Here we check the image data we pass and generated data.
+                // Also we check the file type
+                expect(args[0][0].datas).not.toBe(imageData);
+                expect(args[0][0].mimetype).toBe("image/webp");
+                return [1];
+            }
+            // This handles second RPC call to store jpeg
+            expect(args[0][0].datas).not.toBe(imageData);
+            expect(args[0][0].mimetype).toBe("image/jpeg");
+            return true;
+        }
+    });
+
+    const imageData = Uint8Array.from([...atob(MY_IMAGE)].map((c) => c.charCodeAt(0)));
+    await mountView({
+        type: "form",
+        resModel: "partner",
+        arch: /* xml */ `
+            <form>
+                <field name="document" widget="image" required="1" options="{'convert_to_webp': True}" />
+            </form>
+        `,
+    });
+
+    const imageFile = new File([imageData], "fake_file.jpeg", { type: "jpeg" });
+    expect("img[data-alt='Binary file']").toHaveAttribute(
+        "data-src",
+        "/web/static/img/placeholder.png",
+        { message: "image field should not be set" }
+    );
+    await setFiles(imageFile);
 });

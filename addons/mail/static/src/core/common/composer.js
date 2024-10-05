@@ -69,6 +69,7 @@ export class Composer extends Component {
         "composer",
         "autofocus?",
         "messageToReplyTo?",
+        "onCloseFullComposerCallback?",
         "onDiscardCallback?",
         "onPostCallback?",
         "mode?",
@@ -99,6 +100,7 @@ export class Composer extends Component {
         this.ref = useRef("textarea");
         this.fakeTextarea = useRef("fakeTextarea");
         this.emojiButton = useRef("emoji-button");
+        this.inputContainerRef = useRef("input-container");
         this.state = useState({
             active: true,
         });
@@ -159,7 +161,9 @@ export class Composer extends Component {
         );
         useEffect(
             () => {
-                this.ref.el.style.height = this.fakeTextarea.el.scrollHeight + "px";
+                if (this.fakeTextarea.el.scrollHeight) {
+                    this.ref.el.style.height = this.fakeTextarea.el.scrollHeight + "px";
+                }
                 this.saveContentDebounced();
             },
             () => [this.props.composer.text, this.ref.el]
@@ -208,7 +212,13 @@ export class Composer extends Component {
         }
         if (this.thread) {
             if (this.thread.channel_type === "channel") {
-                return _t("Message #%(thread name)s…", { "thread name": this.thread.displayName });
+                const threadName = this.thread.displayName;
+                if (this.thread.parent_channel_id) {
+                    return _t(`Message "%(subChannelName)s"`, {
+                        subChannelName: threadName,
+                    });
+                }
+                return _t("Message #%(threadName)s…", { threadName });
             }
             return _t("Message %(thread name)s…", { "thread name": this.thread.displayName });
         }
@@ -284,6 +294,10 @@ export class Composer extends Component {
         return this.props.mode === "extended" ? _t("CTRL-Enter") : _t("Enter");
     }
 
+    get showComposerAvatar() {
+        return !this.compact && this.props.sidebar;
+    }
+
     get thread() {
         return this.props.messageToReplyTo?.message?.thread ?? this.props.composer.thread ?? null;
     }
@@ -294,6 +308,10 @@ export class Composer extends Component {
 
     get message() {
         return this.props.composer.message ?? null;
+    }
+
+    get extraData() {
+        return this.thread.rpcParams;
     }
 
     get isSendButtonDisabled() {
@@ -315,7 +333,7 @@ export class Composer extends Component {
 
     get navigableListProps() {
         const props = {
-            anchorRef: this.ref.el,
+            anchorRef: this.inputContainerRef.el,
             position: this.env.inChatter ? "bottom-fit" : "top-fit",
             onSelect: (ev, option) => {
                 this.suggestion.insert(option);
@@ -399,6 +417,14 @@ export class Composer extends Component {
             for (const file of ev.dataTransfer.files) {
                 this.attachmentUploader.uploadFile(file);
             }
+        }
+    }
+
+    onCloseFullComposerCallback() {
+        if (this.props.onCloseFullComposerCallback) {
+            this.props.onCloseFullComposerCallback();
+        } else {
+            this.thread?.fetchNewMessages();
         }
     }
 
@@ -545,7 +571,7 @@ export class Composer extends Component {
                     this.clear();
                 }
                 this.props.messageToReplyTo?.cancel();
-                this.thread?.fetchNewMessages();
+                this.onCloseFullComposerCallback();
             },
         };
         await this.env.services.action.doAction(action, options);
@@ -604,16 +630,20 @@ export class Composer extends Component {
             return;
         }
         await this.processMessage(async (value) => {
-            const postData = {
-                attachments: composer.attachments,
-                isNote: this.props.type === "note",
-                mentionedChannels: composer.mentionedChannels,
-                mentionedPartners: composer.mentionedPartners,
-                cannedResponseIds: composer.cannedResponses.map((c) => c.id),
-                parentId: this.props.messageToReplyTo?.message?.id,
-            };
-            await this._sendMessage(value, postData);
+            await this._sendMessage(value, this.postData, this.extraData);
         });
+    }
+
+    get postData() {
+        const composer = toRaw(this.props.composer);
+        return {
+            attachments: composer.attachments || [],
+            isNote: this.props.type === "note",
+            mentionedChannels: composer.mentionedChannels || [],
+            mentionedPartners: composer.mentionedPartners || [],
+            cannedResponseIds: composer.cannedResponses.map((c) => c.id),
+            parentId: this.props.messageToReplyTo?.message?.id,
+        };
     }
 
     /**
@@ -628,11 +658,12 @@ export class Composer extends Component {
     /**
      * @param {string} value message body
      * @param {postData} postData Message meta data info
+     * @param {extraData} extraData Message extra meta data info needed by other modules
      */
-    async _sendMessage(value, postData) {
+    async _sendMessage(value, postData, extraData) {
         const thread = toRaw(this.props.composer.thread);
         const postThread = toRaw(this.thread);
-        const post = postThread.post.bind(postThread, value, postData);
+        const post = postThread.post.bind(postThread, value, postData, extraData);
         if (postThread.model === "discuss.channel") {
             // feature of (optimistic) temp message
             post();

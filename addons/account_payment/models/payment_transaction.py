@@ -163,9 +163,29 @@ class PaymentTransaction(models.Model):
             'payment_method_line_id': payment_method_line.id,
             'payment_token_id': self.token_id.id,
             'payment_transaction_id': self.id,
-            'ref': reference,
+            'memo': reference,
+            'write_off_line_vals': [],
+            'invoice_ids': self.invoice_ids,
             **extra_create_values,
         }
+
+        if self.invoice_ids:
+            next_payment_values = self.invoice_ids._get_invoice_next_payment_values()
+            if next_payment_values['installment_state'] == 'epd' and self.amount == next_payment_values['amount_due']:
+                aml = next_payment_values['epd_line']
+                epd_aml_values_list = [({
+                    'aml': aml,
+                    'amount_currency': -aml.amount_residual_currency,
+                    'balance': -aml.balance,
+                })]
+                open_balance = next_payment_values['epd_discount_amount']
+                early_payment_values = self.env['account.move']._get_invoice_counterpart_amls_for_early_payment_discount(epd_aml_values_list, open_balance)
+                for aml_values_list in early_payment_values.values():
+                    if (aml_values_list):
+                        aml_vl = aml_values_list[0]
+                        aml_vl['partner_id'] = self.partner_id.id
+                        payment_values['write_off_line_vals'] += [aml_vl]
+
         payment = self.env['account.payment'].create(payment_values)
         payment.action_post()
 
@@ -180,7 +200,7 @@ class PaymentTransaction(models.Model):
         if invoices:
             invoices.filtered(lambda inv: inv.state == 'draft').action_post()
 
-            (payment.line_ids + invoices.line_ids).filtered(
+            (payment.move_id.line_ids + invoices.line_ids).filtered(
                 lambda line: line.account_id == payment.destination_account_id
                 and not line.reconciled
             ).reconcile()

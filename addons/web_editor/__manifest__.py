@@ -137,7 +137,7 @@ Odoo Web Editor widget.
             'web_editor/static/lib/jquery-cropper/jquery-cropper.js',
             'web_editor/static/lib/jQuery.transfo.js',
             'web_editor/static/lib/webgl-image-filter/webgl-image-filter.js',
-            'html_editor/static/lib/DOMpurify.js',
+            'web/static/lib/dompurify/DOMpurify.js',
 
             # odoo-editor
             'web_editor/static/src/js/editor/odoo-editor/src/OdooEditor.js',
@@ -219,8 +219,6 @@ Odoo Web Editor widget.
 
             'web_editor/static/src/js/backend/**/*',
             'web_editor/static/src/xml/backend.xml',
-            'web_editor/static/src/components/history_dialog/**/*',
-            ('remove', 'web_editor/static/src/components/history_dialog/history_dialog.dark.scss'),
         ],
         "web.assets_web_dark": [
             'web_editor/static/src/scss/odoo-editor/powerbox.dark.scss',
@@ -228,7 +226,6 @@ Odoo Web Editor widget.
             'web_editor/static/src/scss/odoo-editor/tableui.dark.scss',
             'web_editor/static/src/scss/wysiwyg.dark.scss',
             'web_editor/static/src/scss/web_editor.common.dark.scss',
-            'web_editor/static/src/components/history_dialog/history_dialog.dark.scss',
         ],
         'web.assets_frontend_minimal': [
             'web_editor/static/src/js/frontend/loader_loading.js',
@@ -291,7 +288,7 @@ Odoo Web Editor widget.
             'web_editor/static/src/js/editor/odoo-editor/test/spec/*js',
             'web_editor/static/src/js/editor/odoo-editor/test/*js',
 
-            'html_editor/static/lib/DOMpurify.js',
+            'web/static/lib/dompurify/DOMpurify.js',
         ],
     },
     'auto_install': True,

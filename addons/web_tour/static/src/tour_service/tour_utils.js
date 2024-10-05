@@ -33,7 +33,16 @@ export function getScrollParent(element) {
     if (!element) {
         return null;
     }
-    if (element.scrollHeight > element.clientHeight) {
+    // We cannot only rely on the fact that the element’s scrollHeight is
+    // greater than its clientHeight. This might not be the case when a step
+    // starts, and the scrollbar could appear later. For example, when clicking
+    // on a "building block" in the "building block previews modal" during a
+    // tour (in website edit mode). When the modal opens, not all "building
+    // blocks" are loaded yet, and the scrollbar is not present initially.
+    const overflowY = window.getComputedStyle(element).overflowY;
+    const isScrollable = overflowY === "auto" || overflowY === "scroll" ||
+        (overflowY === "visible" && element === element.ownerDocument.scrollingElement);
+    if (isScrollable) {
         return element;
     } else {
         return getScrollParent(element.parentNode);
@@ -132,11 +141,9 @@ export const stepUtils = {
         steps.push(
             {
                 isActive: ["auto", "mobile"],
-                trigger: ".o_statusbar_buttons",
+                trigger: ".o_cp_action_menus",
                 run: (actions) => {
-                    const node = hoot.queryFirst(
-                        ".o_statusbar_buttons .btn.dropdown-toggle:contains(Action)"
-                    );
+                    const node = hoot.queryFirst(".o_cp_action_menus .fa-cog");
                     if (node) {
                         hoot.click(node);
                     }
@@ -239,6 +246,15 @@ export const stepUtils = {
         return {
             content: "Wait until the iframe is ready",
             trigger: `iframe[is-ready=true]:iframe html`,
+        };
+    },
+
+    goToUrl(url) {
+        return {
+            isActive: ["auto"],
+            content: `Navigate to ${url}`,
+            trigger: "body",
+            run: `goToUrl ${url}`,
         };
     },
 };

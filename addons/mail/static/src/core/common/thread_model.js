@@ -138,6 +138,19 @@ export class Thread extends Record {
             return this.computeCorrespondent();
         },
     });
+    correspondentCountry = Record.one("Country", {
+        /** @this {import("models").Thread} */
+        compute() {
+            return this.correspondent?.persona?.country ?? this.anonymous_country;
+        },
+    });
+    get showCorrespondentCountry() {
+        return (
+            this.channel_type === "livechat" &&
+            this.operator?.eq(this.store.self) &&
+            Boolean(this.correspondentCountry)
+        );
+    }
     counter = 0;
     counter_bus_id = 0;
     /** @type {string} */
@@ -315,6 +328,15 @@ export class Thread extends Record {
             msg.thread = this;
         },
     });
+    /** @type {String|undefined} */
+    access_token;
+    /** @type {String|undefined} */
+    hash;
+    /**
+     * Partner id for non channel threads
+     *  @type {integer|undefined}
+     */
+    pid;
 
     get accessRestrictedToGroupText() {
         if (!this.authorizedGroupFullName) {
@@ -379,7 +401,7 @@ export class Thread extends Record {
 
     get displayName() {
         if (this.channel_type === "chat" && this.correspondent) {
-            return this.custom_channel_name || this.correspondent.persona.nameOrDisplayName;
+            return this.custom_channel_name || this.correspondent.persona.name;
         }
         if (this.channel_type === "group" && !this.name) {
             return formatList(
@@ -541,6 +563,10 @@ export class Thread extends Record {
         return this.selfMember?.localMessageUnreadCounter > 0;
     }
 
+    get rpcParams() {
+        return {};
+    }
+
     /** @type {undefined|number[]} */
     lastMessageSeenByAllId = Record.attr(undefined, {
         compute() {
@@ -627,15 +653,7 @@ export class Thread extends Record {
             return [];
         }
         try {
-            // ordered messages received: newest to oldest
-            const { data, messages } = await rpc(this.getFetchRoute(), {
-                ...this.getFetchParams(),
-                limit:
-                    !around && around !== 0 ? this.store.FETCH_LIMIT : this.store.FETCH_LIMIT * 2,
-                after,
-                around,
-                before,
-            });
+            const { data, messages } = await this.fetchMessagesData({ after, around, before });
             this.store.insert(data, { html: true });
             this.isLoaded = true;
             return this.store.Message.insert(messages.reverse());
@@ -645,6 +663,18 @@ export class Thread extends Record {
         } finally {
             this.status = "ready";
         }
+    }
+
+    /** @param {{after: Number, before: Number}} */
+    async fetchMessagesData({ after, around, before } = {}) {
+        // ordered messages received: newest to oldest
+        return await rpc(this.getFetchRoute(), {
+            ...this.getFetchParams(),
+            limit: !around && around !== 0 ? this.store.FETCH_LIMIT : this.store.FETCH_LIMIT * 2,
+            after,
+            around,
+            before,
+        });
     }
 
     /** @param {"older"|"newer"} epoch */
@@ -756,6 +786,7 @@ export class Thread extends Record {
         return {
             thread_id: this.id,
             thread_model: this.model,
+            ...this.rpcParams,
         };
     }
 
@@ -772,6 +803,10 @@ export class Thread extends Record {
         if (this.model === "mail.box" && this.id === "history") {
             return `/mail/history/messages`;
         }
+        return this.fetchRouteChatter;
+    }
+
+    get fetchRouteChatter() {
         return "/mail/thread/messages";
     }
 
@@ -884,9 +919,7 @@ export class Thread extends Record {
     }
 
     /** @param {Object} [options] */
-    open(options) {
-        this.setAsDiscussThread();
-    }
+    open(options) {}
 
     openChatWindow({ fromMessagingMenu } = {}) {
         const cw = this.store.ChatWindow.insert(
@@ -953,29 +986,15 @@ export class Thread extends Record {
         this.messages.add(message);
     }
 
-    /** @param {string} body */
-    async post(
-        body,
-        {
-            attachments = [],
-            isNote = false,
-            parentId,
-            mentionedChannels = [],
-            mentionedPartners = [],
-            cannedResponseIds,
-        } = {}
-    ) {
+    /** @param {string} body
+     *  @param {Object} extraData
+     */
+    async post(body, postData = {}, extraData = {}) {
         let tmpMsg;
-        attachments = [...attachments]; // to not lose them on composer clear
-        const params = await this.store.getMessagePostParams({
-            attachments,
-            body,
-            cannedResponseIds,
-            isNote,
-            mentionedChannels,
-            mentionedPartners,
-            thread: this,
-        });
+        postData.attachments = postData.attachments ? [...postData.attachments] : []; // to not lose them on composer clear
+        const { attachments, parentId, mentionedChannels, mentionedPartners } = postData;
+        const params = await this.store.getMessagePostParams({ body, postData, thread: this });
+        Object.assign(params, extraData);
         const tmpId = this.store.getNextTemporaryId();
         params.context = { ...user.context, ...params.context, temporary_id: tmpId };
         if (parentId) {

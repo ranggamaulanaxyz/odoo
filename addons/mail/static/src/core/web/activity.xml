@@ -5,7 +5,7 @@
     <div class="o-mail-Activity d-flex py-1 mb-2" t-on-click="onClick">
         <div class="o-mail-Activity-sidebar flex-shrink-0 position-relative">
             <a role="button" t-on-click="onClickAvatar">
-                <img class="w-100 h-100 rounded" t-att-src="props.activity.persona.avatarUrl" />
+                <img class="w-100 h-100 rounded o_object_fit_cover" t-att-src="props.activity.persona.avatarUrl" />
             </a>
             <div
                 class="o-mail-Activity-iconContainer position-absolute top-100 start-100 translate-middle d-flex align-items-center justify-content-center mt-n1 ms-n1 rounded-circle w-50 h-50"
@@ -26,7 +26,7 @@
                 <span class="fw-bolder text-danger" t-elif="delay lt 0"><t t-esc="-delay"/> days overdue:</span>
                 <span class="fw-bolder text-warning" t-else="">Today:</span>
                 <span class="fw-bolder px-2 text-break"><t t-esc="displayName"/></span>
-                <span class="o-mail-Activity-user px-1">for <t t-esc="props.activity.persona.nameOrDisplayName"/></span>
+                <span class="o-mail-Activity-user px-1">for <t t-esc="props.activity.persona.name"/></span>
                 <button class="btn btn-link btn-primary p-0 lh-1 border-0">
                     <i class="fa fa-info-circle" role="img" title="Info" aria-label="Info" t-on-click="toggleDetails"/>
                 </button>
@@ -36,7 +36,7 @@
                     <tbody>
                         <tr><td class="text-end fw-bolder">Activity type</td><td><t t-esc="props.activity.activity_type_id[1]"/></td></tr>
                         <tr><td class="text-end fw-bolder">Created</td><td><t t-esc="props.activity.dateCreateFormatted"/> by <t t-esc="props.activity.create_uid[1]"/></td></tr>
-                        <tr><td class="text-end fw-bolder">Assigned to</td><td><t t-esc="props.activity.persona.nameOrDisplayName"/></td></tr>
+                        <tr><td class="text-end fw-bolder">Assigned to</td><td><t t-esc="props.activity.persona.name"/></td></tr>
                         <tr><td class="text-end fw-bolder">Due on</td><td><t t-esc="props.activity.dateDeadlineFormatted"/></td></tr>
                     </tbody>
                 </table>

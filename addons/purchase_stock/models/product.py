@@ -10,7 +10,7 @@ class ProductCategory(models.Model):
 
     property_account_creditor_price_difference_categ = fields.Many2one(
         'account.account', string="Price Difference Account",
-        company_dependent=True,
+        company_dependent=True, ondelete='restrict',
         help="This account will be used to value price difference between purchase price and accounting cost.")
 
 
@@ -19,7 +19,7 @@ class ProductTemplate(models.Model):
     _inherit = 'product.template'
 
     property_account_creditor_price_difference = fields.Many2one(
-        'account.account', string="Price Difference Account", company_dependent=True,
+        'account.account', string="Price Difference Account", company_dependent=True, ondelete='restrict',
         help="This account is used in automated inventory valuation to "\
              "record the price difference between a purchase order and its related vendor bill when validating this vendor bill.")
 
@@ -105,7 +105,7 @@ class SupplierInfo(models.Model):
             ('order_line.product_id', 'in',
              self.product_tmpl_id.product_variant_ids.ids),
             ('partner_id', 'in', self.partner_id.ids),
-        ], order='date_order')
+        ], order='date_order desc')
         for supplier in self:
             products = supplier.product_tmpl_id.product_variant_ids
             for purchase in purchases:

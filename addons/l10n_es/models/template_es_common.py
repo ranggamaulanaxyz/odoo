@@ -31,12 +31,12 @@ class AccountChartTemplate(models.AbstractModel):
                 'account_journal_suspense_account_id': 'account_common_572998',
                 'account_journal_early_pay_discount_loss_account_id': 'account_common_6060',
                 'account_journal_early_pay_discount_gain_account_id': 'account_common_7060',
-                'account_journal_payment_debit_account_id': 'account_common_4312',
-                'account_journal_payment_credit_account_id': 'account_common_411',
                 'default_cash_difference_income_account_id': 'account_common_778',
                 'default_cash_difference_expense_account_id': 'account_common_678',
                 'account_sale_tax_id': 'account_tax_template_s_iva21b',
                 'account_purchase_tax_id': 'account_tax_template_p_iva21_bc',
+                'deferred_expense_account_id': 'account_common_480',
+                'deferred_revenue_account_id': 'account_common_485',
             },
         }
 

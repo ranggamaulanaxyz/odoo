@@ -7,7 +7,7 @@ from lxml import etree
 from re import search
 
 from odoo import Command
-from odoo.tools import mute_logger
+from odoo.tools import mute_logger, config
 from odoo.exceptions import AccessError
 from odoo.tests import HttpCase, tagged
 
@@ -49,6 +49,28 @@ class TestProjectSharingPortalAccess(TestProjectSharingCommon):
             for k, v in Task._fields.items()
             if k not in Task.SELF_READABLE_FIELDS
         ])
+
+    def test_mention_suggestions(self):
+        suggestion_ids = {
+            partner.get("id")
+            for partner in self.task_portal.with_user(self.user_portal)
+            .get_mention_suggestions(search="")
+            .get("res.partner")
+        }
+        self.assertEqual(
+            suggestion_ids,
+            {self.user_projectuser.partner_id.id, self.user_portal.partner_id.id},
+            "Portal user as a project collaborator should have access to mention suggestions",
+        )
+        # remove portal user from the project collaborators
+        self.project_portal.collaborator_ids.filtered(
+            lambda rec: rec.partner_id == self.user_portal.partner_id
+        ).unlink()
+        self.assertEqual(
+            {},
+            self.task_portal.with_user(self.user_portal).get_mention_suggestions(search=""),
+            "Non collaborator portal user should not have access to mention suggestions",
+        )
 
     def test_readonly_fields(self):
         """ The fields are not writeable should not be editable by the portal user. """
@@ -103,7 +125,7 @@ class TestProjectSharingPortalAccess(TestProjectSharingCommon):
         project_share_wizard_confirmation.action_send_mail()
         mail_partner = self.env['mail.message'].search([('partner_ids', '=', partner_portal_no_user.id)], limit=1)
         self.assertTrue(mail_partner, 'A mail should have been sent to the non portal user')
-        self.assertIn('href="http://localhost:8069/web/signup', str(mail_partner.body), 'The message link should contain the url to register to the portal')
+        self.assertIn(f'href="http://localhost:{config["http_port"]}/web/signup', str(mail_partner.body), 'The message link should contain the url to register to the portal')
         self.assertIn('token=', str(mail_partner.body), 'The message link should contain a personalized token to register to the portal')
 
 

@@ -46,9 +46,25 @@ patch(ControlButtons.prototype, {
         });
     },
     clickTransferOrder() {
-        this.pos.orderToTransferUuid = this.pos.get_order().uuid;
+        this.dialog.closeAll();
+        this.pos.isOrderTransferMode = true;
+        const orderUuid = this.pos.get_order().uuid;
         this.pos.get_order().setBooked(true);
         this.pos.showScreen("FloorScreen");
+        document.addEventListener(
+            "click",
+            async (ev) => {
+                this.pos.isOrderTransferMode = false;
+                const tableElement = ev.target.closest(".table");
+                if (!tableElement) {
+                    return;
+                }
+                const table = this.pos.getTableFromElement(tableElement);
+                await this.pos.transferOrder(orderUuid, table);
+                this.pos.setTableFromUi(table);
+            },
+            { once: true }
+        );
     },
     clickTakeAway() {
         const isTakeAway = !this.currentOrder.takeaway;
@@ -58,18 +74,18 @@ patch(ControlButtons.prototype, {
         this.currentOrder.takeaway = isTakeAway;
         this.currentOrder.update({ fiscal_position_id: isTakeAway ? takeawayFp : defaultFp });
     },
-    editOrderNote(order) {
+    editFloatingOrderName(order) {
         this.dialog.add(TextInputPopup, {
-            title: _t("Edit order note"),
+            title: _t("Edit Order Name"),
             placeholder: _t("18:45 John 4P"),
-            startingValue: order.note || "",
+            startingValue: order.floating_order_name || "",
             getPayload: async (newName) => {
                 if (typeof order.id == "number") {
                     this.pos.data.write("pos.order", [order.id], {
-                        note: newName,
+                        floating_order_name: newName,
                     });
                 } else {
-                    order.note = newName;
+                    order.floating_order_name = newName;
                 }
             },
         });

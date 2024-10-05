@@ -1,7 +1,9 @@
 import * as PaymentScreen from "@point_of_sale/../tests/tours/utils/payment_screen_util";
 import * as Dialog from "@point_of_sale/../tests/tours/utils/dialog_util";
 import * as ReceiptScreen from "@point_of_sale/../tests/tours/utils/receipt_screen_util";
-import * as Chrome from "@point_of_sale/../tests/tours/utils/chrome_util";
+import * as ChromePos from "@point_of_sale/../tests/tours/utils/chrome_util";
+import * as ChromeRestaurant from "@pos_restaurant/../tests/tours/utils/chrome";
+const Chrome = { ...ChromePos, ...ChromeRestaurant };
 import * as FloorScreen from "@pos_restaurant/../tests/tours/utils/floor_screen_util";
 import * as Order from "@point_of_sale/../tests/tours/utils/generic_components/order_widget_util";
 import * as ProductScreenPos from "@point_of_sale/../tests/tours/utils/product_screen_util";
@@ -42,6 +44,7 @@ registry.category("web_tour.tours").add("SplitBillScreenTour", {
 
             // click pay to split, go back to check the lines
             SplitBillScreen.clickPay(),
+            Chrome.activeTableOrOrderIs("2B"),
             ProductScreen.clickOrderline("Water", "3.0"),
             ProductScreen.clickOrderline("Coca-Cola", "1.0"),
 
@@ -52,6 +55,29 @@ registry.category("web_tour.tours").add("SplitBillScreenTour", {
             ProductScreen.isShown(),
             ProductScreen.clickOrderline("Water", "2.0"),
             ProductScreen.clickOrderline("Minute Maid", "3.0"),
+
+            // Split the order of table 2 again
+            Chrome.clickPlanButton(),
+            FloorScreen.clickTable("2"),
+            ProductScreen.clickControlButton("Split"),
+
+            SplitBillScreen.clickOrderline("Water"),
+            SplitBillScreen.orderlineHas("Water", "2", "1"),
+            SplitBillScreen.subtotalIs("2.0"),
+            SplitBillScreen.clickOrderline("Minute Maid"),
+            SplitBillScreen.orderlineHas("Minute Maid", "3", "1"),
+            SplitBillScreen.subtotalIs("4.0"),
+
+            SplitBillScreen.clickPay(),
+            Chrome.activeTableOrOrderIs("2C"),
+
+            // go back to the original order and see if the order is changed
+            Chrome.clickMenuOption("Orders"),
+            TicketScreen.selectOrder("-0001"),
+            TicketScreen.loadSelectedOrder(),
+            ProductScreen.isShown(),
+            ProductScreen.clickOrderline("Water", "1.0"),
+            ProductScreen.clickOrderline("Minute Maid", "2.0"),
         ].flat(),
 });
 
@@ -78,8 +104,8 @@ registry.category("web_tour.tours").add("SplitBillScreenTour2", {
             Chrome.clickMenuOption("Orders"),
             TicketScreen.selectOrder("-0002"),
             TicketScreen.loadSelectedOrder(),
-            ProductScreen.clickOrderline("Coca-Cola", "1.0"),
-            ProductScreen.clickOrderline("Water", "1.0"),
+            Order.hasLine({ productName: "Coca-Cola", quantity: "1.0" }),
+            Order.hasLine({ productName: "Water", quantity: "1.0" }),
             ProductScreen.totalAmountIs("4.00"),
             Chrome.clickMenuOption("Orders"),
             TicketScreen.selectOrder("-0001"),
@@ -112,11 +138,9 @@ registry.category("web_tour.tours").add("SplitBillScreenTour3", {
             ProductScreen.clickPayButton(),
             PaymentScreen.clickPaymentMethod("Bank"),
             PaymentScreen.clickValidate(),
-            ReceiptScreen.clickNextOrder(),
+            ReceiptScreen.clickContinueOrder(),
 
             // Check if there is still water in the order
-            FloorScreen.isShown(),
-            FloorScreen.clickTable("2"),
 
             ProductScreen.selectedOrderlineHas("Water", "1.0"),
             ProductScreen.clickPayButton(true),
@@ -171,11 +195,9 @@ registry.category("web_tour.tours").add("SplitBillScreenTour4ProductCombo", {
             ProductScreen.clickPayButton(),
             ...PaymentScreen.clickPaymentMethod("Bank"),
             ...PaymentScreen.clickValidate(),
-            ...ReceiptScreen.clickNextOrder(),
+            ...ReceiptScreen.clickContinueOrder(),
 
-            // Check if there is still water in the order
-            ...FloorScreen.isShown(),
-            FloorScreen.clickTable("2"),
+            // Check if there is still Minute Maid in the order
             // now we check that all the lines that remained in the order are correct
             ...ProductScreen.selectedOrderlineHas("Minute Maid", "1.0"),
             ...ProductScreen.clickOrderline("Office Combo"),

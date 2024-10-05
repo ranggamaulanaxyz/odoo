@@ -1167,7 +1167,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
             'name': 'Tax 50%',
             'amount_type': 'percent',
             'amount': 50.0,
-            'price_include': 0
+            'price_include_override': 'tax_excluded',
         })
 
         # set tax to product
@@ -2053,11 +2053,7 @@ class TestPointOfSaleFlow(TestPointOfSaleCommon):
             'chart_template': self.env.company.chart_template,
         })
 
-        outstanding_receipts = self.env.company.account_journal_payment_debit_account_id.with_company(branch).copy(
-            {'company_ids': [Command.set(branch.ids)]}
-        )
         self.env.cr.precommit.run()
-        branch.account_journal_payment_debit_account_id = outstanding_receipts
 
         bank_payment_method = self.bank_payment_method.copy()
         bank_payment_method.company_id = branch.id

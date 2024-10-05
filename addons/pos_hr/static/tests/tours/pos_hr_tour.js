@@ -59,7 +59,7 @@ registry.category("web_tour.tours").add("PosHrTour", {
             PosHr.clickLockButton(),
             Chrome.clickBtn("Unlock Register"),
             PosHr.login("Pos Employee1", "2580"),
-            TicketScreen.clickNewTicket(),
+            Chrome.createFloatingOrder(),
             ProductScreen.addOrderline("Desk Pad", "1"),
             ProductScreen.totalAmountIs("1.98"),
             Chrome.clickMenuOption("Orders"),
@@ -74,7 +74,7 @@ registry.category("web_tour.tours").add("PosHrTour", {
             PosHr.clickCashierName(),
             SelectionPopup.has("Mitchell Admin", { run: "click" }),
             PosHr.cashierNameIs("Mitchell Admin"),
-            TicketScreen.clickNewTicket(),
+            Chrome.createFloatingOrder(),
             ProductScreen.addOrderline("Desk Pad", "1", "8"),
             ProductScreen.totalAmountIs("8.0"),
             Chrome.clickMenuOption("Orders"),
@@ -106,5 +106,20 @@ registry.category("web_tour.tours").add("CashierStayLogged", {
             PosHr.clickLockButton(),
             PosHr.refreshPage(),
             PosHr.loginScreenIsShown(),
+        ].flat(),
+});
+
+registry.category("web_tour.tours").add("CashierCanSeeProductInfo", {
+    test: true,
+    steps: () =>
+        [
+            Chrome.clickBtn("Open Register"),
+            PosHr.loginScreenIsShown(),
+            PosHr.clickLoginButton(),
+            SelectionPopup.has("Mitchell Admin", { run: "click" }),
+            Dialog.confirm("Open Register"),
+            ProductScreen.clickInfoProduct("product_a"),
+            Dialog.confirm("Ok"),
+            Dialog.isNot(),
         ].flat(),
 });

@@ -1,14 +1,14 @@
-import { expect, describe, test } from "@odoo/hoot";
-import { setupEditor, testEditor } from "./_helpers/editor";
-import { addStep, deleteBackward, insertText, redo, undo } from "./_helpers/user_actions";
+import { Editor } from "@html_editor/editor";
 import { Plugin } from "@html_editor/plugin";
 import { MAIN_PLUGINS } from "@html_editor/plugin_sets";
-import { getContent, setSelection } from "./_helpers/selection";
-import { pointerDown, pointerUp, press, queryOne } from "@odoo/hoot-dom";
-import { animationFrame, mockUserAgent, tick } from "@odoo/hoot-mock";
-import { Editor } from "@html_editor/editor";
 import { parseHTML } from "@html_editor/utils/html";
+import { describe, expect, test } from "@odoo/hoot";
+import { click, pointerDown, pointerUp, press, queryOne } from "@odoo/hoot-dom";
+import { animationFrame, mockUserAgent, tick } from "@odoo/hoot-mock";
 import { patchWithCleanup } from "@web/../tests/web_test_helpers";
+import { setupEditor, testEditor } from "./_helpers/editor";
+import { getContent, setSelection } from "./_helpers/selection";
+import { addStep, deleteBackward, insertText, redo, undo } from "./_helpers/user_actions";
 
 describe("reset", () => {
     test("should not add mutations in the current step from the normalization when calling reset", async () => {
@@ -28,6 +28,25 @@ describe("reset", () => {
         const historyPlugin = editor.plugins.find((p) => p.constructor.name === "history");
         expect(el.firstChild.getAttribute("data-test-normalize")).toBe("1");
         expect(historyPlugin.steps.length).toBe(1);
+        expect(historyPlugin.currentStep.mutations.length).toBe(0);
+    });
+
+    test.tags("desktop")("open table picker shouldn't add mutations", async () => {
+        const { editor, el } = await setupEditor("<p>[]</p>");
+
+        await insertText(editor, "/tab");
+        await press("enter");
+        await animationFrame();
+        expect(".o-we-tablepicker").toHaveCount(1);
+        expect(getContent(el)).toBe(
+            `<p placeholder='Type "/" for commands' class="o-we-hint">[]</p>`
+        );
+        const historyPlugin = editor.plugins.find((p) => p.constructor.name === "history");
+        expect(historyPlugin.currentStep.mutations.length).toBe(0);
+
+        await click(".odoo-editor-editable p");
+        await animationFrame();
+        expect(".o-we-tablepicker").toHaveCount(0);
         expect(historyPlugin.currentStep.mutations.length).toBe(0);
     });
 });
@@ -146,12 +165,12 @@ describe("redo", () => {
         await testEditor({
             contentBefore: "<p>[]</p>",
             stepFunction: async (editor) => {
-                insertText(editor, "a");
-                insertText(editor, "b");
-                insertText(editor, "c");
+                await insertText(editor, "a");
+                await insertText(editor, "b");
+                await insertText(editor, "c");
                 undo(editor);
                 undo(editor);
-                insertText(editor, "d");
+                await insertText(editor, "d");
                 undo(editor);
                 undo(editor);
                 redo(editor);
@@ -165,12 +184,12 @@ describe("redo", () => {
         await testEditor({
             contentBefore: "<p>[]</p>",
             stepFunction: async (editor) => {
-                insertText(editor, "a");
-                insertText(editor, "b");
-                insertText(editor, "c");
+                await insertText(editor, "a");
+                await insertText(editor, "b");
+                await insertText(editor, "c");
                 undo(editor);
                 undo(editor);
-                insertText(editor, "d");
+                await insertText(editor, "d");
                 undo(editor);
                 redo(editor);
                 redo(editor);
@@ -198,7 +217,7 @@ describe("selection", () => {
     test("should stage the selection upon click", async () => {
         const { el, editor } = await setupEditor("<p>a</p>");
         const pElement = queryOne("p");
-        pointerDown(pElement);
+        await pointerDown(pElement);
         setSelection({
             anchorNode: pElement.firstChild,
             anchorOffset: 0,
@@ -206,7 +225,7 @@ describe("selection", () => {
             focusOffset: 0,
         });
         await tick();
-        pointerUp(pElement);
+        await pointerUp(pElement);
         await tick();
         const historyPlugin = editor.plugins.find((p) => p.constructor.name === "history");
         const nodeId = historyPlugin.nodeToIdMap.get(pElement.firstChild);
@@ -258,7 +277,7 @@ describe("prevent mutationFilteredClasses to be set from history", () => {
 
     test("should prevent mutationFilteredClasses to be added when adding 2 classes", async () => {
         await testEditor({
-            contentBefore: `<p>a</p>`,
+            contentBefore: `<p>a[]</p>`,
             stepFunction: async (editor) => {
                 const p = editor.editable.querySelector("p");
                 p.className = "x y";
@@ -266,7 +285,7 @@ describe("prevent mutationFilteredClasses to be set from history", () => {
                 undo(editor);
                 redo(editor);
             },
-            contentAfter: `[]<p class="y">a</p>`,
+            contentAfter: `<p class="y">a[]</p>`,
             config: { Plugins: Plugins },
         });
     });
@@ -455,15 +474,15 @@ describe("shortcut", () => {
     test("undo/redo with shortcut", async () => {
         const { editor, el } = await setupEditor(`<p>[]</p>`);
 
-        insertText(editor, "abc");
-        press(["ctrl", "z"]);
-        press(["cmd", "z"]);
+        await insertText(editor, "abc");
+        await press(["ctrl", "z"]);
+        await press(["cmd", "z"]);
         expect(getContent(el)).toBe("<p>ab[]</p>");
 
-        press(["ctrl", "y"]);
+        await press(["ctrl", "y"]);
         expect(getContent(el)).toBe("<p>abc[]</p>");
 
-        press(["ctrl", "shift", "z"]);
+        await press(["ctrl", "shift", "z"]);
         expect(getContent(el)).toBe("<p>abc[]</p>");
     });
 
@@ -471,15 +490,15 @@ describe("shortcut", () => {
         mockUserAgent("mac");
         const { editor, el } = await setupEditor(`<p>[]</p>`);
 
-        insertText(editor, "abc");
-        press(["cmd", "z"]);
-        press(["cmd", "z"]);
+        await insertText(editor, "abc");
+        await press(["cmd", "z"]);
+        await press(["cmd", "z"]);
         expect(getContent(el)).toBe("<p>a[]</p>");
 
-        press(["cmd", "y"]);
+        await press(["cmd", "y"]);
         expect(getContent(el)).toBe("<p>ab[]</p>");
 
-        press(["cmd", "shift", "z"]);
+        await press(["cmd", "shift", "z"]);
         expect(getContent(el)).toBe("<p>abc[]</p>");
     });
 
@@ -493,7 +512,7 @@ describe("shortcut", () => {
             config: { onChange },
         });
         expect(state).toEqual({});
-        insertText(editor, "a");
+        await insertText(editor, "a");
         expect(state).toEqual({ canUndo: true, canRedo: false });
         editor.dispatch("HISTORY_UNDO");
         expect(state).toEqual({ canUndo: false, canRedo: true });
@@ -501,7 +520,7 @@ describe("shortcut", () => {
         expect(state).toEqual({ canUndo: true, canRedo: false });
         editor.dispatch("HISTORY_UNDO");
         expect(state).toEqual({ canUndo: false, canRedo: true });
-        insertText(editor, "b");
+        await insertText(editor, "b");
         expect(state).toEqual({ canUndo: true, canRedo: false });
         expect(getContent(el)).toBe("<p>b[]</p>");
     });
@@ -527,7 +546,7 @@ describe("shortcut", () => {
             config: { onChange, resources },
         });
         expect.verifySteps([]);
-        insertText(editor, "a");
+        await insertText(editor, "a");
         expect.verifySteps([
             "handleNewRecords",
             "CONTENT_UPDATED",

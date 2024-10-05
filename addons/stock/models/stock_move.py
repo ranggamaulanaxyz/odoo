@@ -211,9 +211,12 @@ class StockMove(models.Model):
                 location_dest = move.picking_id.location_dest_id
             elif move.picking_type_id:
                 location_dest = move.picking_type_id.default_location_dest_id
-            customer_loc, __ = self.env['stock.warehouse']._get_partner_locations()
-            if location_dest and move.location_final_id and (move.location_final_id._child_of(location_dest) or
-               (location_dest._child_of(customer_loc) and move.partner_id and move.location_final_id._child_of(move.partner_id.property_stock_customer))):
+            is_move_to_interco_transit = False
+            if self.env.user.has_group('base.group_multi_company') and location_dest:
+                customer_loc, __ = self.env['stock.warehouse']._get_partner_locations()
+                inter_comp_location = self.env.ref('stock.stock_location_inter_company', raise_if_not_found=False)
+                is_move_to_interco_transit = location_dest._child_of(customer_loc) and move.location_final_id == inter_comp_location
+            if location_dest and move.location_final_id and (move.location_final_id._child_of(location_dest) or is_move_to_interco_transit):
                 # Force the location_final as dest in the following cases:
                 # - The location_final is a sublocation of destination -> Means we reached the end
                 # - The location dest is an out location (i.e. Customers) but the final dest is different (e.g. Inter-Company transfers)
@@ -394,7 +397,9 @@ class StockMove(models.Model):
     def _set_quantity(self):
         def _process_decrease(move, quantity):
             mls_to_unlink = set()
-            for ml in move.move_line_ids:
+            # Since the move lines might have been created in a certain order to respect
+            # a removal strategy, they need to be unreserved in the opposite order
+            for ml in reversed(move.move_line_ids.sorted('id')):
                 if float_is_zero(quantity, precision_rounding=move.product_uom.rounding):
                     break
                 qty_ml_dec = min(ml.quantity, ml.product_uom_id._compute_quantity(quantity, ml.product_uom_id, round=False))
@@ -1025,7 +1030,6 @@ Please change the quantity done or the rounding precision of your unit of measur
 
             # if the move is a returned move, we don't want to check push rules, as returning a returned move is the only decent way
             # to receive goods without triggering the push rules again (which would duplicate chained operations)
-            domain = [('location_src_id', '=', move.location_dest_id.id), ('action', 'in', ('push', 'pull_push'))]
             # first priority goes to the preferred routes defined on the move itself (e.g. coming from a SO line)
             warehouse_id = move.warehouse_id or move.picking_id.picking_type_id.warehouse_id
 
@@ -1035,14 +1039,17 @@ Please change the quantity done or the rounding precision of your unit of measur
                 move = move.with_context(allowed_companies=self.env.user.company_ids.ids)
                 warehouse_id = False
 
-            rule = ProcurementGroup._search_rule(move.route_ids, move.product_packaging_id, move.product_id, warehouse_id, domain)
+            rule = ProcurementGroup._get_push_rule(move.product_id, move.location_dest_id, {
+                'route_ids': move.route_ids, 'product_packaging_id': move.product_packaging_id, 'warehouse_id': warehouse_id,
+            })
 
             excluded_rule_ids = []
             while (rule and rule.push_domain and not move.filtered_domain(literal_eval(rule.push_domain))):
                 excluded_rule_ids.append(rule.id)
-                rule = ProcurementGroup._search_rule(
-                    move.route_ids, move.product_packaging_id, move.product_id, warehouse_id,
-                    expression.AND([[('id', 'not in', excluded_rule_ids)], domain]))
+                rule = ProcurementGroup._get_push_rule(move.product_id, move.location_dest_id, {
+                    'route_ids': move.route_ids, 'product_packaging_id': move.product_packaging_id, 'warehouse_id': warehouse_id,
+                    'domain': [('id', 'not in', excluded_rule_ids)],
+                })
 
             # Make sure it is not returning the return
             if rule and (not move.origin_returned_move_id or move.origin_returned_move_id.location_dest_id.id != rule.location_dest_id.id):

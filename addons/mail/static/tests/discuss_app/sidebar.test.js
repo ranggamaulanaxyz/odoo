@@ -64,6 +64,22 @@ test("toggling category button does not hide active category items", async () =>
     await contains(".o-mail-DiscussSidebarChannel.o-active");
 });
 
+test("toggling category button does not hide active sub thread", async () => {
+    const pyEnv = await startServer();
+    const mainChannelId = pyEnv["discuss.channel"].create({ name: "Main Channel" });
+    const subChannelId = pyEnv["discuss.channel"].create({
+        name: "Sub Channel",
+        parent_channel_id: mainChannelId,
+    });
+    await start();
+    await openDiscuss(subChannelId);
+    await contains(".o-mail-DiscussSidebar-item", { text: "Main Channel" });
+    await contains(".o-mail-DiscussSidebar-item", { text: "Sub Channel" });
+    await click(".o-mail-DiscussSidebar button", { text: "Channels" });
+    await contains(".o-mail-DiscussSidebar-item", { text: "Main Channel" });
+    await contains(".o-mail-DiscussSidebar-item", { text: "Sub Channel" });
+});
+
 test("Closing a category sends the updated user setting to the server.", async () => {
     onRpc("/web/dataset/call_kw/res.users.settings/set_res_users_settings", async (request) => {
         const { params } = await request.json();
@@ -200,7 +216,7 @@ test("default thread rendering", async () => {
     });
     await click(".o-mail-DiscussSidebarChannel", { text: "General" });
     await contains(".o-mail-DiscussSidebarChannel.o-active", { text: "General" });
-    await contains(".o-mail-Thread", { text: "There are no messages in this conversation." });
+    await contains(".o-mail-Thread", { text: "The conversation is empty." });
 });
 
 test("sidebar quick search at 20 or more pinned channels", async () => {
@@ -892,8 +908,8 @@ test("channel - states: the active category item should be visible even if the c
     pyEnv["discuss.channel"].create({ name: "channel1" });
     await start();
     await openDiscuss();
-    await click(".o-mail-DiscussSidebarChannel", { text: "channel1" });
-    await contains("div.o-active", { text: "channel1" });
+    await click("button", { text: "channel1" });
+    await contains(".o-mail-DiscussSidebarChannel-container", { text: "channel1" });
     await click(".o-mail-DiscussSidebarCategory .btn", { text: "Channels" });
     await contains(".o-mail-DiscussSidebarCategory-channel .oi-chevron-right");
     await contains("button", { text: "channel1" });
@@ -1047,8 +1063,8 @@ test("chat - states: the active category item should be visible even if the cate
     await openDiscuss();
     await contains(".o-mail-DiscussSidebarCategory-chat .oi-chevron-down");
     await contains(".o-mail-DiscussSidebar button", { text: "Mitchell Admin" });
-    await click(".o-mail-DiscussSidebar button", { text: "Mitchell Admin" });
-    await contains("div.o-active", { text: "Mitchell Admin" });
+    await click("button", { text: "Mitchell Admin" });
+    await contains("button.o-active", { text: "Mitchell Admin" });
     await click(".o-mail-DiscussSidebarCategory-chat .btn", { text: "Direct messages" });
     await contains(".o-mail-DiscussSidebarCategory-chat .oi-chevron-right");
     await contains(".o-mail-DiscussSidebar button", { text: "Mitchell Admin" });
@@ -1226,7 +1242,7 @@ test("Group unread counter up to date after mention is marked as seen [REQUIRE F
     await start();
     await openDiscuss();
     await contains(".o-mail-DiscussSidebarChannel .o-discuss-badge");
-    click(".o-mail-DiscussSidebarChannel");
+    await click(".o-mail-DiscussSidebarChannel");
     await contains(".o-discuss-badge", { count: 0 });
 });
 
@@ -1303,7 +1319,8 @@ test("Can make sidebar smaller", async () => {
     await openDiscuss();
     await contains(".o-mail-DiscussSidebar");
     const normalWidth = queryFirst(".o-mail-DiscussSidebar").getBoundingClientRect().width;
-    await click("[aria-label='Make panel smaller']");
+    await click(".o-mail-DiscussSidebar [title='Options']");
+    await click(".dropdown-item", { text: "Collapse panel" });
     await contains(".o-mail-DiscussSidebar.o-compact");
     const compactWidth = queryFirst(".o-mail-DiscussSidebar").getBoundingClientRect().width;
     expect(normalWidth).toBeGreaterThan(compactWidth);
@@ -1317,10 +1334,12 @@ test("Sidebar compact is locally persistent (saved in local storage)", async () 
     await start();
     await openDiscuss();
     await contains(".o-mail-DiscussSidebar.o-compact");
-    await click("[aria-label='Make panel bigger']");
+    await click(".o-mail-DiscussSidebar [title='Options']");
+    await click(".dropdown-item", { text: "Expand panel" });
     await contains(".o-mail-DiscussSidebar:not(.o-compact)");
     expect(browser.localStorage.getItem("mail.user_setting.discuss_sidebar_compact")).toBe(null);
-    await click("[aria-label='Make panel smaller']");
+    await click(".o-mail-DiscussSidebar [title='Options']");
+    await click(".dropdown-item", { text: "Collapse panel" });
     await contains(".o-mail-DiscussSidebar.o-compact");
     expect(browser.localStorage.getItem("mail.user_setting.discuss_sidebar_compact")).toBe("true");
 });

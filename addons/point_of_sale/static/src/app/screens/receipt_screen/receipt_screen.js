@@ -23,11 +23,12 @@ export class ReceiptScreen extends Component {
         this.currentOrder = this.pos.get_order();
         const partner = this.currentOrder.get_partner();
         this.state = useState({
-            input: partner?.email || "",
-            mode: "email",
+            email: partner?.email || "",
+            phone: partner?.mobile || "",
         });
         this.sendReceipt = useTrackedAsync(this._sendReceiptToCustomer.bind(this));
-        this.doPrint = useTrackedAsync(() => this.pos.printReceipt());
+        this.doFullPrint = useTrackedAsync(() => this.pos.printReceipt());
+        this.doBasicPrint = useTrackedAsync(() => this.pos.printReceipt({ basic: true }));
         onMounted(() => {
             const order = this.pos.get_order();
             this.currentOrder.uiState.locked = true;
@@ -38,21 +39,12 @@ export class ReceiptScreen extends Component {
     _addNewOrder() {
         this.pos.add_new_order();
     }
-    actionSendReceipt() {
-        if (this.state.mode === "email" && this.isValidEmail(this.state.input)) {
-            this.sendReceipt.call({ action: "action_send_receipt", name: "Email" });
-        } else {
-            this.notification.add(_t("Please enter a valid email address"), {
-                type: "danger",
-            });
-        }
-    }
-    changeMode(mode) {
-        this.state.mode = mode;
-        this.state.input = this.currentOrder.partner_id?.email || this.state.input || "";
-    }
-    get isValidInput() {
-        return this.isValidEmail(this.state.input);
+    actionSendReceiptOnEmail() {
+        this.sendReceipt.call({
+            action: "action_send_receipt",
+            destination: this.state.email,
+            name: "Email",
+        });
     }
     get orderAmountPlusTip() {
         const order = this.currentOrder;
@@ -75,6 +67,15 @@ export class ReceiptScreen extends Component {
     get ticketScreen() {
         return { name: "TicketScreen" };
     }
+    get isValidEmail() {
+        return this.state.email && /^.+@.+$/.test(this.state.email);
+    }
+    get isValidPhone() {
+        return this.state.phone && /^\+?[()\d\s-.]{8,18}$/.test(this.state.phone);
+    }
+    showPhoneInput() {
+        return false;
+    }
     orderDone() {
         this.currentOrder.uiState.screen_data.value = "";
         this.currentOrder.uiState.locked = true;
@@ -83,17 +84,18 @@ export class ReceiptScreen extends Component {
         const { name, props } = this.nextScreen;
         this.pos.showScreen(name, props);
     }
-    resumeOrder() {
-        this.currentOrder.uiState.screen_data.value = "";
-        this.currentOrder.uiState.locked = true;
-        this.pos.selectNextOrder();
-        const { name, props } = this.ticketScreen;
-        this.pos.showScreen(name, props);
-    }
-    isResumeVisible() {
-        return this.pos.get_open_orders().length > 0;
-    }
-    async _sendReceiptToCustomer({ action }) {
+
+    generateTicketImage = async (isBasicReceipt = false) =>
+        await this.renderer.toJpeg(
+            OrderReceipt,
+            {
+                data: this.pos.orderExportForPrinting(this.pos.get_order()),
+                formatCurrency: this.env.utils.formatCurrency,
+                basic_receipt: isBasicReceipt,
+            },
+            { addClass: "pos-receipt-print p-3" }
+        );
+    async _sendReceiptToCustomer({ action, destination }) {
         const order = this.currentOrder;
         if (typeof order.id !== "number") {
             this.dialog.add(ConfirmationDialog, {
@@ -104,18 +106,14 @@ export class ReceiptScreen extends Component {
             });
             return Promise.reject();
         }
-        const ticketImage = await this.renderer.toJpeg(
-            OrderReceipt,
-            {
-                data: this.pos.orderExportForPrinting(this.pos.get_order()),
-                formatCurrency: this.env.utils.formatCurrency,
-            },
-            { addClass: "pos-receipt-print p-3" }
-        );
-        await this.pos.data.call("pos.order", action, [[order.id], this.state.input, ticketImage]);
-    }
-    isValidEmail(email) {
-        return email && /^.+@.+$/.test(email);
+        const fullTicketImage = await this.generateTicketImage();
+        const basicTicketImage = await this.generateTicketImage(true);
+        await this.pos.data.call("pos.order", action, [
+            [order.id],
+            destination,
+            fullTicketImage,
+            this.pos.basic_receipt ? basicTicketImage : null,
+        ]);
     }
 }
 

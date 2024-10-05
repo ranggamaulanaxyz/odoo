@@ -6,7 +6,7 @@ import {
     clickOnEditAndWaitEditMode,
     clickOnEditAndWaitEditModeInTranslatedPage,
     clickOnSave,
-    dragNDrop,
+    insertSnippet,
     registerWebsitePreviewTour,
 } from '@website/js/tours/tour_utils';
 
@@ -26,7 +26,7 @@ registerWebsitePreviewTour('snippet_translation', {
         }
     },
     ...clickOnEditAndWaitEditMode(),
-    ...dragNDrop({id: "s_cover", name: "Cover", groupName: "Intro"}),
+    ...insertSnippet({id: "s_cover", name: "Cover", groupName: "Intro"}),
     {
         content: "Check that contact us contain Parseltongue",
         trigger: ':iframe .s_cover .btn-outline-secondary:contains("Contact us in Parseltongue")',
@@ -42,7 +42,7 @@ registerWebsitePreviewTour('snippet_translation_changing_lang', {
 }, () => [
     {
         content: "Change language to Parseltongue",
-        trigger: ':iframe .js_language_selector .btn',
+        trigger: ':iframe .js_language_selector button',
         run: "click",
     },
     {
@@ -67,7 +67,7 @@ registerWebsitePreviewTour('snippet_translation_changing_lang', {
     },
     ...clickOnSave(),
     ...clickOnEditAndWaitEditModeInTranslatedPage(),
-    ...dragNDrop({name: "Cover", id: "s_cover", groupName: "Intro"}),
+    ...insertSnippet({name: "Cover", id: "s_cover", groupName: "Intro"}),
     {
         content: "Check that contact us contain Parseltongue",
         trigger: ':iframe .s_cover .btn-outline-secondary:contains("Contact us in Parseltongue")',

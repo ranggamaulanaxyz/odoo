@@ -642,7 +642,7 @@ test("domain field: edit through selector (dynamic content)", async function () 
     // Open and close the datepicker
     await contains(".o_datetime_input").click();
     expect(".o_datetime_picker").toHaveCount(1);
-    scroll(getFixture(), { top: 10 });
+    await scroll(getFixture(), { top: 10 });
     expect(".o_datetime_picker").toHaveCount(1);
     expect(SELECTORS.debugArea).toHaveValue(rawDomain);
     expect.verifySteps([]);
@@ -700,7 +700,7 @@ test.tags("desktop")("domain field in kanban view", async function () {
         arch: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" widget="domain" options="{'model': 'partner.type'}" />
                     </t>
                 </templates>
@@ -827,7 +827,6 @@ test("debug input corrections don't need a focus out to be saved", async functio
     await contains(".o_form_button_save").click();
     expect(".o_field_domain").toHaveClass("o_field_invalid");
     await contains(SELECTORS.debugArea).edit("[('id', '=', 1)]", { confirm: false });
-    // await animationFrame();
     expect(".o_form_status_indicator span i.fa-warning").toHaveCount(0);
     expect(".o_form_button_save[disabled]").toHaveCount(0);
     expect(".o_form_button_save").toHaveCount(1);
@@ -999,4 +998,27 @@ test("folded domain field with any operator", async function () {
             </form>`,
     });
     expect(`.o_field_domain .o_facet_values`).toHaveText("Company matches ( Id = 1 )");
+});
+
+test("folded domain field with withinh operator", async function () {
+    Partner._fields.company_id = fields.Many2one({ relation: "partner" });
+    Partner._records[0].foo = `[
+        "&",
+        ("datetime", ">=", datetime.datetime.combine(context_today(), datetime.time(0, 0, 0)).to_utc().strftime("%Y-%m-%d %H:%M:%S")),
+        ("datetime", "<=", datetime.datetime.combine(context_today() + relativedelta(months = 2), datetime.time(0, 0, 0)).to_utc().strftime("%Y-%m-%d %H:%M:%S"))
+    ]`;
+    await mountView({
+        type: "form",
+        resModel: "partner",
+        resId: 1,
+        arch: `
+            <form>
+                <sheet>
+                    <group>
+                        <field name="foo" widget="domain" options="{'model': 'partner', 'foldable': true}" />
+                    </group>
+                </sheet>
+            </form>`,
+    });
+    expect(`.o_field_domain .o_facet_values`).toHaveText("Datetime is within 2 months");
 });

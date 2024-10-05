@@ -160,17 +160,17 @@
                 <field name="archive" />
                 <progressbar field="kanban_state" colors='{"done": "success", "blocked": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <t t-if="widget.editable"><a role="menuitem" type="open" class="dropdown-item">Edit...</a></t>
                         <t t-if="widget.deletable"><a role="menuitem" type="delete" class="dropdown-item">Delete</a></t>
                         <field name="color" widget="kanban_color_picker"/>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name" class="fw-bold fs-5"/>
                         <span name="owner_user_id" t-if="record.owner_user_id.raw_value">Requested by: <field name="owner_user_id"/></span>
                         <span t-if="record.equipment_id.raw_value"><field name="equipment_id"/><span t-if="record.category_id.raw_value"> (<field name="category_id"/>)</span></span>
                         <field name="schedule_date"/>
-                        <footer class="fs-6">
+                        <footer>
                             <div class="d-flex">
                                 <field name="priority" widget="priority"/>
                                 <field name="activity_ids" widget="kanban_activity" class="ms-3"/>
@@ -370,6 +370,12 @@
                 <sheet>
                     <field name="company_id" invisible="1"/>
                     <div class="oe_button_box" name="button_box">
+                        <button type="object"
+                            name="action_open_matched_serial"
+                            icon="fa-bars" class="oe_stat_button"
+                            invisible="not match_serial">
+                            <field string="Serial Number" name="serial_no" widget="statinfo"/>
+                        </button>
                         <button name="%(hr_equipment_request_action_from_equipment)d"
                             type="action"
                             class="oe_stat_button"
@@ -398,6 +404,7 @@
                             <field name="location" string="Used in location"/>
                         </group>
                     </group>
+                    <field name="equipment_properties" nolabel="1" columns="2"/>
                     <notebook>
                         <page string="Description" name="description">
                             <field name="note"/>
@@ -453,20 +460,20 @@
             <kanban highlight_color="color" sample="1">
                 <progressbar field="activity_state" colors='{"planned": "success", "today": "warning", "overdue": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <t t-if="widget.editable"><a role="menuitem" type="open" class="dropdown-item">Edit...</a></t>
                         <t t-if="widget.deletable"><a role="menuitem" type="delete" class="dropdown-item">Delete</a></t>
                         <div role="separator" class="dropdown-divider"></div>
                         <div role="separator" class="dropdown-header">Record Colour</div>
                         <field name="color" widget="kanban_color_picker"/>
                     </t>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div>
                             <field name="name" class="fw-bold fs-5"/>
                             <span t-if="record.model.raw_value" class="fw-bold small"> (<field name="model"/>)</span>
                         </div>
                         <field t-if="record.serial_no.raw_value" name="serial_no"/>
-                        <footer class="fs-6">
+                        <footer>
                             <div class="badge text-bg-danger" t-if="record.maintenance_open_count.raw_value">
                                 <field name="maintenance_open_count" /> Request
                             </div>
@@ -656,7 +663,7 @@
         <field name="arch" type="xml">
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name" class="fw-bolder mb-1"/>
                         <div class="d-flex mt-1 align-items-center smaller">
                             <strong>Equipment:</strong><field name="equipment_count" class="ms-1"/>
@@ -713,7 +720,7 @@
         <field name="arch" type="xml">
             <kanban class="o_kanban_mobile">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name" class="fw-bolder"/>
                     </t>
                 </templates>
@@ -779,7 +786,7 @@
         <field name="arch" type="xml">
             <kanban class="o_kanban_mobile">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name" class="fw-bold"/>
                     </t>
                 </templates>
@@ -791,20 +798,12 @@
         <field name="name">maintenance.team.kanban</field>
         <field name="model">maintenance.team</field>
         <field name="arch" type="xml">
-            <kanban class="o_kanban_dashboard o_maintenance_team_kanban" create="0" can_open="0">
-                <field name="name"/>
-                <field name="color"/>
-                <field name="todo_request_ids"/>
-                <field name="todo_request_count"/>
-                <field name="todo_request_count_date"/>
-                <field name="todo_request_count_high_priority"/>
-                <field name="todo_request_count_block"/>
-                <field name="todo_request_count_unscheduled"/>
+            <kanban highlight_color="color" class="o_maintenance_team_kanban" create="0" can_open="0">
                 <templates>
-                    <t t-name="kanban-menu">
+                    <t t-name="menu">
                         <div class="container">
                             <div class="row">
-                                <div class="col-6 o_kanban_card_manage_section o_kanban_manage_view">
+                                <div class="col-6">
                                     <h5 role="menuitem" class="o_kanban_card_manage_title">
                                         <span>Requests</span>
                                     </h5>
@@ -829,7 +828,7 @@
                                         </a>
                                     </div>
                                 </div>
-                                <div class="col-6 o_kanban_card_manage_section o_kanban_manage_new">
+                                <div class="col-6">
                                     <h5 role="menuitem" class="o_kanban_card_manage_title">
                                         <span>Reporting</span>
                                     </h5>
@@ -842,58 +841,41 @@
                             </div>
                             <div t-if="widget.editable" class="o_kanban_card_manage_settings row">
                                 <div class="col-8" role="menuitem" aria-haspopup="true">
-                                    <ul role="menu" class="oe_kanban_colorpicker" data-field="color"/>
+                                    <field name="color" widget="kanban_color_picker"/>
                                 </div>
                                 <div role="menuitem" class="col-4">
-                                    <a type="edit" class="dropdown-item">Configuration</a>
+                                    <a type="open" class="dropdown-item">Configuration</a>
                                 </div>
                             </div>
                         </div>
                     </t>
-                    <t t-name="kanban-box">
-                        <div t-attf-class="#{!selection_mode ? kanban_color(record.color.raw_value) : ''}">
-                            <div t-attf-class="o_kanban_card_header">
-                                <div class="o_kanban_card_header_title">
-                                    <div class="o_primary">
-                                        <a name="%(hr_equipment_todo_request_action_from_dashboard)d" type="action">
-                                            <field name="name"/>
-                                        </a></div>
-                                </div>
+                    <t t-name="card">
+                        <a name="%(hr_equipment_todo_request_action_from_dashboard)d" type="action">
+                            <field name="name" class="fw-bold fs-4 ms-2"/>
+                        </a>
+                        <div class="row g-0 mt-3 ms-2 pb-4">
+                            <div class="col-6">
+                                <button class="btn btn-primary" name="%(hr_equipment_todo_request_action_from_dashboard)d" type="action" context="{'search_default_todo': 1}">
+                                    <field name="todo_request_count"/> To Do
+                                </button>
                             </div>
-                            <div class="container o_kanban_card_content">
-                                <div class="row">
-                                    <div class="col-6 o_kanban_primary_left">
-                                        <button class="btn btn-primary" name="%(hr_equipment_todo_request_action_from_dashboard)d" type="action" context="{'search_default_todo': 1}">
-                                            <t t-esc="record.todo_request_count.value"/> To Do
-                                        </button>
-                                    </div>
-                                    <div class="col-6 o_kanban_primary_right">
-                                        <div t-if="record.todo_request_count_date.raw_value > 0">
-                                            <a name="%(hr_equipment_request_action_cal)d" type="action" context="{'search_default_todo': 1, 'search_default_maintenance_team_id': id}">
-                                                <t t-esc="record.todo_request_count_date.value"/>
-                                                Scheduled
-                                            </a>
-                                        </div>
-                                        <div t-if="record.todo_request_count_high_priority.raw_value > 0">
-                                            <a name="%(hr_equipment_todo_request_action_from_dashboard)d" type="action" context="{'search_default_high_priority': 1}">
-                                                <t t-esc="record.todo_request_count_high_priority.value"/>
-                                                Top Priorities
-                                            </a>
-                                        </div>
-                                        <div t-if="record.todo_request_count_block.raw_value > 0">
-                                            <a name="%(hr_equipment_todo_request_action_from_dashboard)d" type="action" context="{'search_default_kanban_state_block': 1}">
-                                                <t t-esc="record.todo_request_count_block.value"/>
-                                                Blocked
-                                            </a>
-                                        </div>
-                                        <div t-if="record.todo_request_count_unscheduled.raw_value > 0">
-                                            <a name="%(hr_equipment_todo_request_action_from_dashboard)d" type="action" context="{'search_default_todo': 1, 'search_default_unscheduled': 1}">
-                                                <t t-esc="record.todo_request_count_unscheduled.value"/>
-                                                Unscheduled
-                                            </a>
-                                        </div>
-                                    </div>
-                                </div>
+                            <div class="col-6">
+                                <a t-if="record.todo_request_count_date.raw_value > 0" name="%(hr_equipment_request_action_cal)d" type="action" context="{'search_default_todo': 1, 'search_default_maintenance_team_id': id}" class="d-block">
+                                    <field name="todo_request_count_date"/>
+                                    Scheduled
+                                </a>
+                                <a t-if="record.todo_request_count_high_priority.raw_value > 0" name="%(hr_equipment_todo_request_action_from_dashboard)d" type="action" context="{'search_default_high_priority': 1}" class="d-block">
+                                    <field name="todo_request_count_high_priority"/>
+                                    Top Priorities
+                                </a>
+                                <a t-if="record.todo_request_count_block.raw_value > 0" name="%(hr_equipment_todo_request_action_from_dashboard)d" type="action" context="{'search_default_kanban_state_block': 1}" class="d-block">
+                                    <field name="todo_request_count_block"/>
+                                    Blocked
+                                </a>
+                                <a t-if="record.todo_request_count_unscheduled.raw_value > 0" name="%(hr_equipment_todo_request_action_from_dashboard)d" type="action" context="{'search_default_todo': 1, 'search_default_unscheduled': 1}" class="d-block">
+                                    <field name="todo_request_count_unscheduled"/>
+                                    Unscheduled
+                                </a>
                             </div>
                         </div>
                     </t>

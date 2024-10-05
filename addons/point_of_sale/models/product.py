@@ -18,6 +18,7 @@ class ProductTemplate(models.Model):
         help="Category used in the Point of Sale.")
     public_description = fields.Html(
         string="Product Description",
+        translate=True
     )
 
     @api.ondelete(at_uninstall=False)
@@ -46,29 +47,6 @@ class ProductTemplate(models.Model):
                 combo_name = self.env['product.combo.item'].sudo().search([('product_id', 'in', product.product_variant_ids.ids)], limit=1).combo_id.name
                 if combo_name:
                     raise UserError(_('You must first remove this product from the %s combo', combo_name))
-
-    def _create_variant_ids(self):
-        res = super()._create_variant_ids()
-        for template in self:
-            archived_product = self.env['product.product'].search([('product_tmpl_id', '=', template.id), ('active', '=', False)], limit=1)
-            if archived_product:
-                combo_items_to_delete = self.env['product.combo.item'].search([
-                    ('product_id', '=', archived_product.id)
-                ])
-                if combo_items_to_delete:
-                    # Delete old combo item
-                    combo_ids = combo_items_to_delete.mapped('combo_id')
-                    combo_items_to_delete.unlink()
-                    # Create new combo item (one for each new variant) in each combo
-                    new_variants = template.product_variant_ids.filtered(lambda v: v.active)
-                    self.env['product.combo.item'].create([
-                        {
-                            'product_id': variant.id,
-                            'combo_id': combo_id.id,
-                        }
-                        for variant in new_variants for combo_id in combo_ids
-                    ])
-        return res
 
 
 class ProductProduct(models.Model):
@@ -101,12 +79,9 @@ class ProductProduct(models.Model):
             products = config.with_context(display_default_code=False).get_limited_products_loading(fields)
         else:
             domain = self._load_pos_data_domain(data)
-            products = self.with_context(display_default_code=False).search_read(
-                domain,
-                fields,
-                order='sequence,default_code,name',
-                load=False,
-            )
+            products = self._load_product_with_domain(domain, config.id)
+
+        self._add_missing_products(products, config.id, data)
 
         data['pos.config']['data'][0]['_product_default_values'] = \
             self.env['account.tax']._eval_taxes_computation_prepare_product_default_values(product_fields)
@@ -116,6 +91,20 @@ class ProductProduct(models.Model):
             'data': products,
             'fields': fields,
         }
+
+    def _add_missing_products(self, products, config_id, data):
+        product_ids_in_loaded_lines = {line['product_id'] for line in data['pos.order.line']['data']}
+        not_loaded_product_ids = product_ids_in_loaded_lines - {product['id'] for product in products}
+        products.extend(self._load_product_with_domain([('id', 'in', list(not_loaded_product_ids))], config_id, True))
+
+    def _load_product_with_domain(self, domain, config_id, load_archived=False):
+        fields = self._load_pos_data_fields(config_id)
+        context = {**self.env.context, 'display_default_code': False, 'active_test': not load_archived}
+        return self.with_context(context).search_read(
+            domain,
+            fields,
+            order='sequence,default_code,name',
+            load=False)
 
     def _process_pos_ui_product_product(self, products, config_id):
 
@@ -140,6 +129,8 @@ class ProductProduct(models.Model):
             for tax in taxes:
                 taxes_by_company[tax.company_id.id].add(tax.id)
 
+        loaded_product_tmpl_ids = list({p['product_tmpl_id'] for p in products})
+        archived_combinations = self._get_archived_combinations_per_product_tmpl_id(loaded_product_tmpl_ids)
         different_currency = config_id.currency_id != self.env.company.currency_id
         for product in products:
             if different_currency:
@@ -148,6 +139,17 @@ class ProductProduct(models.Model):
 
             if len(taxes_by_company) > 1 and len(product['taxes_id']) > 1:
                 product['taxes_id'] = filter_taxes_on_company(product['taxes_id'], taxes_by_company)
+
+            if archived_combinations.get(product['product_tmpl_id']):
+                product['_archived_combinations'] = archived_combinations[product['product_tmpl_id']]
+
+    def _get_archived_combinations_per_product_tmpl_id(self, product_tmpl_ids):
+        archived_combinations = {}
+        for product in self.env['product.product'].with_context(active_test=False).search([('product_tmpl_id', 'in', product_tmpl_ids), ('active', '=', False)]):
+            if not archived_combinations.get(product.product_tmpl_id.id):
+                archived_combinations[product.product_tmpl_id.id] = []
+            archived_combinations[product.product_tmpl_id.id].append(product.product_template_attribute_value_ids.ids)
+        return archived_combinations
 
     @api.ondelete(at_uninstall=False)
     def _unlink_except_active_pos_session(self):

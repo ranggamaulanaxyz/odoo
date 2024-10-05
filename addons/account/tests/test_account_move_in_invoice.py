@@ -223,7 +223,7 @@ class TestAccountMoveInInvoiceOnchanges(AccountTestInvoicingCommon):
             'type_tax_use': 'purchase',
             'amount_type': 'percent',
             'amount': 10,
-            'price_include': True,
+            'price_include_override': 'tax_included',
             'include_base_amount': True,
         })
         tax_price_exclude = self.env['account.tax'].create({
@@ -366,7 +366,7 @@ class TestAccountMoveInInvoiceOnchanges(AccountTestInvoicingCommon):
             'type_tax_use': 'purchase',
             'amount_type': 'percent',
             'amount': 10,
-            'price_include': True,
+            'price_include_override': 'tax_included',
             'include_base_amount': True,
         })
         tax_price_include_2 = self.env['account.tax'].create({
@@ -374,7 +374,7 @@ class TestAccountMoveInInvoiceOnchanges(AccountTestInvoicingCommon):
             'type_tax_use': 'purchase',
             'amount_type': 'percent',
             'amount': 20,
-            'price_include': True,
+            'price_include_override': 'tax_included',
             'include_base_amount': True,
         })
 
@@ -1579,11 +1579,12 @@ class TestAccountMoveInInvoiceOnchanges(AccountTestInvoicingCommon):
         self.assertFalse(move.payment_ids)  # don't auto reconcile payments
 
         # Reconcile manually, the move is now fully paid
-        (move.line_ids[-1] | payment.line_ids.filtered(lambda line: line.account_id == move.line_ids[-1].account_id)).reconcile()
+        (move.line_ids[-1] | payment.move_id.line_ids.filtered(lambda line: line.account_id == move.line_ids[-1].account_id)).reconcile()
 
         # If the move is already fully paid, we should alert the user
-        with self.assertRaisesRegex(UserError, r"You can only register payments for \(partially\) unpaid documents."):
-            move.action_force_register_payment()
+        with self.assertRaisesRegex(UserError, r"You can't register a payment because there is nothing left"):
+            action_register_payment = move.action_force_register_payment()
+            self.env[action_register_payment['res_model']].with_context(action_register_payment['context']).create({})
 
     def test_in_invoice_switch_type_1(self):
         # Test creating an account_move with an in_invoice_type and switch it in an in_refund,

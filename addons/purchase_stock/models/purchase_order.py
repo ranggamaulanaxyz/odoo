@@ -155,6 +155,8 @@ class PurchaseOrder(models.Model):
                     moves_to_cancel_ids.update(move_dest_ids.ids)
                 else:
                     moves_to_recompute_ids.update(move_dest_ids.ids)
+            if order_line.group_id:
+                order_line.group_id.purchase_line_ids = [Command.unlink(order_line.id)]
 
         if moves_to_cancel_ids:
             moves_to_cancel = self.env['stock.move'].browse(moves_to_cancel_ids)
@@ -237,6 +239,12 @@ class PurchaseOrder(models.Model):
         if self.dest_address_id and self.picking_type_id.code == "dropship":
             return self.dest_address_id.property_stock_customer.id
         return self.picking_type_id.default_location_dest_id.id
+
+    def _get_final_location_record(self):
+        self.ensure_one()
+        if self.dest_address_id and self.picking_type_id.code == 'dropship':
+            return self.dest_address_id.property_stock_customer
+        return self.picking_type_id.warehouse_id.lot_stock_id
 
     @api.model
     def _get_picking_type(self, company_id):

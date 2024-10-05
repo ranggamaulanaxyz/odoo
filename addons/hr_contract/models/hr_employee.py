@@ -36,6 +36,7 @@ class EmployeeBase(models.AbstractModel):
 class Employee(models.Model):
     _inherit = "hr.employee"
 
+    legal_name = fields.Char(compute='_compute_legal_name', store=True, readonly=False, groups="hr.group_hr_user")
     vehicle = fields.Char(string='Company Vehicle', groups="hr.group_hr_user")
     contract_ids = fields.One2many('hr.contract', 'employee_id', string='Employee Contracts', groups="hr.group_hr_user")
     contract_id = fields.Many2one(
@@ -45,6 +46,12 @@ class Employee(models.Model):
     contracts_count = fields.Integer(compute='_compute_contracts_count', string='Contract Count', groups="hr.group_hr_user")
     contract_warning = fields.Boolean(string='Contract Warning', store=True, compute='_compute_contract_warning', groups="hr.group_hr_user")
     first_contract_date = fields.Date(compute='_compute_first_contract_date', groups="hr.group_hr_user", store=True)
+
+    @api.depends('name')
+    def _compute_legal_name(self):
+        for employee in self:
+            if not employee.legal_name:
+                employee.legal_name = employee.name
 
     def _get_first_contracts(self):
         self.ensure_one()
@@ -160,7 +167,8 @@ class Employee(models.Model):
         ], groupby=['employee_id'], aggregates=['id:recordset'])
         for employee, contracts in contracts_by_employee:
             for contract in contracts:
-                calendar_tz = timezone(contract.resource_calendar_id.tz)
+                # if employee is under fully flexible contract, use timezone of the employee
+                calendar_tz = timezone(contract.resource_calendar_id.tz) if contract.resource_calendar_id else timezone(employee.resource_id.tz)
                 utc = timezone('UTC')
                 date_start = datetime.combine(
                     contract.date_start,
@@ -277,8 +285,7 @@ class Employee(models.Model):
         if vals.get('contract_id'):
             for employee in self:
                 employee.resource_calendar_id.transfer_leaves_to(employee.contract_id.resource_calendar_id, employee.resource_id)
-                if employee.resource_calendar_id:
-                    employee.resource_calendar_id = employee.contract_id.resource_calendar_id
+                employee.resource_calendar_id = employee.contract_id.resource_calendar_id
         return res
 
     @api.ondelete(at_uninstall=False)
@@ -293,6 +300,9 @@ class Employee(models.Model):
         if not self.contract_ids:
             action['context'] = {
                 'default_employee_id': self.id,
+                # display current resource_calendar_id as the default one if it exists (if False, fully flexible calendar)
+                'default_resource_calendar_id': self.resource_calendar_id.id or False,
+                'from_action_open_contract': True,
             }
             action['target'] = 'current'
             return action

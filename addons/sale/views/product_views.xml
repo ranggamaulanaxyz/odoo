@@ -14,14 +14,15 @@
                 <field name="visible_expense_policy" invisible="1"/>
             </field>
             <field name="type" position="after">
-                <field name="invoice_policy" required="1" invisible="not sale_ok"/>
+                <field
+                    name="invoice_policy"
+                    required="1"
+                    invisible="not sale_ok or type == 'combo'"
+                />
             </field>
             <field name="service_tracking" position="attributes">
                 <attribute name="invisible" add="not sale_ok" separator="or"/>
             </field>
-            <group name="tags" position="inside">
-                <field name="expense_policy" widget="radio" invisible="not visible_expense_policy"/>
-            </group>
             <group name="description" position="after">
                 <t groups="sales_team.group_sale_salesman">
                     <group string="Warning when Selling this Product" groups="sale.group_warning_sale">
@@ -33,6 +34,9 @@
                                required="sale_line_warn != 'no-message'"/>
                     </group>
                 </t>
+                <group name="expense_info" string="Expense" invisible="not visible_expense_policy">
+                    <field name="expense_policy" widget="radio"/>
+                </group>
             </group>
         </field>
     </record>
@@ -110,7 +114,7 @@
         <field name="inherit_id" ref="product.product_view_kanban_catalog"/>
         <field name="model">product.product</field>
         <field name="arch" type="xml">
-            <xpath expr="//t[@t-name='kanban-menu']" position="attributes">
+            <xpath expr="//t[@t-name='menu']" position="attributes">
                 <attribute name="groups">sales_team.group_sale_manager</attribute>
             </xpath>
         </field>
@@ -127,6 +131,17 @@
                         name="products_in_order"
                         domain="[('product_catalog_product_is_in_sale_order', '=', True)]"/>
             </filter>
+        </field>
+    </record>
+
+    <record id="view_category_property_form" model="ir.ui.view">
+        <field name="name">product.category.property.form.inherit.sale</field>
+        <field name="model">product.category</field>
+        <field name="inherit_id" ref="product.product_category_form_view"/>
+        <field name="arch" type="xml">
+            <field name="property_account_expense_categ_id" position="after">
+                <field name="property_account_downpayment_categ_id"/>
+            </field>
         </field>
     </record>
 

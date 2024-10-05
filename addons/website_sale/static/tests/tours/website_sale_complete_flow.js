@@ -6,7 +6,7 @@
 
     registry.category("web_tour.tours").add('website_sale_tour_1', {
         test: true,
-        checkDelay: 250,
+        checkDelay: 150,
         url: '/shop?search=Storage Box Test',
         steps: () => [
     // Testing b2c with Tax-Excluded Prices
@@ -31,14 +31,9 @@
     },
         tourUtils.goToCart({quantity: 2}),
     {
-        isActive: ["auto"],
+        content: "Check for 2 products in cart",
         trigger:
             '#cart_products div:has(a>h6:contains("Storage Box Test")) input.js_quantity:value(2)',
-    },
-    {
-        content: "Check for 2 products in cart and proceed to checkout",
-        trigger: 'a[href*="/shop/checkout"]',
-        run: "click",
     },
     ...tourUtils.assertCartAmounts({
         taxes: '23.70',
@@ -46,13 +41,18 @@
         total: '181.70',
     }),
     {
-        content: "Fulfill billing address form",
+        content: "Proceed to checkout",
+        trigger: 'a[href*="/shop/checkout"]',
+        run: "click",
+    },
+    {
+        content: "Fulfill delivery address form",
         trigger: 'select[name="country_id"]',
         run: "selectByLabel Afghanistan",
     },
     {
         trigger: `input[name="name"]`,
-        run: "edit abc",
+        run: "edit abcd",
     },
     {
         trigger: `input[name="phone"]`,
@@ -64,20 +64,15 @@
     },
     {
         trigger: `input[name="street"]`,
-        run: "edit SO1 Billing Street, 33",
+        run: "edit SO1 Delivery Street, 33",
     },
     {
         trigger: `input[name="city"]`,
-        run: "edit SO1BillingCity",
+        run: "edit SO1DeliveryCity",
     },
     {
         trigger: `input[name="zip"]`,
         run: "edit 10000",
-    },
-    {
-        content: "Shipping address is not same as billing address",
-        trigger: '#use_same_as_delivery',
-        run: "click",
     },
     {
         content: "Click on next button",
@@ -85,11 +80,25 @@
         run: "click",
     },
     {
-        isActive: ["auto"],
-        trigger: 'h3:contains("Delivery address")',
+        content: "Click for edit address",
+        trigger: 'a:contains("Edit") i',
+        run: "click",
     },
     {
-        content: "Fulfill shipping address form",
+        content: "Billing address is not same as delivery address",
+        trigger: '#use_delivery_as_billing',
+        run: "click",
+    },
+    {
+        content: "Add a billing address",
+        trigger: '.all_billing a[href^="/shop/address"]:contains("Add address")',
+        run: "click",
+    },
+    {
+        trigger: 'h3:contains("Billing address")',
+    },
+    {
+        content: "Fulfill billing address form",
         trigger: 'select[name="country_id"]',
         run: "selectByLabel Afghanistan",
     },
@@ -102,12 +111,16 @@
         run: "edit 8888888888",
     },
     {
+        trigger: `input[name="email"]`,
+        run: "edit abc@odoo.com",
+    },
+    {
         trigger: `input[name="street"]`,
-        run: "edit 17, SO1 Shipping Road",
+        run: "edit 17, SO1 Billing Road",
     },
     {
         trigger: `input[name="city"]`,
-        run: "edit SO1ShippingCity",
+        run: "edit SO1BillingCity",
     },
     {
         trigger: `input[name="zip"]`,
@@ -119,12 +132,12 @@
         run: "click",
     },
     {
-        content: "Check selected billing address is same as typed in previous step",
-        trigger: '#shipping_and_billing:contains(SO1 Billing Street, 33):contains(SO1BillingCity):contains(Afghanistan)',
+        content: "Check selected delivery address is same as typed in previous step",
+        trigger: '#delivery_and_billing:contains(SO1 Delivery Street, 33):contains(SO1DeliveryCity):contains(Afghanistan)',
     },
     {
-        content: "Check selected shipping address is same as typed in previous step",
-        trigger: '#shipping_and_billing:contains(17, SO1 Shipping Road):contains(SO1ShippingCity):contains(Afghanistan)',
+        content: "Check selected billing address is same as typed in previous step",
+        trigger: '#delivery_and_billing:contains(17, SO1 Billing Road):contains(SO1BillingCity):contains(Afghanistan)',
     },
     {
         content: "Click for edit address",
@@ -133,11 +146,10 @@
     },
     {
         content: "Click for edit billing address",
-        trigger: '.js_edit_address:first',
+        trigger: '.all_billing .js_edit_address:first',
         run: "click",
     },
     {
-        isActive: ["auto"],
         trigger: 'h3:contains("Billing address")',
     },
     {
@@ -168,7 +180,7 @@
         tourUtils.confirmOrder(),
     {
         content: "Check selected billing address is same as typed in previous step",
-        trigger: '#shipping_and_billing:contains(SO1 Billing Street Edited, 33):contains(SO1BillingCityEdited):contains(Afghanistan)',
+        trigger: '#delivery_and_billing:contains(SO1 Billing Street Edited, 33):contains(SO1BillingCityEdited):contains(Afghanistan)',
     },
     {
         content: "Select `Wire Transfer` payment method",
@@ -176,7 +188,6 @@
         run: "click",
     },
     {
-        isActive: ["auto"],
         trigger:
             'input[name="o_payment_radio"][data-payment-method-code="wire_transfer"]:checked',
     },
@@ -210,7 +221,6 @@
     },
     // Sign in as admin change config auth_signup -> b2b, sale_show_tax -> total and Logout
     {
-        isActive: ["auto"],
         trigger: ".o_header_standard:not(.o_transitioning)",
     },
     {
@@ -248,7 +258,6 @@
         run: "click"
     },
     {
-        isActive: ["auto"],
         trigger: ".o_frontend_to_backend_nav", // Check if the user is connected
     },
     {
@@ -299,20 +308,20 @@
     },
         tourUtils.goToCart({quantity: 2}),
         {
-            isActive: ["auto"],
+            content: "Check for 2 products in cart",
             trigger:
                 '#cart_products div:has(a>h6:contains("Storage Box Test")) input.js_quantity:value(2)',
         },
-    {
-        content: "Check for 2 products in cart and proceed to checkout",
-        trigger: 'a[href*="/shop/checkout"]',
-        run: "click",
-    },
-    ...tourUtils.assertCartAmounts({
-        taxes: '23.70',
-        untaxed: '158.00',
-        total: '181.70',
-    }),
+        ...tourUtils.assertCartAmounts({
+            taxes: "23.70",
+            untaxed: "158.00",
+            total: "181.70",
+        }),
+        {
+            content: "Proceed to checkout",
+            trigger: 'a[href*="/shop/checkout"]',
+            run: "click",
+        },
     {
         content: "Click on Sign in Button",
         trigger: `.oe_cart a:contains(Sign in)`,
@@ -332,12 +341,12 @@
         run: "click",
     },
     {
-        content: "Add new shipping address",
+        content: "Add new delivery address",
         trigger: '.all_delivery a[href^="/shop/address"]:contains("Add address")',
         run: "click",
     },
     {
-        content: "Fulfill shipping address form",
+        content: "Fulfill delivery address form",
         trigger: 'select[name="country_id"]',
         run: "selectByLabel Afghanistan",
     },
@@ -351,11 +360,11 @@
     },
     {
         trigger: `input[name="street"]`,
-        run: "edit SO2New Shipping Street, 5",
+        run: "edit SO2New Delivery Street, 5",
     },
     {
         trigger: `input[name="city"]`,
-        run: "edit SO2NewShipping",
+        run: "edit SO2NewDelivery",
     },
     {
         trigger: `input[name="zip"]`,
@@ -372,7 +381,6 @@
         run: "click",
     },
     {
-        isActive: ["auto"],
         trigger: 'input[name="o_payment_radio"][data-payment-method-code="wire_transfer"]:checked',
     },
     {
@@ -381,7 +389,6 @@
         run: "click",
     },
     {
-        isActive: ["auto"],
         trigger: '.oe_cart .oe_website_sale_tx_status',
     },
     {
@@ -390,7 +397,6 @@
         run: "click",
     },
     {
-        isActive: ["auto"],
         trigger: "header#top li.dropdown .js_usermenu.show",
     },
     {
@@ -401,7 +407,6 @@
 
     // enable extra step on website checkout and check extra step on checkout process
     {
-        isActive: ["auto"],
         trigger: ".o_header_standard:not(.o_transitioning)",
     },
     {
@@ -442,9 +447,9 @@
     registry.category("web_tour.tours").add('website_sale_tour_2', {
         test: true,
         url: '/shop/cart',
+        checkDelay: 150,
         steps: () => [
     {
-        isActive: ["auto"],
         trigger: '.o_wizard:contains("Extra Info")',
     },
     {
@@ -497,14 +502,6 @@
         content: "Click on 'Continue checkout' button",
         trigger: '.oe_cart .btn:contains("Continue checkout")',
         run: "click",
-    },
-    {
-        content: "Check selected billing address is same as typed in previous step",
-        trigger: '#shipping_and_billing:contains(SO1 Billing Street Edited, 33):contains(SO1BillingCityEdited):contains(Afghanistan)',
-    },
-    {
-        content: "Check selected shipping address is same as typed in previous step",
-        trigger: '#shipping_and_billing:contains(SO2New Shipping Street, 5):contains(SO2NewShipping):contains(Afghanistan)',
     },
     ...tourUtils.payWithTransfer(),
     {

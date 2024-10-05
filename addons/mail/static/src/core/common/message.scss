@@ -22,9 +22,14 @@
     opacity: 75%;
 }
 
+.o-mail-Message-edited {
+    display: none;
+}
+
 .o-mail-Message-seenContainer {
     font-size: 0.65rem;
     right: 2px;
+    bottom: -2px;
 }
 
 .o-mail-Message-sidebar {
@@ -82,10 +87,12 @@
 
     & > p {
         margin-bottom: 0 !important;
+    }
 
-        &:last-of-type:has(~ .o-mail-Message-edited) {
-            display: inline-block;
-        }
+    // overflow: auto can break rendering of next element of a frequent broken Outlook 365
+    // warning table. If detected, we prevent the issue by removing flotation.
+    table[align="left"][width="100%"] {
+        float: none;
     }
 }
 

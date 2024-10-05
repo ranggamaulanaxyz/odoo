@@ -101,7 +101,7 @@
                 <field name="categ_id"/>
                 <progressbar field="activity_state" colors='{"planned": "success", "today": "warning", "overdue": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card" class="flex-row">
+                    <t t-name="card" class="flex-row">
                         <main class="pe-2">
                             <div class="mb-1">
                                 <div class="d-flex mb-0 h5">
@@ -121,7 +121,13 @@
                             <field name="product_properties" widget="properties"/>
                         </main>
                         <aside>
-                            <field name="image_128" widget="image" alt="Product" options="{'img_class': 'w-100 object-fit-contain'}"/>
+                            <field
+                                name="image_128"
+                                widget="image"
+                                alt="Product"
+                                options="{'img_class': 'w-100 object-fit-contain'}"
+                                invisible="not image_128"
+                            />
                         </aside>
                     </t>
                 </templates>

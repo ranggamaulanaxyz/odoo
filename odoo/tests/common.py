@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import concurrent.futures
 import contextlib
+import difflib
 import importlib
 import inspect
 import itertools
@@ -17,6 +18,7 @@ import logging
 import os
 import pathlib
 import platform
+import pprint
 import re
 import shutil
 import signal
@@ -485,14 +487,8 @@ class BaseCase(case.TestCase, metaclass=MetaCase):
         else:
             return self._assertRaises(exception, **kwargs)
 
-    @contextmanager
-    def assertQueries(self, expected, flush=True):
-        """ Check the queries made by the current cursor. ``expected`` is a list
-        of strings representing the expected queries being made. Query strings
-        are matched against each other, ignoring case and whitespaces.
-        """
+    def _patchExecute(self, actual_queries, flush=True):
         Cursor_execute = Cursor.execute
-        actual_queries = []
 
         def execute(self, query, params=None, log_exceptions=None):
             actual_queries.append(query.code if isinstance(query, SQL) else query)
@@ -511,6 +507,16 @@ class BaseCase(case.TestCase, metaclass=MetaCase):
                 self.env.flush_all()
                 self.env.cr.flush()
 
+    @contextmanager
+    def assertQueries(self, expected, flush=True):
+        """ Check the queries made by the current cursor. ``expected`` is a list
+        of strings representing the expected queries being made. Query strings
+        are matched against each other, ignoring case and whitespaces.
+        """
+        actual_queries = []
+
+        yield from self._patchExecute(actual_queries, flush)
+
         if not self.warm:
             return
 
@@ -525,6 +531,32 @@ class BaseCase(case.TestCase, metaclass=MetaCase):
                 "".join(actual_query.lower().split()),
                 "".join(expect_query.lower().split()),
                 "\n---- actual query:\n%s\n---- not like:\n%s" % (actual_query, expect_query),
+            )
+
+    @contextmanager
+    def assertQueriesContain(self, expected, flush=True):
+        """ Check the queries made by the current cursor. ``expected`` is a list
+        of strings representing the expected queries being made. Query strings
+        are matched against each other, ignoring case and whitespaces.
+        """
+        actual_queries = []
+
+        yield from self._patchExecute(actual_queries, flush)
+
+        if not self.warm:
+            return
+
+        self.assertEqual(
+            len(actual_queries), len(expected),
+            "\n---- actual queries:\n%s\n---- expected queries:\n%s" % (
+                "\n".join(actual_queries), "\n".join(expected),
+            )
+        )
+        for actual_query, expect_query in zip(actual_queries, expected):
+            self.assertIn(
+                "".join(expect_query.lower().split()),
+                "".join(actual_query.lower().split()),
+                "\n---- actual query:\n%s\n---- doesn't contain:\n%s" % (actual_query, expect_query),
             )
 
     @contextmanager
@@ -617,8 +649,13 @@ class BaseCase(case.TestCase, metaclass=MetaCase):
         for vs in expected_values:
             r = {}
             for f in field_names:
-                if records._fields[f].type in ('one2many', 'many2many'):
+                t = records._fields[f].type
+                if t in ('one2many', 'many2many'):
                     r[f] = sorted(vs[f])
+                elif t == 'float':
+                    r[f] = float(vs[f])
+                elif t == 'integer':
+                    r[f] = int(vs[f])
                 elif vs[f] is None:
                     r[f] = False
                 else:
@@ -636,15 +673,29 @@ class BaseCase(case.TestCase, metaclass=MetaCase):
                     case 'one2many' | 'many2many':
                         record_value = sorted(record_value.ids)
                     case 'float' if digits := field.get_digits(record.env):
-                        record_value = Approx(record_value, digits[1])
+                        record_value = Approx(record_value, digits[1], decorate=False)
                     case 'monetary' if currency_field_name := field.get_currency_field(record):
                         # don't round if there's no currency set
                         if c := record[currency_field_name]:
-                            record_value = Approx(record_value, c)
+                            record_value = Approx(record_value, c, decorate=False)
                 r[field_name] = record_value
             record_reformatted.append(r)
 
-        self.assertEqual(expected_reformatted, record_reformatted)
+        try:
+            self.assertSequenceEqual(expected_reformatted, record_reformatted, seq_type=list)
+            return
+        except AssertionError as e:
+            standardMsg, _, diffMsg = str(e).rpartition('\n')
+            if 'self.maxDiff' not in diffMsg:
+                raise
+            # move out of handler to avoid exception chaining
+
+        diffMsg = "".join(difflib.unified_diff(
+            pprint.pformat(expected_reformatted).splitlines(keepends=True),
+            pprint.pformat(record_reformatted).splitlines(keepends=True),
+            fromfile="expected", tofile="records",
+        ))
+        self.fail(self._formatMessage(None, standardMsg + '\n' + diffMsg))
 
     # turns out this thing may not be quite as useful as we thought...
     def assertItemsEqual(self, a, b, msg=None):
@@ -749,8 +800,9 @@ class Approx:  # noqa: PLW1641
     Most of the time, :meth:`TestCase.assertAlmostEqual` is more useful, but it
     doesn't work for all helpers.
     """
-    def __init__(self, value: float, rounding: int | float | odoo.addons.base.models.res_currency.Currency, /) -> None:  # noqa: PYI041
+    def __init__(self, value: float, rounding: int | float | odoo.addons.base.models.res_currency.Currency, /, decorate: bool) -> None:  # noqa: PYI041
         self.value = value
+        self.decorate = decorate
         if isinstance(rounding, int):
             self.cmp = partial(float_compare, precision_digits=rounding)
         elif isinstance(rounding, float):
@@ -759,7 +811,9 @@ class Approx:  # noqa: PLW1641
             self.cmp = rounding.compare_amounts
 
     def __repr__(self) -> str:
-        return f"~{self.value!r}"
+        if self.decorate:
+            return f"~{self.value!r}"
+        return repr(self.value)
 
     def __eq__(self, other: object) -> bool | NotImplemented:
         if not isinstance(other, (float, int)):
@@ -1784,8 +1838,18 @@ class HttpCase(TransactionCase):
         ICP.set_param('web.base.url', cls.base_url())
         ICP.env.flush_all()
         # v8 api with correct xmlrpc exception handling.
-        cls.xmlrpc_url = f'http://{HOST}:{odoo.tools.config["http_port"]:d}/xmlrpc/2/'
+        cls.xmlrpc_url = f'{cls.base_url()}/xmlrpc/2/'
         cls._logger = logging.getLogger('%s.%s' % (cls.__module__, cls.__name__))
+
+    @classmethod
+    def base_url(cls):
+        return f"http://{HOST}:{cls.http_port():d}"
+
+    @classmethod
+    def http_port(cls):
+        if odoo.service.server.server is None:
+            return None
+        return odoo.service.server.server.httpd.server_port
 
     def setUp(self):
         super().setUp()
@@ -1986,10 +2050,6 @@ class HttpCase(TransactionCase):
         finally:
             browser.stop()
             self._wait_remaining_requests()
-
-    @classmethod
-    def base_url(cls):
-        return f"http://{HOST}:{odoo.tools.config['http_port']}"
 
     def start_tour(self, url_path, tour_name, step_delay=None, **kwargs):
         """Wrapper for `browser_js` to start the given `tour_name` with the

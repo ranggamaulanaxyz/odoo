@@ -1,23 +1,27 @@
 import { Plugin } from "@html_editor/plugin";
 import { closestBlock, isBlock } from "@html_editor/utils/blocks";
-import { wrapInlinesInBlocks, removeClass, setTagName, toggleClass } from "@html_editor/utils/dom";
+import { removeClass, toggleClass, wrapInlinesInBlocks } from "@html_editor/utils/dom";
 import {
     getDeepestPosition,
     isEmptyBlock,
     isProtected,
     isProtecting,
     isVisible,
+    paragraphRelatedElements,
 } from "@html_editor/utils/dom_info";
 import {
     closestElement,
     descendants,
     getAdjacents,
     selectElements,
+    ancestors,
 } from "@html_editor/utils/dom_traversal";
 import { childNodeIndex } from "@html_editor/utils/position";
+import { leftLeafOnlyNotBlockPath } from "@html_editor/utils/dom_state";
 import { _t } from "@web/core/l10n/translation";
-import { compareListTypes, createList, getListMode, insertListAfter, isListItem } from "./utils";
+import { compareListTypes, createList, insertListAfter, isListItem } from "./utils";
 import { callbacksForCursorUpdate } from "@html_editor/utils/selection";
+import { getListMode, switchListMode } from "@html_editor/utils/list";
 
 function isListActive(listMode) {
     return (selection) => {
@@ -102,13 +106,7 @@ export class ListPlugin extends Plugin {
                 },
             },
         ],
-        emptyBlockHints: [
-            { selector: "UL LI", hint: _t("List") },
-            { selector: "OL LI", hint: _t("List") },
-            // @todo @phoenix: hint for checklists was supposed to be "To-do",
-            // but never worked because of the ::before pseudo-element is used
-            // to display the checkbox.
-        ],
+        hints: [{ selector: "LI", text: _t("List") }],
         onInput: { handler: p.onInput.bind(p) },
     });
 
@@ -130,10 +128,23 @@ export class ListPlugin extends Plugin {
         }
     }
 
-    onInput() {
+    onInput(ev) {
+        if (ev.data !== " ") {
+            return;
+        }
         const selection = this.shared.getEditableSelection();
         const blockEl = closestBlock(selection.anchorNode);
-        const stringToConvert = blockEl.textContent.substring(0, selection.anchorOffset);
+        const leftDOMPath = leftLeafOnlyNotBlockPath(selection.anchorNode);
+        let spaceOffset = selection.anchorOffset;
+        let leftLeaf = leftDOMPath.next().value;
+        while (leftLeaf) {
+            // Calculate spaceOffset by adding lengths of previous text nodes
+            // to correctly find offset position for selection within inline
+            // elements. e.g. <p>ab<strong>cd[]e</strong></p>
+            spaceOffset += leftLeaf.length;
+            leftLeaf = leftDOMPath.next().value;
+        }
+        const stringToConvert = blockEl.textContent.substring(0, spaceOffset);
         const shouldCreateNumberList = /^(?:[1aA])[.)]\s$/.test(stringToConvert);
         const shouldCreateBulletList = /^[-*]\s$/.test(stringToConvert);
         const shouldCreateCheckList = /^\[\]\s$/.test(stringToConvert);
@@ -224,7 +235,9 @@ export class ListPlugin extends Plugin {
         // Apply changes.
         if (listsToSwitch.size || nonListBlocks.size) {
             for (const list of listsToSwitch) {
-                this.switchListMode(list, mode);
+                const cursors = this.shared.preserveSelection();
+                const newList = switchListMode(list, mode);
+                cursors.remapNode(list, newList).restore();
             }
             for (const block of nonListBlocks) {
                 const list = this.blockToList(block, mode, listStyle);
@@ -248,7 +261,12 @@ export class ListPlugin extends Plugin {
             if (isProtected(element) || isProtecting(element)) {
                 continue;
             }
-            for (const fn of [this.liWithoutParentToP, this.mergeSimilarLists, this.normalizeLI]) {
+            for (const fn of [
+                this.liWithoutParentToP,
+                this.mergeSimilarLists,
+                this.normalizeLI,
+                this.normalizeNestedList,
+            ]) {
                 fn.call(this, element);
             }
         }
@@ -257,38 +275,6 @@ export class ListPlugin extends Plugin {
     // --------------------------------------------------------------------------
     // Helpers for toggleList
     // --------------------------------------------------------------------------
-
-    /**
-     * Switches the list mode of the given list element.
-     *
-     * @param {HTMLOListElement|HTMLUListElement} list - The list element to switch the mode of.
-     * @param {"UL"|"OL"|"CL"} newMode - The new mode to switch to.
-     * @returns {HTMLOListElement|HTMLUListElement} The modified list element.
-     */
-    switchListMode(list, newMode) {
-        if (getListMode(list) === newMode) {
-            return;
-        }
-        const newTag = newMode === "CL" ? "UL" : newMode;
-        const cursors = this.shared.preserveSelection();
-        const newList = setTagName(list, newTag);
-        // Clear list style (@todo @phoenix - why??)
-        newList.style.removeProperty("list-style");
-        for (const li of newList.children) {
-            if (li.style.listStyle !== "none") {
-                li.style.listStyle = null;
-                if (!li.style.all) {
-                    li.removeAttribute("style");
-                }
-            }
-        }
-        removeClass(newList, "o_checklist");
-        if (newMode === "CL") {
-            newList.classList.add("o_checklist");
-        }
-        cursors.remapNode(list, newList).restore();
-        return newList;
-    }
 
     /**
      * @param {HTMLElement} element
@@ -407,9 +393,27 @@ export class ListPlugin extends Plugin {
             return;
         }
 
-        if ([...element.children].some(isBlock)) {
+        if (
+            [...element.children].some(
+                (child) => isBlock(child) && !this.shared.isUnsplittable(child)
+            )
+        ) {
             const cursors = this.shared.preserveSelection();
             wrapInlinesInBlocks(element, cursors);
+            cursors.restore();
+        }
+    }
+
+    normalizeNestedList(element) {
+        if (element.tagName === "LI") {
+            return;
+        }
+        if (["UL", "OL"].includes(element.parentElement?.tagName)) {
+            const cursors = this.shared.preserveSelection();
+            const li = this.document.createElement("li");
+            element.parentElement.insertBefore(li, element);
+            li.appendChild(element);
+            li.classList.add("oe-nested");
             cursors.restore();
         }
     }
@@ -598,6 +602,17 @@ export class ListPlugin extends Plugin {
     // --------------------------------------------------------------------------
 
     handleTab() {
+        const selection = this.shared.getEditableSelection();
+        const closestLI = closestElement(selection.anchorNode, "LI");
+        if (closestLI) {
+            const block = closestBlock(selection.anchorNode);
+            const isLiContainsUnSpittable =
+                paragraphRelatedElements.includes(block.nodeName) &&
+                ancestors(block, closestLI).find((node) => this.shared.isUnsplittable(node));
+            if (isLiContainsUnSpittable) {
+                return;
+            }
+        }
         const { listItems, navListItems, nonListItems } = this.separateListItems();
         if (listItems.length || navListItems.length) {
             this.indentListNodes(listItems);
@@ -609,6 +624,17 @@ export class ListPlugin extends Plugin {
     }
 
     handleShiftTab() {
+        const selection = this.shared.getEditableSelection();
+        const closestLI = closestElement(selection.anchorNode, "LI");
+        if (closestLI) {
+            const block = closestBlock(selection.anchorNode);
+            const isLiContainsUnSpittable =
+                paragraphRelatedElements.includes(block.nodeName) &&
+                ancestors(block, closestLI).find((node) => this.shared.isUnsplittable(node));
+            if (isLiContainsUnSpittable) {
+                return;
+            }
+        }
         const { listItems, navListItems, nonListItems } = this.separateListItems();
         if (listItems.length || navListItems.length) {
             this.outdentListNodes(listItems);
@@ -621,7 +647,12 @@ export class ListPlugin extends Plugin {
 
     handleSplitBlock(params) {
         const closestLI = closestElement(params.targetNode, "LI");
-        if (!closestLI) {
+        const isBlockUnsplittable =
+            closestLI &&
+            Array.from(closestLI.childNodes).some(
+                (node) => isBlock(node) && this.shared.isUnsplittable(node)
+            );
+        if (!closestLI || isBlockUnsplittable) {
             return;
         }
         if (!closestLI.textContent) {

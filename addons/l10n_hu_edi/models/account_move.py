@@ -238,10 +238,7 @@ class AccountMove(models.Model):
             if self.l10n_hu_edi_state in ['confirmed', 'confirmed_warning']:
                 valid_actions.append('request_cancel')
             if not valid_actions:
-                # Placeholder to denote that the invoice was already processed with a NAV flow,
-                # useful e.g. for account_move_send's _need_invoice_document which gets called
-                # at various points in the flow, including after the invoice state has been changed
-                # to a final state.
+                # Placeholder to denote that the invoice was already processed with a NAV flow
                 valid_actions.append(True)
         return valid_actions
 
@@ -882,7 +879,7 @@ class AccountMove(models.Model):
 
                     advance_invoices = line._get_downpayment_lines().mapped('move_id').filtered(lambda m: m.state == 'posted')
                     reconciled_moves = advance_invoices._get_reconciled_amls().move_id
-                    last_reconciled_payment = reconciled_moves.filtered(lambda m: m.payment_id or m.statement_line_id).sorted('date', reverse=True)[:1]
+                    last_reconciled_payment = reconciled_moves.filtered(lambda m: m.origin_payment_id or m.statement_line_id).sorted('date', reverse=True)[:1]
 
                     if last_reconciled_payment:
                         line_values.update({
@@ -999,39 +996,32 @@ class AccountMove(models.Model):
             """ Replace the values of keys_to_invert by their negative. """
             dictionary.update({
                 key: -value
-                for key, value in dictionary.items() if key in keys_to_invert
-            })
-            keys_to_reformat = {f'formatted_{x}': x for x in keys_to_invert}
-            dictionary.update({
-                key: formatLang(self.env, dictionary[keys_to_reformat[key]], currency_obj=self.company_id.currency_id)
-                for key, value in dictionary.items() if key in keys_to_reformat
+                for key, value in dictionary.items()
+                if key in keys_to_invert
             })
 
         self.ensure_one()
-
         tax_totals = self.tax_totals
-        if not isinstance(tax_totals, dict):
+        if not tax_totals or self.move_type not in ('out_refund', 'in_refund'):
             return tax_totals
 
-        tax_totals['display_tax_base'] = True
+        fields_to_reverse = (
+            'base_amount_currency', 'base_amount',
+            'display_base_amount_currency', 'display_base_amount',
+            'tax_amount_currency', 'tax_amount',
+            'total_amount_currency', 'total_amount',
+            'cash_rounding_base_amount_currency', 'cash_rounding_base_amount',
+        )
 
-        if 'refund' in self.move_type:
-            invert_dict(tax_totals, ['amount_total', 'amount_untaxed', 'rounding_amount', 'amount_total_rounded'])
-
-            for subtotal in tax_totals['subtotals']:
-                invert_dict(subtotal, ['amount'])
-
-            for tax_list in tax_totals['groups_by_subtotal'].values():
-                for tax in tax_list:
-                    keys_to_invert = ['tax_group_amount', 'tax_group_base_amount', 'tax_group_amount_company_currency', 'tax_group_base_amount_company_currency']
-                    invert_dict(tax, keys_to_invert)
+        invert_dict(tax_totals, fields_to_reverse)
+        for subtotal in tax_totals['subtotals']:
+            invert_dict(subtotal, fields_to_reverse)
+            for tax_group in subtotal['tax_groups']:
+                invert_dict(tax_group, fields_to_reverse)
 
         currency_huf = self.env.ref('base.HUF')
-        currency_rate = self._l10n_hu_get_currency_rate()
-
         tax_totals['total_vat_amount_in_huf'] = sum(
-            -line.balance if self.company_id.currency_id == currency_huf else currency_huf.round(-line.amount_currency * currency_rate)
-            for line in self.line_ids.filtered(lambda l: l.tax_line_id.l10n_hu_tax_type)
+            -line.balance for line in self.line_ids.filtered(lambda l: l.tax_line_id.l10n_hu_tax_type)
         )
         tax_totals['formatted_total_vat_amount_in_huf'] = formatLang(
             self.env, tax_totals['total_vat_amount_in_huf'], currency_obj=currency_huf

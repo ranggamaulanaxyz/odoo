@@ -78,11 +78,11 @@ export class ColumnPlugin extends Plugin {
                 },
             },
         ],
-        emptyBlockHints: [
+        hints: [
             {
                 selector: `.odoo-editor-editable .o_text_columns div[class^='col-'],
-                            .odoo-editor-editable .o_text_columns p:first-child`,
-                hint: _t("Empty column"),
+                            .odoo-editor-editable .o_text_columns div[class^='col-']>p:first-child`,
+                text: _t("Empty column"),
             },
         ],
     });

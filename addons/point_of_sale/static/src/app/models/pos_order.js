@@ -18,8 +18,8 @@ export class PosOrder extends Base {
     setup(vals) {
         super.setup(vals);
 
-        if (!this.session_id && !this.finalized) {
-            this.update({ session_id: this.session.id });
+        if (!this.session_id && typeof this.id === "string") {
+            this.update({ session_id: this.session });
         }
 
         // Data present in python model
@@ -30,7 +30,11 @@ export class PosOrder extends Base {
         this.uuid = vals.uuid ? vals.uuid : uuidv4();
         this.last_order_preparation_change = vals.last_order_preparation_change
             ? JSON.parse(vals.last_order_preparation_change)
-            : {};
+            : {
+                  lines: {},
+                  generalNote: "",
+              };
+        this.general_note = vals.general_note || "";
         this.tracking_number =
             vals.tracking_number && !isNaN(parseInt(vals.tracking_number))
                 ? vals.tracking_number
@@ -84,10 +88,9 @@ export class PosOrder extends Base {
         return this.state !== "draft";
     }
 
-    getOrderName() {
-        return this.getFloatingOrderName() || "";
+    get isUnsyncedPaid() {
+        return this.finalized && typeof this.id === "string";
     }
-
     getEmailItems() {
         return [_t("the receipt")].concat(this.is_to_invoice() ? [_t("the invoice")] : []);
     }
@@ -109,7 +112,8 @@ export class PosOrder extends Base {
             rounding_applied: this.get_rounding_applied(),
             tax_details: this.get_tax_details(),
             change: this.amount_return,
-            name: this.name,
+            name: this.pos_reference,
+            generalNote: this.general_note || "",
             invoice_id: null, //TODO
             cashier: this.employee_id?.name || this.user_id?.name,
             date: formatDateTime(parseUTCString(this.date_order)),
@@ -123,10 +127,8 @@ export class PosOrder extends Base {
             // FIXME: isn't there a better way to handle this date?
             shippingDate:
                 this.shipping_date && formatDate(DateTime.fromJSDate(new Date(this.shipping_date))),
-            headerData: {
-                ...headerData,
-                trackingNumber: this.tracking_number,
-            },
+            headerData: headerData,
+            screenName: "ReceiptScreen",
         };
     }
     canPay() {
@@ -137,6 +139,10 @@ export class PosOrder extends Base {
         this.amount_tax = this.get_total_tax();
         this.amount_total = this.get_total_with_tax();
         this.amount_return = this.get_change();
+        this.lines.forEach((line) => {
+            line.price_subtotal = line.get_price_without_tax();
+            line.price_subtotal_incl = line.get_price_with_tax();
+        });
     }
 
     // NOTE args added [unwatchedPrinter]
@@ -173,7 +179,7 @@ export class PosOrder extends Base {
                     cancelled: changes["cancelled"],
                     table_name: this.table_id?.name,
                     floor_name: this.table_id?.floor_id?.name,
-                    name: this.name || "unknown order",
+                    name: this.pos_reference || "unknown order",
                     time: {
                         hours,
                         minutes,
@@ -230,11 +236,11 @@ export class PosOrder extends Base {
             if (!line.skip_change) {
                 orderlineIdx.push(line.preparationKey);
 
-                if (this.last_order_preparation_change[line.preparationKey]) {
-                    this.last_order_preparation_change[line.preparationKey]["quantity"] =
+                if (this.last_order_preparation_change.lines[line.preparationKey]) {
+                    this.last_order_preparation_change.lines[line.preparationKey]["quantity"] =
                         line.get_quantity();
                 } else {
-                    this.last_order_preparation_change[line.preparationKey] = {
+                    this.last_order_preparation_change.lines[line.preparationKey] = {
                         attribute_value_ids: line.attribute_value_ids.map((a) =>
                             a.serialize({ orm: true })
                         ),
@@ -251,11 +257,12 @@ export class PosOrder extends Base {
 
         // Checks whether an orderline has been deleted from the order since it
         // was last sent to the preparation tools. If so we delete it to the changes.
-        for (const [key, change] of Object.entries(this.last_order_preparation_change)) {
+        for (const [key, change] of Object.entries(this.last_order_preparation_change.lines)) {
             if (!this.models["pos.order.line"].getBy("uuid", change.uuid)) {
-                delete this.last_order_preparation_change[key];
+                delete this.last_order_preparation_change.lines[key];
             }
         }
+        this.last_order_preparation_change.generalNote = this.general_note;
     }
 
     hasSkippedChanges() {
@@ -448,6 +455,9 @@ export class PosOrder extends Base {
             if (this.assert_editable()) {
                 lineToRemove.delete();
             }
+        }
+        if (!this.lines.length) {
+            this.general_note = ""; // reset general note on empty order
         }
         this.select_orderline(this.get_last_orderline());
         return true;
@@ -860,7 +870,7 @@ export class PosOrder extends Base {
     }
 
     is_paid() {
-        return this.get_due() <= 0 && this.check_paymentlines_rounding();
+        return this.get_due() <= 0;
     }
 
     is_paid_with_cash() {
@@ -1059,10 +1069,11 @@ export class PosOrder extends Base {
                 amount: formatCurrency(pl.get_amount()),
             })),
             change: this.get_change() && formatCurrency(this.get_change()),
+            generalNote: this.general_note || "",
         };
     }
     getFloatingOrderName() {
-        return this.note || this.tracking_number.toString() || "";
+        return this.floating_order_name || this.tracking_number.toString() || "";
     }
 
     sortBySequenceAndCategory(a, b) {

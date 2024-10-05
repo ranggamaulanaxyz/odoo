@@ -1,6 +1,6 @@
 import { expect, test } from "@odoo/hoot";
 import { setupEditor } from "./_helpers/editor";
-import { press, queryAll, waitFor } from "@odoo/hoot-dom";
+import { getActiveElement, press, queryAll, queryOne, waitFor } from "@odoo/hoot-dom";
 import { animationFrame } from "@odoo/hoot-mock";
 import { contains, onRpc } from "@web/../tests/web_test_helpers";
 import { insertText } from "./_helpers/user_actions";
@@ -16,9 +16,9 @@ const ALTERNATIVES_DIALOG_TITLE = "AI Copywriter";
 const TRANSLATE_DIALOG_TITLE = "Translate with AI";
 
 const openFromPowerbox = async (editor) => {
-    insertText(editor, "/ChatGPT");
+    await insertText(editor, "/ChatGPT");
     await animationFrame();
-    press("Enter");
+    await press("Enter");
 };
 const openFromToolbar = async () => {
     await contains(".o-we-toolbar .btn[name='chatgpt']").click();
@@ -232,7 +232,7 @@ test("insert the response from ChatGPT translate dialog", async () => {
 
     // Expect to undo and redo the inserted text.
     editor.dispatch("HISTORY_UNDO");
-    expect(getContent(el)).toBe(`<p>[]Hello</p>`);
+    expect(getContent(el)).toBe(`<p>[Hello]</p>`);
     editor.dispatch("HISTORY_REDO");
     expect(getContent(el)).toBe(`<p>Bonjour[]</p>`);
 });
@@ -284,4 +284,37 @@ test("Translate button should be positioned before ChatGPT button in toolbar", a
     expect(buttons).toHaveCount(2);
     expect(buttons[0]).toHaveAttribute("name", "translate");
     expect(buttons[1]).toHaveAttribute("name", "chatgpt");
+});
+
+test("press escape to close ChatGPT dialog", async () => {
+    const { editor, el } = await setupEditor("<p>te[]st</p>", {
+        config: { Plugins: [...MAIN_PLUGINS, ChatGPTPlugin] },
+    });
+
+    // Select ChatGPT in the Powerbox.
+    await openFromPowerbox(editor);
+
+    // Expect the ChatGPT Prompt Dialog to be open.
+    const promptDialogHeaderSelector = `.o_dialog .modal-header:contains("${PROMPT_DIALOG_TITLE}")`;
+    await waitFor(promptDialogHeaderSelector);
+    expect(getActiveElement()).toBe(queryOne('.modal [name="promptInput"]'));
+
+    await press("escape");
+    await animationFrame();
+    expect(promptDialogHeaderSelector).toHaveCount(0);
+    expect(getContent(el)).toBe("<p>te[]st</p>");
+});
+
+test("AI is an alias to ChatGPT command in the Powerbox", async () => {
+    const { editor } = await setupEditor("<p>[]<br></p>");
+    insertText(editor, "/AI");
+    await animationFrame();
+    expect(".active .o-we-command-name").toHaveText("ChatGPT");
+
+    // Search is case-insensitive: "/ai" should also match.
+    press("backspace");
+    press("backspace");
+    insertText(editor, "ai");
+    await animationFrame();
+    expect(".active .o-we-command-name").toHaveText("ChatGPT");
 });
