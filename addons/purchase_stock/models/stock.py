@@ -81,6 +81,13 @@ class StockWarehouse(models.Model):
             result[warehouse.id].update(warehouse._get_receive_rules_dict())
         return result
 
+    def _get_receive_rules_dict(self):
+        rules = super()._get_receive_rules_dict()
+        customer_loc, __ = self._get_partner_locations()
+        # Sets the right order for new warehouses: buy then push.
+        rules['crossdock'].insert(0, self.Routing(self.env['stock.location'], customer_loc, self.in_type_id, 'buy'))
+        return rules
+
     def _get_routes_values(self):
         routes = super(StockWarehouse, self)._get_routes_values()
         routes.update(self._get_receive_routes_values('buy_to_resupply'))
@@ -264,6 +271,8 @@ class StockLot(models.Model):
 
 class ProcurementGroup(models.Model):
     _inherit = 'procurement.group'
+
+    purchase_line_ids = fields.One2many('purchase.order.line', 'group_id', string='Linked Purchase Order Lines', copy=False)
 
     @api.model
     def run(self, procurements, raise_user_error=True):

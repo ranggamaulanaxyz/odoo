@@ -27,14 +27,14 @@ beforeEach(() => {
         form: `
             <form string="To-do" class="o_todo_form_view" js_class="todo_form">
                 <field name="name"/>
-                <field name="state" invisible="1"/>
+                <field name="state" widget="todo_done_checkmark"/>
             </form>`,
         search: `
             <search/>`,
         kanban: `
             <kanban>
                 <template>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="state" widget="todo_done_checkmark"/>
                     </t>
                 </template>

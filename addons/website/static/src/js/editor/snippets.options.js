@@ -1412,6 +1412,17 @@ options.registry.ReplaceMedia.include({
     },
 });
 
+options.registry.ImageTools.include({
+    async _computeWidgetVisibility(widgetName, params) {
+        if (params.optionsPossibleValues.selectStyle
+                && params.cssProperty === 'width'
+                && this.$target[0].classList.contains('o_card_img')) {
+            return false;
+        }
+        return this._super(...arguments);
+    },
+});
+
 options.registry.BackgroundVideo = options.Class.extend({
 
     //--------------------------------------------------------------------------
@@ -2132,6 +2143,7 @@ options.registry.Carousel = options.registry.CarouselHandler.extend({
         this.$indicators.append($('<button>', {
             'data-bs-target': '#' + this.$target.attr('id'),
             'data-bs-slide-to': $items.length,
+            'aria-label': _t('Carousel indicator'),
         }));
         this.$indicators.append(' ');
         // Need to remove editor data from the clone so it gets its own.
@@ -2214,8 +2226,9 @@ options.registry.CarouselItem = options.Class.extend({
      * @see this.selectClass for parameters
      */
     addSlideItem(previewMode, widgetValue, params) {
+        const optionName = this.$carousel[0].classList.contains("s_carousel_intro") ? "CarouselIntro" : "Carousel";
         this.trigger_up('option_update', {
-            optionName: 'Carousel',
+            optionName: optionName,
             name: 'add_slide',
         });
     },
@@ -2478,7 +2491,7 @@ options.registry.collapse = options.Class.extend({
 
         const accordionId = setUniqueId(accordionEl, "myCollapse");
         accordionContentEl.dataset.bsParent = "#" + accordionId;
-        
+
         const contentId = setUniqueId(accordionContentEl, "myCollapseTab");
         accordionBtnEl.dataset.bsTarget = "#" + contentId;
         accordionBtnEl.setAttribute("aria-controls", contentId);
@@ -4308,7 +4321,8 @@ options.registry.GalleryElement = options.Class.extend({
      * @see this.selectClass for parameters
      */
     position(previewMode, widgetValue, params) {
-        const optionName = this.$target[0].classList.contains("carousel-item") ? "Carousel"
+        const carouselOptionName = this.$target[0].parentNode.parentNode.classList.contains("s_carousel_intro") ? "CarouselIntro" : "Carousel";
+        const optionName = this.$target[0].classList.contains("carousel-item") ? carouselOptionName
             : "GalleryImageList";
         const itemEl = this.$target[0];
         this.trigger_up("option_update", {

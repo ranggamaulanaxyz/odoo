@@ -158,7 +158,9 @@
             'web/static/lib/bootstrap/js/dist/scrollspy.js',
             'web/static/lib/bootstrap/js/dist/tab.js',
             'web/static/lib/bootstrap/js/dist/toast.js',
+            'web/static/lib/dompurify/DOMpurify.js',
             'web/static/src/libs/bootstrap.js',
+            'web/static/src/libs/pdfjs.js',
             'web/static/src/legacy/js/libs/jquery.js',
 
             'base/static/src/css/modules.css',
@@ -201,7 +203,6 @@
             'bus/static/src/**/*.js',
 
             'html_editor/static/src/**/*',
-            'html_editor/static/lib/DOMpurify.js',
 
             'mail/static/src/scss/variables/*.scss',
             'mail/static/src/chatter/web/form_renderer.scss',
@@ -212,6 +213,8 @@
             'project/static/src/components/project_many2one_field/*',
             'project/static/src/views/project_task_form/*.scss',
 
+            ('include', 'portal.assets_chatter_helpers'),
+            'portal/static/src/chatter/core/**/*',
             'project/static/src/project_sharing/search/favorite_menu/custom_favorite_item.xml',
             'project/static/src/project_sharing/**/*',
             'web/static/src/start.js',

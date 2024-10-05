@@ -184,6 +184,16 @@ defineModels([Partner, Product, Category, Currency, IrAttachment]);
 
 beforeEach(() => {
     patchWithCleanup(AnimatedNumber, { enableAnimations: false });
+
+    // avoid "kanban-box" deprecation warnings in this suite, which defines legacy kanban on purpose
+    const originalConsoleWarn = console.warn;
+    patchWithCleanup(console, {
+        warn: (msg) => {
+            if (msg !== "'kanban-box' is deprecated, use 'kanban-card' API instead") {
+                originalConsoleWarn(msg);
+            }
+        },
+    });
 });
 
 test("display full is supported on fields", async () => {
@@ -260,7 +270,7 @@ test.tags("desktop")("basic grouped rendering", async () => {
     );
 
     // focuses the search bar and closes the dropdown
-    click(".o_searchview input");
+    await click(".o_searchview input");
 
     // the next line makes sure that reload works properly.  It looks useless,
     // but it actually test that a grouped local record can be reloaded without
@@ -552,26 +562,26 @@ test("view button and string interpolated attribute in kanban", async () => {
             </kanban>`,
     });
     expect.verifySteps([
-        "[one] className: 'hola oe_kanban_action oe_kanban_action_a'",
-        "[two] className: 'hola oe_kanban_action oe_kanban_action_a hello'",
-        "[sri] className: 'hola oe_kanban_action oe_kanban_action_a yop'",
-        "[foa] className: 'hola oe_kanban_action oe_kanban_action_a yop olleh'",
-        "[fye] className: 'hola oe_kanban_action oe_kanban_action_a hello yop'",
-        "[one] className: 'hola oe_kanban_action oe_kanban_action_a'",
-        "[two] className: 'hola oe_kanban_action oe_kanban_action_a hello'",
-        "[sri] className: 'hola oe_kanban_action oe_kanban_action_a blip'",
-        "[foa] className: 'hola oe_kanban_action oe_kanban_action_a blip olleh'",
-        "[fye] className: 'hola oe_kanban_action oe_kanban_action_a hello blip'",
-        "[one] className: 'hola oe_kanban_action oe_kanban_action_a'",
-        "[two] className: 'hola oe_kanban_action oe_kanban_action_a hello'",
-        "[sri] className: 'hola oe_kanban_action oe_kanban_action_a gnap'",
-        "[foa] className: 'hola oe_kanban_action oe_kanban_action_a gnap olleh'",
-        "[fye] className: 'hola oe_kanban_action oe_kanban_action_a hello gnap'",
-        "[one] className: 'hola oe_kanban_action oe_kanban_action_a'",
-        "[two] className: 'hola oe_kanban_action oe_kanban_action_a hello'",
-        "[sri] className: 'hola oe_kanban_action oe_kanban_action_a blip'",
-        "[foa] className: 'hola oe_kanban_action oe_kanban_action_a blip olleh'",
-        "[fye] className: 'hola oe_kanban_action oe_kanban_action_a hello blip'",
+        "[one] className: 'hola oe_kanban_action'",
+        "[two] className: 'hola oe_kanban_action hello'",
+        "[sri] className: 'hola oe_kanban_action yop'",
+        "[foa] className: 'hola oe_kanban_action yop olleh'",
+        "[fye] className: 'hola oe_kanban_action hello yop'",
+        "[one] className: 'hola oe_kanban_action'",
+        "[two] className: 'hola oe_kanban_action hello'",
+        "[sri] className: 'hola oe_kanban_action blip'",
+        "[foa] className: 'hola oe_kanban_action blip olleh'",
+        "[fye] className: 'hola oe_kanban_action hello blip'",
+        "[one] className: 'hola oe_kanban_action'",
+        "[two] className: 'hola oe_kanban_action hello'",
+        "[sri] className: 'hola oe_kanban_action gnap'",
+        "[foa] className: 'hola oe_kanban_action gnap olleh'",
+        "[fye] className: 'hola oe_kanban_action hello gnap'",
+        "[one] className: 'hola oe_kanban_action'",
+        "[two] className: 'hola oe_kanban_action hello'",
+        "[sri] className: 'hola oe_kanban_action blip'",
+        "[foa] className: 'hola oe_kanban_action blip olleh'",
+        "[fye] className: 'hola oe_kanban_action hello blip'",
     ]);
 });
 
@@ -595,7 +605,7 @@ test("click on a button type='delete' to delete a record in a column", async () 
     expect(queryAll(".o_kanban_record", { root: getKanbanColumn(0) })).toHaveCount(2);
     expect(queryAll(".o_kanban_load_more", { root: getKanbanColumn(0) })).toHaveCount(0);
 
-    click(queryFirst(".o_kanban_record .o_delete", { root: getKanbanColumn(0) }));
+    await click(queryFirst(".o_kanban_record .o_delete", { root: getKanbanColumn(0) }));
     await animationFrame();
     expect(".modal").toHaveCount(1);
 
@@ -821,7 +831,7 @@ test("Do not open record when clicking on `a` with `href`", async () => {
         ev.preventDefault();
     });
 
-    click(testLink);
+    await click(testLink);
     expect.verifySteps([]);
 });
 
@@ -850,7 +860,7 @@ test("Open record when clicking on widget field", async function (assert) {
 
     expect(".o_kanban_record:not(.o_kanban_ghost)").toHaveCount(4);
 
-    click(queryFirst(".o_field_monetary[name=salary]"));
+    await click(queryFirst(".o_field_monetary[name=salary]"));
 });
 
 test("clicking on a link triggers correct event", async () => {
@@ -980,8 +990,9 @@ test("button executes action and reloads", async () => {
 
     let count = 0;
     mockService("action", {
-        doActionButton({ onClose }) {
+        async doActionButton({ onClose }) {
             count++;
+            await animationFrame();
             onClose();
         },
     });
@@ -994,7 +1005,9 @@ test("button executes action and reloads", async () => {
                 <templates>
                     <div t-name="kanban-box">
                         <field name="foo"/>
-                        <button type="object" name="a1" class="a1"/>
+                        <button type="object" name="a1" class="a1">
+                            A1
+                        </button>
                     </div>
                 </templates>
             </kanban>`,
@@ -1007,11 +1020,15 @@ test("button executes action and reloads", async () => {
         "web_search_read",
     ]);
     expect("button.a1").toHaveCount(4);
+    expect("button.a1:first").not.toHaveAttribute("disabled");
 
-    click(queryFirst("button.a1"));
-    expect(!!queryFirst("button.a1").disabled).toBe(true);
+    await click("button.a1");
+
+    expect("button.a1:first").toHaveAttribute("disabled");
+
     await animationFrame();
 
+    expect("button.a1:first").not.toHaveAttribute("disabled");
     expect(count).toBe(1, { message: "should have triggered an execute action only once" });
     // the records should be reloaded after executing a button action
     expect.verifySteps(["web_search_read"]);
@@ -1248,7 +1265,7 @@ test("properly evaluate more complex domains", async () => {
             </kanban>`,
     });
 
-    expect("button.float-end.oe_kanban_action_button").toHaveCount(1, {
+    expect("button.float-end.oe_kanban_action").toHaveCount(1, {
         message: "only one button should be visible",
     });
 });
@@ -1322,7 +1339,7 @@ test("kanban card: record value should be updated", async () => {
 
     expect(queryText(".foo", { root: getKanbanRecord({ index: 0 }) })).toBe("yop");
 
-    click(queryOne("button", { root: getKanbanRecord({ index: 0 }) }));
+    await click(queryOne("button", { root: getKanbanRecord({ index: 0 }) }));
     await animationFrame();
     await animationFrame();
 
@@ -1607,7 +1624,7 @@ test.tags("desktop")("set cover image", async () => {
     expect(".modal .btn:contains(Discard)").toHaveCount(1);
     expect(".modal .btn:contains(Remove Cover Image)").toHaveCount(0);
 
-    dblclick(".modal .o_kanban_cover_image img"); // doesn't work
+    await dblclick(".modal .o_kanban_cover_image img"); // doesn't work
     await animationFrame();
 
     expect('img[data-src*="/web/image/2"]').toHaveCount(1);
@@ -1662,7 +1679,7 @@ test.tags("desktop")("open file explorer if no cover image", async () => {
     await contains(".oe_kanban_action", {
         root: getDropdownMenu(getKanbanRecord({ index: 0 })),
     }).click();
-    setInputFiles([]);
+    await setInputFiles([]);
     await animationFrame();
 
     expect(`.o_file_input input`).not.toBeEnabled({
@@ -1755,7 +1772,7 @@ test.tags("desktop")("unset cover image", async () => {
     expect(queryText(coverButton)).toBe("Set Cover Image");
     await contains(coverButton).click();
 
-    dblclick(".modal .o_kanban_cover_image img"); // doesn't work
+    await dblclick(".modal .o_kanban_cover_image img"); // doesn't work
     await animationFrame();
 
     expect(queryAll("img", { root: getKanbanRecord({ index: 1 }) })).toHaveCount(0, {
@@ -1913,7 +1930,7 @@ test("kanban view with boolean toggle widget", async () => {
     expect(getKanbanRecord({ index: 0 }).querySelector("[name='bar'] input")).toBeChecked();
     expect(getKanbanRecord({ index: 1 }).querySelector("[name='bar'] input")).toBeChecked();
 
-    click(queryOne("[name='bar'] input", { root: getKanbanRecord({ index: 1 }) }));
+    await click(queryOne("[name='bar'] input", { root: getKanbanRecord({ index: 1 }) }));
     await animationFrame();
 
     expect(getKanbanRecord({ index: 0 }).querySelector("[name='bar'] input")).toBeChecked();
@@ -2099,7 +2116,13 @@ test("action/type attributes on kanban arch, type='action'", async () => {
 });
 
 test("Missing t-key is automatically filled with a warning", async () => {
-    patchWithCleanup(console, { warn: () => expect.step("warning") });
+    patchWithCleanup(console, {
+        warn: (msg) => {
+            if (msg !== "'kanban-box' is deprecated, use 'kanban-card' API instead") {
+                expect.step("warning");
+            }
+        },
+    });
 
     await mountView({
         type: "kanban",

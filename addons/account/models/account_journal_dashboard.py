@@ -87,22 +87,37 @@ class account_journal(models.Model):
         act_type_name = self.env['mail.activity.type']._field_to_sql('act_type', 'name')
         sql_query = SQL(
             """
-            SELECT activity.id,
-                   activity.res_id,
-                   activity.res_model,
-                   activity.summary,
-                   CASE WHEN activity.date_deadline < %(today)s THEN 'late' ELSE 'future' END as status,
-                   %(act_type_name)s as act_type_name,
-                   act_type.category as activity_category,
-                   activity.date_deadline,
-                   move.date,
-                   move.ref,
-                   move.journal_id
-              FROM account_move move
-              JOIN mail_activity activity ON activity.res_id = move.id AND activity.res_model = 'account.move'
-         LEFT JOIN mail_activity_type act_type ON activity.activity_type_id = act_type.id
-             WHERE move.journal_id = ANY(%(ids)s)
-               AND move.company_id = ANY(%(company_ids)s)
+         SELECT activity.id,
+                activity.res_id,
+                activity.res_model,
+                activity.summary,
+      CASE WHEN activity.date_deadline < %(today)s THEN 'late' ELSE 'future' END as status,
+                %(act_type_name)s as act_type_name,
+                act_type.category as activity_category,
+                activity.date_deadline,
+                move.journal_id
+           FROM account_move move
+           JOIN mail_activity activity ON activity.res_id = move.id AND activity.res_model = 'account.move'
+      LEFT JOIN mail_activity_type act_type ON activity.activity_type_id = act_type.id
+          WHERE move.journal_id = ANY(%(ids)s)
+            AND move.company_id = ANY(%(company_ids)s)
+
+      UNION ALL
+
+         SELECT activity.id,
+                activity.res_id,
+                activity.res_model,
+                activity.summary,
+      CASE WHEN activity.date_deadline < %(today)s THEN 'late' ELSE 'future' END as status,
+                %(act_type_name)s as act_type_name,
+                act_type.category as activity_category,
+                activity.date_deadline,
+                journal.id as journal_id
+           FROM account_journal journal
+           JOIN mail_activity activity ON activity.res_id = journal.id AND activity.res_model = 'account.journal'
+      LEFT JOIN mail_activity_type act_type ON activity.activity_type_id = act_type.id
+          WHERE journal.id = ANY(%(ids)s)
+            AND journal.company_id = ANY(%(company_ids)s)
             """,
             today=today,
             act_type_name=act_type_name,
@@ -545,20 +560,16 @@ class account_journal(models.Model):
         for journal_type, journals in [('sale', sale_journals), ('purchase', purchase_journals)]:
             if not journals:
                 continue
-            query, params = journals._get_open_sale_purchase_query(journal_type).select(
-                SQL("account_move_line.journal_id"),
-                SQL("account_move_line.company_id"),
-                SQL("account_move_line.currency_id AS currency"),
-                SQL("account_move_line.date_maturity < %s AS late", fields.Date.context_today(self)),
-                SQL("SUM(account_move_line.amount_residual) AS amount_total_company"),
-                SQL("SUM(account_move_line.amount_residual_currency) AS amount_total"),
-                SQL("COUNT(*)"),
+
+            query, selects = journals._get_open_sale_purchase_query(journal_type)
+            sql = SQL("""%s
+                    GROUP BY account_move_line.company_id, account_move_line.journal_id, account_move_line.currency_id, late, to_pay""",
+                      query.select(*selects),
             )
-            query += " GROUP BY company_id, journal_id, currency, late"
-            self.env.cr.execute(query, params)
+            self.env.cr.execute(sql)
             query_result = group_by_journal(self.env.cr.dictfetchall())
             for journal in journals:
-                query_results_to_pay[journal.id] = query_result[journal.id]
+                query_results_to_pay[journal.id] = [r for r in query_result[journal.id] if r['to_pay']]
                 late_query_results[journal.id] = [r for r in query_result[journal.id] if r['late']]
 
         to_check_vals = {
@@ -702,7 +713,7 @@ class account_journal(models.Model):
 
     def _get_open_sale_purchase_query(self, journal_type):
         assert journal_type in ('sale', 'purchase')
-        return self.env['account.move.line']._where_calc([
+        query = self.env['account.move.line']._where_calc([
             ('move_id', 'in', self.env['account.move']._where_calc([
                 *self.env['account.move.line']._check_company_domain(self.env.companies),
                 ('journal_id', 'in', self.ids),
@@ -712,6 +723,18 @@ class account_journal(models.Model):
             ])),
             ('account_type', '=', 'asset_receivable' if journal_type == 'sale' else 'liability_payable'),
         ])
+        selects = [
+            SQL("account_move_line.journal_id"),
+            SQL("account_move_line.company_id"),
+            SQL("account_move_line.currency_id AS currency"),
+            SQL("account_move_line.date_maturity < %s AS late", fields.Date.context_today(self)),
+            SQL("SUM(account_move_line.amount_residual) AS amount_total_company"),
+            SQL("SUM(account_move_line.amount_residual_currency) AS amount_total"),
+            SQL("COUNT(*)"),
+            SQL("TRUE AS to_pay")
+        ]
+
+        return query, selects
 
     def _count_results_and_sum_amounts(self, results_dict, target_currency):
         """ Loops on a query result to count the total number of invoices and sum
@@ -787,7 +810,7 @@ class account_journal(models.Model):
                    END) AS amount_total,
                    SUM(amount_company_currency_signed) AS amount_total_company
               FROM account_payment payment
-              JOIN account_move move ON move.payment_id = payment.id
+              JOIN account_move move ON move.origin_payment_id = payment.id
               JOIN account_journal journal ON move.journal_id = journal.id
              WHERE payment.is_matched IS TRUE
                AND move.state = 'posted'
@@ -815,7 +838,7 @@ class account_journal(models.Model):
                    END) AS amount_total,
                    SUM(amount_company_currency_signed) AS amount_total_company
               FROM account_payment payment
-              JOIN account_move move ON move.payment_id = payment.id
+              JOIN account_move move ON move.origin_payment_id = payment.id
              WHERE (NOT payment.is_matched OR payment.is_matched IS NULL)
                AND move.state = 'posted'
                AND payment.journal_id = ANY(%s)
@@ -856,12 +879,21 @@ class account_journal(models.Model):
             'context': self._get_move_action_context(),
         }
 
+    def _build_no_journal_error_msg(self, company_name, journal_types):
+        return _(
+                "No journal could be found in company %(company_name)s for any of those types: %(journal_types)s",
+                company_name=company_name,
+                journal_types=', '.join(journal_types),
+            )
+
     def action_create_vendor_bill(self):
         """ This function is called by the "try our sample" button of Vendor Bills,
         visible on dashboard if no bill has been created yet.
         """
         context = dict(self._context)
-        purchase_journal = self.browse(context.get('default_journal_id'))
+        purchase_journal = self.browse(context.get('default_journal_id')) or self.search([('type', '=', 'purchase')], limit=1)
+        if not purchase_journal:
+            raise UserError(self._build_no_journal_error_msg(self.env.company.display_name, ['purchase']))
         context['default_move_type'] = 'in_invoice'
         invoice_date = fields.Date.today() - timedelta(days=12)
         partner = self.env['res.partner'].search([('name', '=', 'Deco Addict')], limit=1)
@@ -871,7 +903,8 @@ class account_journal(models.Model):
                 'name': 'Deco Addict',
                 'is_company': True,
             })
-        default_expense_account = self.env['ir.property'].with_company(company)._get('property_account_expense_categ_id', 'product.category')
+        ProductCategory = self.env['product.category'].with_company(company)
+        default_expense_account = ProductCategory._fields['property_account_expense_categ_id'].get_company_dependent_fallback(ProductCategory)
         ref = 'DE%s' % invoice_date.strftime('%Y%m')
         bill = self.env['account.move'].with_context(default_extract_state='done').create({
             'move_type': 'in_invoice',

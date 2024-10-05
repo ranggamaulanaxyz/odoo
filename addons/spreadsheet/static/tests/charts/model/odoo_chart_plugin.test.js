@@ -652,6 +652,23 @@ test("Remove odoo chart when sheet is deleted", async () => {
     expect(model.getters.getOdooChartIds().length).toBe(0);
 });
 
+test("Odoo chart datasource display name has a default when the chart title is empty", async () => {
+    const { model } = await createSpreadsheetWithChart({ type: "odoo_line" });
+    const sheetId = model.getters.getActiveSheetId();
+    const chartId = model.getters.getChartIds(sheetId)[0];
+    const definition = model.getters.getChartDefinition(chartId);
+    expect(model.getters.getOdooChartDisplayName(chartId)).toBe("(#1) Partners");
+    model.dispatch("UPDATE_CHART", {
+        definition: {
+            ...definition,
+            title: { text: "" },
+        },
+        id: chartId,
+        sheetId,
+    });
+    expect(model.getters.getOdooChartDisplayName(chartId)).toBe("(#1) Odoo Line Chart");
+});
+
 test("See records when clicking on a bar chart bar", async () => {
     const action = {
         domain: [
@@ -831,4 +848,21 @@ test("import/export action xml id", async () => {
     const sheetId = model2.getters.getActiveSheetId();
     const chartId = model2.getters.getChartIds(sheetId)[0];
     expect(model2.getters.getChartDefinition(chartId).actionXmlId).toBe("test.my_action");
+});
+
+test("Show values is taken into account in the runtime", async () => {
+    const { model } = await createSpreadsheetWithChart({ type: "odoo_bar" });
+    const sheetId = model.getters.getActiveSheetId();
+    const chartId = model.getters.getChartIds(sheetId)[0];
+    const definition = model.getters.getChartDefinition(chartId);
+    model.dispatch("UPDATE_CHART", {
+        definition: {
+            ...definition,
+            showValues: true,
+        },
+        id: chartId,
+        sheetId,
+    });
+    const runtime = model.getters.getChartRuntime(chartId);
+    expect(runtime.chartJsConfig.options.plugins.chartShowValuesPlugin.showValues).toBe(true);
 });

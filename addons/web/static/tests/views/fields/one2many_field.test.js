@@ -5,7 +5,6 @@ import {
     queryAll,
     queryAllTexts,
     queryFirst,
-    queryLast,
     queryOne,
 } from "@odoo/hoot-dom";
 import { Deferred, animationFrame, mockTimeZone, runAllTimers } from "@odoo/hoot-mock";
@@ -403,7 +402,7 @@ test("O2M List with pager, decoration and default_order: add and cancel adding",
     });
 
     // Cancel Creation
-    press("escape");
+    await press("escape");
     await animationFrame();
     expect(".o_field_x2many_list .o_data_row").toHaveCount(1);
 });
@@ -681,7 +680,7 @@ test("one2many list editable with cell readonly modifier", async () => {
     });
 
     // Simulating a TAB key
-    press("Tab");
+    await press("Tab");
     await animationFrame();
     await contains(".o_selected_row [name=qux] input").edit(9, { confirm: false });
     await contains(".o_selected_row [name=qux] input").edit(99);
@@ -2297,7 +2296,7 @@ test("one2many field when using the pager", async () => {
                 <field name="p">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name"/>
                             </t>
                         </templates>
@@ -2394,7 +2393,7 @@ test("edition of one2many field with pager", async () => {
                 <field name="p">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <div>
                                     <a t-if="!read_only_mode" type="delete" class="fa fa-times float-end delete_icon"/>
                                     <field name="name"/>
@@ -2529,7 +2528,7 @@ test.tags("desktop")("edition of one2many field with pager on desktop", async ()
                 <field name="p">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <div>
                                     <a t-if="!read_only_mode" type="delete" class="fa fa-times float-end delete_icon"/>
                                     <field name="name"/>
@@ -2609,7 +2608,7 @@ test("When viewing one2many records in an embedded kanban, the delete button sho
                 <field name="turtles">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <h3>Record 1</h3>
                             </t>
                         </templates>
@@ -2640,7 +2639,7 @@ test("open a record in a one2many kanban (mode 'readonly')", async () => {
                 <field name="turtles">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name"/>
                             </t>
                         </templates>
@@ -2673,7 +2672,7 @@ test("open a record in a one2many kanban (mode 'edit')", async () => {
                 <field name="turtles">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name"/>
                             </t>
                         </templates>
@@ -2756,7 +2755,7 @@ test("open a record in a one2many kanban with an x2m in the form", async () => {
                 <field name="p">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name"/>
                             </t>
                         </templates>
@@ -2798,7 +2797,7 @@ test("one2many in kanban: add a line custom control create editable", async () =
                             <create string="Add pasta" context="{'default_name': 'pasta'}"/>
                         </control>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name"/>
                             </t>
                         </templates>
@@ -2850,7 +2849,7 @@ test("one2many in kanban: add a line custom control create editable (2)", async 
                             <button string="Action Button" name="do_something" type="object" context="{'parent_id': parent.id}"/>
                         </control>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name"/>
                             </t>
                         </templates>
@@ -3373,7 +3372,7 @@ test("one2many kanban: edition", async () => {
                 <field name="p">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <div>
                                     <a t-if="!read_only_mode" type="delete" class="fa fa-times float-end delete_icon"/>
                                     <field name="name"/>
@@ -3448,7 +3447,7 @@ test("one2many kanban (editable): properly handle add-label node attribute", asy
                 <field name="turtles" add-label="Add turtle" mode="kanban">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name"/>
                             </t>
                         </templates>
@@ -3475,7 +3474,7 @@ test("one2many kanban: create action disabled", async () => {
                 <field name="p">
                     <kanban create="0">
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <div>
                                     <a t-if="!read_only_mode" type="delete" class="fa fa-times float-end delete_icon"/>
                                     <field name="name"/>
@@ -3504,7 +3503,7 @@ test("one2many kanban: conditional create/delete actions", async () => {
                 <field name="p" options="{'create': [('bar', '=', True)], 'delete': [('bar', '=', True)]}">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name"/>
                             </t>
                         </templates>
@@ -3735,7 +3734,7 @@ test.tags("desktop")("one2many list (editable): edition, part 4", async () => {
 
     // add a value in the turtle_trululu field to trigger an onchange
     await clickFieldDropdown("turtle_trululu");
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     expect(".o_data_row textarea").toHaveValue("Some Description");
 });
@@ -4145,7 +4144,7 @@ test("pressing enter in a o2m with a required empty field", async () => {
 
     // edit mode, then click on Add an item, then press enter
     await contains(".o_field_x2many_list_row_add a").click();
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     expect('div[name="turtle_foo"]').toHaveClass("o_field_invalid");
     expect.verifySteps(["get_views", "web_read", "onchange"]);
@@ -4171,19 +4170,19 @@ test("pressing enter several times in a one2many", async () => {
     expect(".o_data_row:eq(0)").toHaveClass("o_selected_row");
 
     await contains("[name='turtle_foo'] input").edit("a", { confirm: false });
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     expect(".o_data_row").toHaveCount(2);
     expect(".o_data_row:eq(1)").toHaveClass("o_selected_row");
 
     await contains("[name='turtle_foo'] input").edit("a", { confirm: false });
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     expect(".o_data_row").toHaveCount(3);
     expect(".o_data_row:eq(2)").toHaveClass("o_selected_row");
 
     // this is a weird case, but there's no required fields, so the record is already valid, we can press Enter directly.
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     expect(".o_data_row").toHaveCount(4);
     expect(".o_data_row:eq(3)").toHaveClass("o_selected_row");
@@ -4208,7 +4207,7 @@ test("creating a new line in an o2m with an handle field does not focus the hand
     await contains(".o_field_x2many_list_row_add a").click();
     expect("[name='turtle_foo'] input").toBeFocused();
 
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     expect("[name='turtle_foo'] input").toBeFocused();
 });
@@ -4282,7 +4281,7 @@ test("editable o2m, pressing ESC discard current changes", async () => {
     await contains(".o_field_x2many_list_row_add a").click();
     expect("tr.o_data_row").toHaveCount(1);
 
-    press("Escape");
+    await press("Escape");
     await animationFrame();
     expect("tr.o_data_row").toHaveCount(0);
     expect.verifySteps(["get_views", "web_read", "onchange"]);
@@ -4310,7 +4309,7 @@ test("editable o2m with required field, pressing ESC discard current changes", a
     await contains(".o_field_x2many_list_row_add a").click();
     expect("tr.o_data_row").toHaveCount(1);
 
-    press("Escape");
+    await press("Escape");
     await animationFrame();
     expect("tr.o_data_row").toHaveCount(0);
     expect.verifySteps(["get_views", "web_read", "onchange"]);
@@ -4347,7 +4346,7 @@ test("pressing escape in editable o2m list in dialog", async () => {
 
     expect(".modal .o_data_row.o_selected_row").toHaveCount(1);
 
-    press("Escape");
+    await press("Escape");
     await animationFrame();
     expect(".modal").toHaveCount(1);
     expect(".modal .o_data_row").toHaveCount(0);
@@ -4893,7 +4892,7 @@ test.tags("desktop")("one2many list with inline form view", async () => {
 
     // write in the many2one field, value = 37 (xphone)
     await clickFieldDropdown("product_id");
-    press("Enter");
+    await press("Enter");
     await animationFrame();
 
     // write in the integer field
@@ -5333,7 +5332,7 @@ test.tags("desktop")("one2many with many2many widget: create", async () => {
     });
     await contains('.modal .o_field_widget[name="turtle_int"] input').edit(50, { confirm: false });
     await clickFieldDropdown("product_id");
-    press("Enter");
+    await press("Enter");
     await animationFrame();
 
     await contains(".modal-footer button").click();
@@ -5420,7 +5419,7 @@ test.tags("desktop")("one2many with many2many widget: edition", async () => {
     // edit the first one2many record
     await contains(".o_data_cell:eq(0)").click();
     await clickFieldDropdown("product_id");
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     await contains(".modal .o_form_button_save").click();
 
@@ -5433,7 +5432,7 @@ test.tags("desktop")("one2many with many2many widget: edition", async () => {
     // edit the second one2many record
     await contains(".o_data_row:eq(1) .o_data_cell:eq(0)").click();
     await clickFieldDropdown("product_id");
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     await contains(".modal .modal-footer button:first:eq(0)").click();
 
@@ -5716,7 +5715,7 @@ test("one2many kanban with action button", async () => {
                 <field name="p">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="foo"/>
                                 <button name="method_name" type="object" class="fa fa-plus"/>
                             </t>
@@ -5727,7 +5726,7 @@ test("one2many kanban with action button", async () => {
         resId: 1,
     });
 
-    await contains(".oe_kanban_action_button").click();
+    await contains("button.oe_kanban_action").click();
 });
 
 test("one2many without inline tree arch", async () => {
@@ -6413,7 +6412,7 @@ test("one2many field with virtual ids", async () => {
                                 <field name="p" mode="kanban">
                                     <kanban>
                                         <templates>
-                                            <t t-name="kanban-card">
+                                            <t t-name="card">
                                                 <field name="id" class="o_test_id"/>
                                                 <field name="foo" class="o_test_foo"/>
                                             </t>
@@ -6504,7 +6503,7 @@ test("one2many field with virtual ids with kanban button", async () => {
                 <field name="p" mode="kanban">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="foo"/>
                                 <button type="object" class="btn btn-link fa fa-shopping-cart" name="button_warn" string="button_warn" warn="warn" />
                                 <button type="object" class="btn btn-link fa fa-shopping-cart" name="button_disabled" string="button_disabled" />
@@ -6634,7 +6633,7 @@ test("focusing fields in one2many list", async () => {
     await contains(".o_data_row td").click();
     expect('[name="turtle_foo"] input').toBeFocused();
 
-    press("Tab");
+    await press("Tab");
     await animationFrame();
     expect('[name="turtle_int"] input').toBeFocused();
 });
@@ -6801,7 +6800,7 @@ test('x2many fields use their "mode" attribute', async () => {
                         </list>
                         <kanban>
                             <templates>
-                                <t t-name="kanban-card">
+                                <t t-name="card">
                                     <field name="turtle_int"/>
                                 </t>
                             </templates>
@@ -7030,7 +7029,7 @@ test.tags("desktop")("one2many list editable: add new line before onchange retur
     def = new Deferred();
     expect(".o_data_row").toHaveCount(1);
     await clickFieldDropdown("turtle_trululu");
-    press("Enter");
+    await press("Enter");
     await animationFrame();
 
     // try to add a second line and check that it is correctly waiting
@@ -7595,7 +7594,7 @@ test("editing tabbed one2many (editable=bottom)", async () => {
     });
     await contains(".o_field_x2many_list_row_add a").click();
     expect("tr.o_data_row").toHaveCount(41);
-    expect(queryLast("tr.o_data_row")).toHaveClass("o_selected_row");
+    expect("tr.o_data_row:last").toHaveClass("o_selected_row");
 
     await contains('.o_data_row [name="turtle_foo"] input').edit("rainbow dash", {
         confirm: false,
@@ -7766,7 +7765,7 @@ test.tags("desktop")("focus is correctly reset after an onchange in an x2many", 
     expect(".o_field_widget[name=qux] input").toBeFocused();
 
     await clickFieldDropdown("trululu");
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     expect(".o_field_widget[name=trululu] input").toHaveValue("first record");
 });
@@ -8736,7 +8735,7 @@ test("o2m add a line custom control create editable", async () => {
         '.o_field_widget[name="p"] .o_selected_row .o_field_widget[name="name"] input'
     ).toBeFocused();
 
-    press("Enter");
+    await press("Enter");
     await animationFrame();
     expect(queryAllTexts(".o_data_cell")).toEqual(["", "pizza", ""]);
 
@@ -9058,7 +9057,7 @@ test.tags("desktop")("create and edit on m2o in o2m, and press ESCAPE", async ()
 
     expect(".modal .o_form_view").toHaveCount(1);
 
-    press("Escape");
+    await press("Escape");
     await animationFrame();
 
     expect(".modal .o_form_view").toHaveCount(0);
@@ -9066,19 +9065,21 @@ test.tags("desktop")("create and edit on m2o in o2m, and press ESCAPE", async ()
     expect(".o_selected_row [name=turtle_trululu] input").toBeFocused();
 });
 
-test("one2many add a line should not crash if orderedResIDs is not set", async () => {
-    mockService("action", {
-        doActionButton(args) {
-            return Promise.reject();
-        },
-    });
+test.tags("desktop")(
+    "one2many add a line should not crash if orderedResIDs is not set on desktop",
+    async () => {
+        mockService("action", {
+            doActionButton(args) {
+                return Promise.reject();
+            },
+        });
 
-    Partner._records[0].turtles = [];
+        Partner._records[0].turtles = [];
 
-    await mountView({
-        type: "form",
-        resModel: "partner",
-        arch: `
+        await mountView({
+            type: "form",
+            resModel: "partner",
+            arch: `
             <form>
                 <header>
                     <button name="post" type="object" string="Validate" class="oe_highlight"/>
@@ -9089,12 +9090,47 @@ test("one2many add a line should not crash if orderedResIDs is not set", async (
                     </list>
                 </field>
             </form>`,
-    });
+        });
 
-    await contains('button[name="post"]').click();
-    await contains(".o_field_x2many_list_row_add a").click();
-    expect(".o_data_row.o_selected_row").toHaveCount(1);
-});
+        await contains('button[name="post"]').click();
+        await contains(".o_field_x2many_list_row_add a").click();
+        expect(".o_data_row.o_selected_row").toHaveCount(1);
+    }
+);
+
+test.tags("mobile")(
+    "one2many add a line should not crash if orderedResIDs is not set on mobile",
+    async () => {
+        mockService("action", {
+            doActionButton(args) {
+                return Promise.reject();
+            },
+        });
+
+        Partner._records[0].turtles = [];
+
+        await mountView({
+            type: "form",
+            resModel: "partner",
+            arch: `
+            <form>
+                <header>
+                    <button name="post" type="object" string="Validate" class="oe_highlight"/>
+                </header>
+                <field name="turtles">
+                    <list editable="bottom">
+                        <field name="turtle_foo"/>
+                    </list>
+                </field>
+            </form>`,
+        });
+
+        await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+        await contains('button[name="post"]').click();
+        await contains(".o_field_x2many_list_row_add a").click();
+        expect(".o_data_row.o_selected_row").toHaveCount(1);
+    }
+);
 
 test("one2many shortcut tab should not crash when there is no input widget", async () => {
     // create a one2many view which has no input (only 1 textarea in this case)
@@ -9123,7 +9159,7 @@ test("one2many shortcut tab should not crash when there is no input widget", asy
     await contains("[name=turtle_foo]:eq(2)").click();
 
     expect("[name=turtle_foo] textarea").toBeFocused();
-    press("tab");
+    await press("tab");
     await animationFrame();
 
     expect(queryAllTexts(".o_field_text")).toEqual(["blip", "ninja", ""]);
@@ -9163,7 +9199,7 @@ test("o2m add a line custom control create editable with 'tab'", async () => {
     await contains("[name=turtle_foo]").click();
     expect(".o_data_row").toHaveCount(1);
 
-    press("Tab");
+    await press("Tab");
     await animationFrame();
     expect(".o_data_row").toHaveCount(2);
     expect.verifySteps(["onchange"]);
@@ -9487,7 +9523,7 @@ test("field context is correctly passed to x2m subviews", async () => {
                 <field name="turtles" context="{'some_key': 1}">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <t t-if="context.some_key">
                                     <field name="turtle_foo"/>
                                 </t>
@@ -9523,7 +9559,7 @@ test.tags("desktop")("one2many kanban with widget handle", async () => {
                     <kanban>
                         <field name="turtle_int" widget="handle"/>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="turtle_foo"/>
                             </t>
                         </templates>
@@ -10893,9 +10929,9 @@ test("when Navigating to a one2many with tabs, the button add a line receives th
     await contains("[name=qux] input").click();
     expect("[name=qux] input").toBeFocused();
     // next tabable element is notebook tab
-    press("Tab");
+    await press("Tab");
     // go inside one2many
-    press("Tab");
+    await press("Tab");
     await animationFrame();
     expect(".o_field_x2many_list_row_add a").toBeFocused();
 });
@@ -10933,16 +10969,16 @@ test("Navigate to a one2many with tab then tab again focus the next field", asyn
     await contains("[name=qux] input").click();
     expect("[name=qux] input").toBeFocused();
     // next tabable element is notebook tab
-    press("Tab");
+    await press("Tab");
     // go inside one2many
-    press("Tab");
+    await press("Tab");
     await animationFrame();
 
     expect(".o_field_x2many_list_row_add a").toBeFocused();
     expect("[name=turtles] .o_selected_row").toHaveCount(0);
     // trigger Tab event and check that the default behavior can happen.
     expect(getNextFocusableElement()).toBe(queryOne("[name=foo] input"));
-    press("Tab");
+    await press("Tab");
     expect("[name=foo] input").toBeFocused();
 });
 
@@ -10979,9 +11015,9 @@ test("when Navigating to a one2many with tabs, not filling any field and hitting
     await contains("[name=qux] input").click();
     expect("[name=qux] input").toBeFocused();
     // next tabable element is notebook tab
-    press("Tab");
+    await press("Tab");
     // go inside one2many
-    press("Tab");
+    await press("Tab");
     await animationFrame();
 
     expect(".o_field_x2many_list_row_add a").toBeFocused();
@@ -10990,13 +11026,13 @@ test("when Navigating to a one2many with tabs, not filling any field and hitting
     await contains(".o_field_x2many_list_row_add a").click();
     expect("[name=turtle_foo] input").toBeFocused();
 
-    press("Tab"); // go to turtle_description field
+    await press("Tab"); // go to turtle_description field
     await animationFrame();
     expect("[name=turtle_description] textarea").toBeFocused();
 
     expect(getNextFocusableElement()).toBe(queryOne("[name=foo] input"));
     // trigger Tab event and check that the default behavior can happen.
-    press("Tab");
+    await press("Tab");
     expect("[name=foo] input").toBeFocused();
 });
 
@@ -11038,16 +11074,16 @@ test("when Navigating to a one2many with tabs, editing in a popup, the popup sho
     await contains("[name=qux] input").click();
     expect("[name=qux] input").toBeFocused();
     // next tabable element is notebook tab
-    press("Tab");
+    await press("Tab");
     // go inside one2many
-    press("Tab");
+    await press("Tab");
     await animationFrame();
     expect(".o_field_x2many_list_row_add a").toBeFocused();
 
     await contains(".o_field_x2many_list_row_add a").click();
     expect(".modal [name=turtle_foo] input").toBeFocused();
 
-    press("Escape");
+    await press("Escape");
     await animationFrame();
 
     expect(".modal").toHaveCount(0);
@@ -11090,11 +11126,16 @@ test.tags("desktop")(
             confirm: false,
         });
         await runAllTimers();
-        clickFieldDropdownItem("turtle_trululu", "Create and edit...");
 
-        press("Escape");
+        // Discard input value
+        press("Escape").then(() => {
+            // ... then discard record
+            press("Escape");
+        });
+        clickFieldDropdownItem("turtle_trululu", "Create and edit..."); // Open create modal
         await animationFrame();
         await animationFrame();
+
         expect(".modal").toHaveCount(0);
         expect(".o_selected_row").toHaveCount(0);
     }
@@ -11126,27 +11167,27 @@ test.tags("desktop")("navigating through an editable list with custom controls",
 
     // press tab to navigate to the list
     expect(getNextFocusableElement()).toBe(queryFirst(".o_field_x2many_list_row_add a"));
-    press("Tab");
+    await press("Tab");
 
     expect(".o_field_x2many_list_row_add a:eq(0)").toBeFocused();
 
     // press right to focus the second control
-    press("ArrowRight");
+    await press("ArrowRight");
     await animationFrame();
 
     expect(".o_field_x2many_list_row_add a:eq(1)").toBeFocused();
 
     // press left to come back to first control
-    press("ArrowLeft");
+    await press("ArrowLeft");
     await animationFrame();
 
     expect(".o_field_x2many_list_row_add a:eq(0)").toBeFocused();
     expect(getNextFocusableElement()).toBe(queryOne(".o_field_x2many_list_row_add a:eq(1)"));
-    press("Tab");
+    await press("Tab");
     expect(".o_field_x2many_list_row_add a:eq(1)").toBeFocused();
 
     expect(getNextFocusableElement()).toBe(queryOne("[name=int_field] input"));
-    press("Tab");
+    await press("Tab");
     expect("[name=int_field] input").toBeFocused();
 });
 
@@ -11166,7 +11207,7 @@ test("be able to press a key on the keyboard when focusing a column header witho
     });
     await contains(".o_data_row .o_data_cell").click();
     await contains(".o_list_renderer .o_column_sortable").click();
-    press("a");
+    await press("a");
     await animationFrame();
     expect(".o_data_row").toHaveCount(1);
 });
@@ -11195,7 +11236,7 @@ test("Navigate from an invalid but not dirty row", async () => {
     expect(".o_data_row.o_selected_row").toHaveCount(1);
     expect(".o_data_row:eq(0)").toHaveClass("o_selected_row");
 
-    press("Tab"); // navigate with "Tab" to the second row
+    await press("Tab"); // navigate with "Tab" to the second row
     await animationFrame();
 
     expect(".o_data_row.o_selected_row").toHaveCount(1);
@@ -11208,7 +11249,7 @@ test("Navigate from an invalid but not dirty row", async () => {
     expect(".o_data_row:eq(0)").toHaveClass("o_selected_row");
     expect(".o_invalid_cell").toHaveCount(0);
 
-    press("Enter"); // try to navigate with "Enter" to the second row
+    await press("Enter"); // try to navigate with "Enter" to the second row
     await animationFrame();
 
     expect(".o_data_row.o_selected_row").toHaveCount(1);
@@ -11262,7 +11303,7 @@ test.tags("desktop")("Check onchange with two consecutive one2one", async () => 
     });
 
     await clickFieldDropdown("turtle_trululu");
-    press("Enter");
+    await press("Enter");
     await animationFrame();
 
     expect(
@@ -11338,7 +11379,7 @@ test("open a one2many record containing a one2many", async () => {
     });
 
     expect.verifySteps([
-        "localStorage getItem pwa.installationState", // from install_prompt service
+        "localStorage getItem pwaService.installationState",
         "localStorage getItem optional_fields,partner,form,123456789,p,list,name",
         "localStorage getItem debug_open_view,partner,form,123456789,p,list,name",
     ]);
@@ -11395,7 +11436,7 @@ test("one2many can delete a new record", async () => {
                 <field name="p">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="foo"/>
                             </t>
                         </templates>
@@ -11834,7 +11875,7 @@ test("active actions are passed to o2m field", async () => {
 
     expect(".o_data_row:eq(2)").toHaveClass("o_selected_row");
 
-    press("Enter");
+    await press("Enter");
     await animationFrame();
 
     expect(".o_data_row").toHaveCount(3);
@@ -11857,7 +11898,7 @@ test("kanban one2many in opened view form", async () => {
                         <field name="p">
                             <kanban class="o-custom-class" can_open="0">
                                 <templates>
-                                    <t t-name="kanban-card">
+                                    <t t-name="card">
                                         <field name="name"/>
                                     </t>
                                 </templates>
@@ -11886,7 +11927,7 @@ test("kanban one2many in opened view form (with _view_ref)", async () => {
         [["kanban", 1234]]: /* xml */ `
             <kanban class="o-custom-class" can_open="0">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                     </t>
                 </templates>
@@ -11933,7 +11974,7 @@ test("kanban one2many (with widget) in opened view form", async () => {
                 <field name="p">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name" widget="char"/>
                             </t>
                         </templates>
@@ -12228,7 +12269,7 @@ test("pressing tab before an onchange is resolved", async () => {
     await contains(".o_field_widget[name='name'] input").edit("gold", { confirm: "blur" });
     await contains(".o_data_cell[name='name']").click(); // focus the input again
 
-    press("Tab");
+    await press("Tab");
     onchangeGetPromise.resolve();
     await animationFrame();
 
@@ -12742,7 +12783,7 @@ test("x2many kanban with float field in form (non inline) but not in kanban", as
                 <field name="turtles" invisible="not bar">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name"/>
                             </t>
                         </templates>
@@ -12936,12 +12977,12 @@ test.tags("desktop")("expand record in dialog", async () => {
     await contains("[name='name'] input").edit("new turtle");
     await contains(".o_dialog .o_form_button_save").click();
     expect(".o_field_widget[name=turtles] .o_data_row").toHaveCount(2);
-    await contains(queryLast(".o_field_widget[name=turtles] .o_data_cell")).click();
+    await contains(".o_field_widget[name=turtles] .o_data_cell:last").click();
     expect(".o_dialog .o_form_view").toHaveCount(1);
     expect(".o_dialog .modal-header .o_expand_button").toHaveCount(0);
     await contains(".o_dialog .modal-header .btn-close").click();
     await clickSave();
-    await contains(queryLast(".o_field_widget[name=turtles] .o_data_cell")).click();
+    await contains(".o_field_widget[name=turtles] .o_data_cell:last").click();
     expect(".o_dialog .o_form_view").toHaveCount(1);
     expect(".o_dialog .modal-header .o_expand_button").toHaveCount(1);
     await contains(".o_dialog .modal-header .o_expand_button").click();

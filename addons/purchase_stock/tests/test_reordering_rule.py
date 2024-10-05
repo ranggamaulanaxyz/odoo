@@ -3,11 +3,13 @@
 
 from datetime import datetime as dt, time
 from datetime import timedelta as td
+from json import loads
 
 from odoo import SUPERUSER_ID, Command
 from odoo.fields import Date
 from odoo.tests import Form, tagged, freeze_time
 from odoo.tests.common import TransactionCase
+from odoo.tools import format_date
 from odoo.tools.date_utils import add
 from odoo.exceptions import UserError, ValidationError
 
@@ -36,6 +38,9 @@ class TestReorderingRule(TransactionCase):
         """
             - Receive products in 2 steps
             - The product has a reordering rule
+            - Manually create and confirm a PO => the forecast should be updated
+            - Cancel the PO => the forecast should be updated
+            - Create a picking that automatically generates another PO
             - On the po generated, the source document should be the name of the reordering rule
             - Increase the quantity on the RFQ, the extra quantity should follow the push rules
             - Increase the quantity on the PO, the extra quantity should follow the push rules
@@ -61,6 +66,23 @@ class TestReorderingRule(TransactionCase):
         orderpoint_form.product_min_qty = 0.000
         orderpoint_form.product_max_qty = 0.000
         order_point = orderpoint_form.save()
+
+        # Manually create a PO, and check orderpoint forecast
+        manual_po = self.env['purchase.order'].create({
+            'name': 'Manual PO',
+            'partner_id': self.partner.id,
+            'order_line': [Command.create({
+                'product_id': self.product_01.id,
+                'product_qty': 10,
+            })],
+        })
+
+        manual_po.button_confirm()
+        self.assertEqual(order_point.qty_forecast, 10)
+
+        manual_po.button_cancel()
+        self.assertEqual(order_point.qty_forecast, 0)
+
         # Create Delivery Order of 10 product
         picking_form = Form(self.env['stock.picking'])
         picking_form.partner_id = self.partner
@@ -74,7 +96,7 @@ class TestReorderingRule(TransactionCase):
         self.env['procurement.group'].run_scheduler()
 
         # Check purchase order created or not
-        purchase_order = self.env['purchase.order'].search([('partner_id', '=', self.partner.id)])
+        purchase_order = self.env['purchase.order'].search([('partner_id', '=', self.partner.id), ('state', '!=', 'cancel')])
         self.assertTrue(purchase_order, 'No purchase order created.')
         # Check the picking type on the purchase order
         purchase_order.picking_type_id = warehouse_2.in_type_id
@@ -1033,6 +1055,67 @@ class TestReorderingRule(TransactionCase):
         self.product_01.virtual_available = -1
         self.assertEqual(op.qty_to_order, 2, 'sale order is ignored')
 
+    def test_reordering_rule_visibility_days_display(self):
+        """ Checks that the visibility days are properly shown on the info wizard & the orderpoint forecast.
+        """
+        today = dt.today()
+        warehouse = self.env['stock.warehouse'].search([('company_id', '=', self.env.user.id)], limit=1)
+        orderpoint = self.env['stock.warehouse.orderpoint'].create({
+            'warehouse_id': warehouse.id,
+            'location_id': warehouse.lot_stock_id.id,
+            'product_id': self.product_01.id,
+            'product_min_qty': 0,
+            'product_max_qty': 0,
+            'visibility_days': 5,
+        })
+
+        # Out move in 5 days
+        out_5_days = self.env['stock.move'].create({
+            'name': '5 days',
+            'product_id': self.product_01.id,
+            'product_uom_qty': 5,
+            'location_id': warehouse.lot_stock_id.id,
+            'picking_type_id': warehouse.out_type_id.id,
+            'date': today + td(days=5),
+        })
+        out_5_days._action_confirm()
+
+        # Visibility days should be ignored if nothing is found within lead times (today + 1 day)
+        replenishment_info = loads(self.env['stock.replenishment.info'].create({'orderpoint_id': orderpoint.id}).json_lead_days)
+        self.assertEqual(replenishment_info['lead_days_date'], format_date(orderpoint.env, today + td(days=1)))
+        self.assertEqual(float(replenishment_info['qty_to_order']), 0)
+        self.assertEqual(replenishment_info['visibility_days'], 0)
+        # Extra lines for forecast are given through its context
+        context = orderpoint.action_product_forecast_report()['context']
+        self.assertEqual(context['qty_to_order'], 0)
+        self.assertEqual(context['lead_days_date'], format_date(orderpoint.env, today + td(days=1)))
+        self.assertEqual(context['qty_to_order_with_visibility_days'], 0)
+
+        # Out move today
+        out_today = self.env['stock.move'].create({
+            'name': 'today',
+            'product_id': self.product_01.id,
+            'product_uom_qty': 3,
+            'location_id': warehouse.lot_stock_id.id,
+            'picking_type_id': warehouse.out_type_id.id,
+            'partner_id': self.partner.id,  # Avoids the two moves being merged
+            'date': today,
+        })
+        out_today._action_confirm()
+
+        # Visibility days should be used something is found within lead times
+        replenishment_info = loads(self.env['stock.replenishment.info'].create({'orderpoint_id': orderpoint.id}).json_lead_days)
+        self.assertEqual(replenishment_info['lead_days_date'], format_date(orderpoint.env, today + td(days=1)))
+        self.assertEqual(float(replenishment_info['qty_to_order']), 8)
+        self.assertEqual(replenishment_info['visibility_days'], 5)
+        self.assertEqual(replenishment_info['visibility_days_date'], format_date(orderpoint.env, today + td(days=1) + td(days=5)))
+        # Extra lines for forecast are given through its context
+        context = orderpoint.action_product_forecast_report()['context']
+        self.assertEqual(context['qty_to_order'], 3)
+        self.assertEqual(context['lead_days_date'], format_date(orderpoint.env, today + td(days=1)))
+        self.assertEqual(context['qty_to_order_with_visibility_days'], 8)
+        self.assertEqual(context['visibility_days_date'], format_date(orderpoint.env, today + td(days=1) + td(days=5)))
+
     def test_update_po_line_without_purchase_access_right(self):
         """ Test that a user without purchase access right can update a PO line from picking."""
         # create a user with only inventory access right
@@ -1173,3 +1256,49 @@ class TestReorderingRule(TransactionCase):
         })
         with self.assertRaises(UserError):
             orderpoint.snoozed_until = add(Date.today(), days=1)
+
+    def test_supplierinfo_last_purchase_date(self):
+        """
+        Test that the last_purchase_date on the replenishment information is correctly computed
+        A user creates two purchase orders
+        The last_purchase_date on the supplier info should be computed as the most recent date_order from the purchase orders
+        """
+        res_partner = self.env['res.partner'].create({
+            'name': 'Test Partner',
+        })
+        product = self.env['product.product'].create({
+            'name': 'Storable Product',
+            'is_storable': True,
+        })
+        orderpoint = self.env['stock.warehouse.orderpoint'].create({
+            'product_id': product.id,
+            'product_min_qty': 0,
+            'product_max_qty': 0,
+        })
+        po1_vals = {
+            'partner_id': res_partner.id,
+            'date_order': dt.today() - td(days=15),
+            'order_line': [
+                (0, 0, {
+                    'name': product.name,
+                    'product_id': product.id,
+                    'product_qty': 1.0,
+                })],
+        }
+        po2_vals = {
+            'partner_id': res_partner.id,
+            'date_order': dt.today(),
+            'order_line': [
+                (0, 0, {
+                    'name': product.name,
+                    'product_id': product.id,
+                    'product_qty': 1.0,
+                })],
+        }
+        po1 = self.env['purchase.order'].create(po1_vals)
+        po1.button_confirm()
+        po2 = self.env['purchase.order'].create(po2_vals)
+        po2.button_confirm()
+        replenishment_info = self.env['stock.replenishment.info'].create({'orderpoint_id': orderpoint.id})
+        supplier_info = replenishment_info.supplierinfo_ids
+        self.assertEqual(supplier_info.last_purchase_date, dt.today().date(), "The last_purhchase_date should be set to the most recent date_order from the purchase orders")

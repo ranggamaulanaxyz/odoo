@@ -1,6 +1,7 @@
 import { Plugin } from "@html_editor/plugin";
-import { isBlock } from "@html_editor/utils/blocks";
+import { isBlock, closestBlock } from "@html_editor/utils/blocks";
 import { fillEmpty } from "@html_editor/utils/dom";
+import { leftLeafOnlyNotBlockPath } from "@html_editor/utils/dom_state";
 import { isVisibleTextNode } from "@html_editor/utils/dom_info";
 import {
     closestElement,
@@ -16,7 +17,7 @@ import { DIRECTIONS } from "@html_editor/utils/position";
 import { _t } from "@web/core/l10n/translation";
 import { FontSelector } from "./font_selector";
 
-const fontItems = [
+export const fontItems = [
     {
         name: _t("Header 1 Display 1"),
         tagName: "h1",
@@ -102,6 +103,7 @@ export class FontPlugin extends Plugin {
             { callback: p.handleSplitBlockPRE.bind(p) },
             { callback: p.handleSplitBlockHeading.bind(p) },
         ],
+        onInput: { handler: p.onInput.bind(p) },
         handle_delete_backward: { callback: p.handleDeleteBackward.bind(p), sequence: 20 },
         handle_delete_backward_word: { callback: p.handleDeleteBackward.bind(p), sequence: 20 },
         toolbarCategory: [
@@ -192,15 +194,15 @@ export class FontPlugin extends Plugin {
                 },
             },
         ],
-        emptyBlockHints: [
-            { selector: "H1", hint: _t("Heading 1") },
-            { selector: "H2", hint: _t("Heading 2") },
-            { selector: "H3", hint: _t("Heading 3") },
-            { selector: "H4", hint: _t("Heading 4") },
-            { selector: "H5", hint: _t("Heading 5") },
-            { selector: "H6", hint: _t("Heading 6") },
-            { selector: "PRE", hint: _t("Code") },
-            { selector: "BLOCKQUOTE", hint: _t("Quote") },
+        hints: [
+            { selector: "H1", text: _t("Heading 1") },
+            { selector: "H2", text: _t("Heading 2") },
+            { selector: "H3", text: _t("Heading 3") },
+            { selector: "H4", text: _t("Heading 4") },
+            { selector: "H5", text: _t("Heading 5") },
+            { selector: "H6", text: _t("Heading 6") },
+            { selector: "PRE", text: _t("Code") },
+            { selector: "BLOCKQUOTE", text: _t("Quote") },
         ],
     });
 
@@ -306,5 +308,37 @@ export class FontPlugin extends Plugin {
         closestHandledElement.remove();
         this.shared.setCursorStart(p);
         return true;
+    }
+
+    onInput(ev) {
+        if (ev.data !== " ") {
+            return;
+        }
+        const selection = this.shared.getEditableSelection();
+        const blockEl = closestBlock(selection.anchorNode);
+        const leftDOMPath = leftLeafOnlyNotBlockPath(selection.anchorNode);
+        let spaceOffset = selection.anchorOffset;
+        let leftLeaf = leftDOMPath.next().value;
+        while (leftLeaf) {
+            // Calculate spaceOffset by adding lengths of previous text nodes
+            // to correctly find offset position for selection within inline
+            // elements. e.g. <p>ab<strong>cd []e</strong></p>
+            spaceOffset += leftLeaf.length;
+            leftLeaf = leftDOMPath.next().value;
+        }
+        const precedingText = blockEl.textContent.substring(0, spaceOffset);
+        if (/^(#{1,6})\s$/.test(precedingText)) {
+            const numberOfHash = precedingText.length - 1;
+            const headingToBe = headingTags[numberOfHash - 1];
+            this.shared.setSelection({
+                anchorNode: blockEl.firstChild,
+                anchorOffset: 0,
+                focusNode: selection.focusNode,
+                focusOffset: selection.focusOffset,
+            });
+            this.shared.extractContent(this.shared.getEditableSelection());
+            fillEmpty(blockEl);
+            this.dispatch("SET_TAG", { tagName: headingToBe });
+        }
     }
 }

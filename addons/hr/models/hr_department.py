@@ -8,7 +8,7 @@ from odoo.exceptions import ValidationError
 class Department(models.Model):
     _name = "hr.department"
     _description = "Department"
-    _inherit = ['mail.thread']
+    _inherit = ['mail.thread', 'mail.activity.mixin']
     _order = "name"
     _rec_name = 'complete_name'
     _parent_store = True
@@ -161,7 +161,7 @@ class Department(models.Model):
             'name': _("Employees"),
             'type': 'ir.actions.act_window',
             'res_model': res_model,
-            'view_mode': 'tree,kanban,form',
+            'view_mode': 'list,kanban,form',
             'search_view_id': [search_view_id, 'search'],
             'context': {
                 'searchpanel_default_department_id': self.id,

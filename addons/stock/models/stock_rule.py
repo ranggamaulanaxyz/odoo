@@ -387,7 +387,7 @@ class StockRule(models.Model):
         delays = defaultdict(float)
         delay = sum(self.filtered(lambda r: r.action in ['pull', 'pull_push']).mapped('delay'))
         delays['total_delay'] += delay
-        global_visibility_days = self.env['ir.config_parameter'].sudo().get_param('stock.visibility_days')
+        global_visibility_days = self.env.context.get('global_visibility_days', 0)
         if global_visibility_days:
             delays['total_delay'] += int(global_visibility_days)
         if self.env.context.get('bypass_delay_description'):
@@ -399,7 +399,7 @@ class StockRule(models.Model):
                 if rule.action in ['pull', 'pull_push'] and rule.delay
             ]
         if global_visibility_days:
-            delay_description.append((_('Global Visibility Days'), _('+ %d day(s)', int(global_visibility_days))))
+            delay_description.append((_('Time Horizon'), _('+ %d day(s)', int(global_visibility_days))))
         return delays, delay_description
 
 
@@ -564,6 +564,20 @@ class ProcurementGroup(models.Model):
             domain_company = ['|', ('company_id', '=', False), ('company_id', 'child_of', list(company_ids))]
             domain = expression.AND([domain, domain_company])
         return domain
+
+    @api.model
+    def _get_push_rule(self, product_id, location_dest_id, values):
+        """ Find a push rule for the location_dest_id, with a fallback to the parent locations if none could be found.
+        """
+        found_rule = self.env['stock.rule']
+        location = location_dest_id
+        while (not found_rule) and location:
+            domain = [('location_src_id', '=', location.id), ('action', 'in', ('push', 'pull_push'))]
+            if values.get('domain'):
+                domain = expression.AND([domain, values['domain']])
+            found_rule = self._search_rule(values.get('route_ids'), values.get('product_packaging_id'), product_id, values.get('warehouse_id'), domain)
+            location = location.location_id
+        return found_rule
 
     @api.model
     def _get_moves_to_assign_domain(self, company_id):

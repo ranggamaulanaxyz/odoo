@@ -34,7 +34,7 @@ class TestTax(TestTaxCommon):
 
     def test_forced_price_exclude_context_key(self):
         """ Test the 'force_price_include' context key that force all taxes to act as price excluded taxes. """
-        taxes = (self.percent_tax(10.0, price_include=True) + self.percent_tax(10.0, price_include=True))\
+        taxes = (self.percent_tax(10.0, price_include_override='tax_included') + self.percent_tax(10.0, price_include_override='tax_included'))\
             .with_context({'force_price_include': False})
         self._check_compute_all_results(
             taxes,
@@ -49,125 +49,6 @@ class TestTax(TestTaxCommon):
             100.0,
         )
 
-    def test_tax_repartition_lines_intracomm_tax(self):
-        ''' Test usage of intracomm taxes having e.g.+100%, -100% as repartition lines.'''
-        common_values = {
-            'invoice_repartition_line_ids': [
-                Command.create({'repartition_type': 'base', 'factor_percent': 100.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 100.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': -100.0}),
-            ],
-            'refund_repartition_line_ids': [
-                Command.create({'repartition_type': 'base', 'factor_percent': 100.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 100.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': -100.0}),
-            ],
-        }
-        tax_price_excluded = self.percent_tax(21.0, **common_values)
-        tax_price_included = self.percent_tax(21.0, price_include=True, **common_values)
-
-        for tax, price_unit in ((tax_price_included, 121.0), (tax_price_excluded, 100.0)):
-            for sign in (1, -1):
-                with self.subTest(sign=sign, price_include=tax.price_include):
-                    self._check_compute_all_results(
-                        tax,
-                        {
-                            'total_included': sign * 121.0,
-                            'total_excluded': sign * 100.0,
-                            'taxes': (
-                                (sign * 100.0, sign * 21.0),
-                                (sign * 100.0, -sign * 21.0),
-                            ),
-                        },
-                        sign * price_unit,
-                    )
-
-    def test_tax_repartition_lines_dispatch_amount_1(self):
-        ''' Ensure the tax amount is well dispatched to the repartition lines and the rounding errors are well managed. '''
-        tax = self.percent_tax(
-            3.0,
-            invoice_repartition_line_ids=[
-                Command.create({'repartition_type': 'base', 'factor_percent': 100.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-            ],
-            refund_repartition_line_ids=[
-                Command.create({'repartition_type': 'base', 'factor_percent': 100.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-            ],
-        )
-
-        for sign in (1, -1):
-            with self.subTest(sign=sign):
-                self._check_compute_all_results(
-                    tax,
-                    {
-                        'total_included': sign * 1.03,
-                        'total_excluded': sign * 1.0,
-                        'taxes': (
-                            (sign * 1.0, sign * 0.01),
-                            (sign * 1.0, sign * 0.01),
-                            (sign * 1.0, sign * 0.01),
-                            (sign * 1.0, sign * 0.02),
-                            (sign * 1.0, sign * 0.02),
-                            (sign * 1.0, sign * 0.02),
-                        ),
-                    },
-                    sign * 1.0,
-                )
-
-    def test_tax_repartition_lines_dispatch_amount_2(self):
-        ''' Ensure the tax amount is well dispatched to the repartition lines and the rounding errors are well managed. '''
-        tax = self.percent_tax(
-            3.0,
-            invoice_repartition_line_ids=[
-                Command.create({'repartition_type': 'base', 'factor_percent': 100.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': -50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 25.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 25.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': -25.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': -25.0}),
-            ],
-            refund_repartition_line_ids=[
-                Command.create({'repartition_type': 'base', 'factor_percent': 100.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': -50.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 25.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': 25.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': -25.0}),
-                Command.create({'repartition_type': 'tax', 'factor_percent': -25.0}),
-            ],
-        )
-
-        for sign in (1, -1):
-            with self.subTest(sign=sign):
-                self._check_compute_all_results(
-                    tax,
-                    {
-                        'total_included': sign * 1.03,
-                        'total_excluded': sign * 1.0,
-                        'taxes': (
-                            (sign * 1.0, sign * 0.02),
-                            (sign * 1.0, sign * -0.02),
-                            (sign * 1.0, sign * 0.01),
-                            (sign * 1.0, sign * 0.01),
-                            (sign * 1.0, sign * -0.01),
-                            (sign * 1.0, sign * -0.01),
-                        ),
-                    },
-                    sign * 1.0,
-                )
-
     def test_parse_name_search(self):
         list_ten_fixed_tax = self.env["account.tax"]
         ten_fixed_tax = self.env["account.tax"].create(
@@ -179,15 +60,46 @@ class TestTax(TestTaxCommon):
         )
         list_ten_fixed_tax |= ten_fixed_tax_tix
 
-        self.assertListEqual(
-            [x[0] for x in self.env["account.tax"].name_search("tix")],
-            list_ten_fixed_tax.ids,
+        self.assertEqual(
+            self.env["account.tax"].search([("name", "ilike", "tix")]),
+            list_ten_fixed_tax,
         )
-        self.assertListEqual(
-            [x[0] for x in self.env["account.tax"].name_search("\"tix\"")],
-            ten_fixed_tax_tix.ids,
+        self.assertEqual(
+            self.env["account.tax"].search([("name", "ilike", "\"tix\"")]),
+            ten_fixed_tax_tix,
         )
-        self.assertListEqual(
-            [x[0] for x in self.env["account.tax"].name_search("Ten \"tix\"")],
-            ten_fixed_tax_tix.ids,
+        self.assertEqual(
+            self.env["account.tax"].search([("name", "ilike", "Ten \"tix\"")]),
+            ten_fixed_tax_tix,
+        )
+
+    def test_repartition_line_in(self):
+        tax = self.env['account.tax'].create({
+            'name': 'tax20',
+            'amount_type': 'percent',
+            'amount': 20,
+            'type_tax_use': 'none',
+            'invoice_repartition_line_ids': [
+                Command.create({'repartition_type': 'base', 'factor_percent': 100.0}),
+                Command.create({'repartition_type': 'tax', 'factor_percent': 100.0}),
+                Command.create({'repartition_type': 'tax', 'factor_percent': -100.0}),
+            ],
+            'refund_repartition_line_ids': [
+                Command.create({'repartition_type': 'base', 'factor_percent': 100.0}),
+                Command.create({'repartition_type': 'tax', 'factor_percent': 100.0}),
+                Command.create({'repartition_type': 'tax', 'factor_percent': -100.0}),
+            ],
+        })
+        self.env.company.country_id = self.env.ref('base.in')
+        self._check_compute_all_results(
+            tax,
+            {
+                'total_included': 1000,
+                'total_excluded': 1000,
+                'taxes': (
+                    (1000, 200.0),
+                    (1000, -200.0),
+                ),
+            },
+            1000.0,
         )

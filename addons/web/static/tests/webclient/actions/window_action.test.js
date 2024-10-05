@@ -93,7 +93,7 @@ class Partner extends models.Model {
         "kanban,1": `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo"/>
                     </t>
                 </templates>
@@ -317,7 +317,7 @@ test.tags("desktop")("switching into a view with mode=edit lands in edit mode", 
     Partner._views["kanban,1"] = `
         <kanban on_create="quick_create" default_group_by="m2o">
             <templates>
-                <t t-name="kanban-card">
+                <t t-name="card">
                     <field name="foo"/>
                 </t>
             </templates>
@@ -1004,7 +1004,7 @@ test("execute_action of type object raises error: re-enables buttons", async () 
     await contains(".o_form_button_save").click();
 
     // click on 'Execute action', to execute action 4 in a dialog
-    click('.o_form_view button[name="object"]');
+    await click('.o_form_view button[name="object"]');
     expect(".o_form_button_create").toHaveProperty("disabled", true);
     await animationFrame();
     expect(".o_form_button_create").not.toHaveProperty("disabled");
@@ -1027,7 +1027,7 @@ test("execute_action of type object raises error in modal: re-enables buttons", 
     await mountWithCleanup(WebClient);
     await getService("action").doAction(5);
     expect(".modal .o_form_view").toHaveCount(1);
-    click('.modal footer button[name="object"]');
+    await click('.modal footer button[name="object"]');
     expect(".modal .o_form_view").toHaveCount(1);
     expect(".modal footer button").toHaveProperty("disabled", true);
     await animationFrame();
@@ -2280,7 +2280,7 @@ test("do not pushState when target=new and dialog is opened", async () => {
     });
 });
 
-test("do not restore after action button clicked", async () => {
+test.tags("desktop")("do not restore after action button clicked on desktop", async () => {
     Partner._views["form,false"] = `
         <form>
             <header>
@@ -2303,14 +2303,38 @@ test("do not restore after action button clicked", async () => {
     expect(".o_form_buttons_view .o_form_button_save").not.toBeVisible();
 });
 
+test.tags("mobile")("do not restore after action button clicked on mobile", async () => {
+    Partner._views["form,false"] = `
+        <form>
+            <header>
+                <button name="do_something" string="Call button" type="object"/>
+            </header>
+            <sheet>
+                <field name="display_name"/>
+            </sheet>
+        </form>`;
+
+    onRpc("/web/dataset/call_button", () => true);
+
+    await mountWithCleanup(WebClient);
+    await getService("action").doAction(3, { viewType: "form", props: { resId: 1 } });
+    await contains("div[name='display_name'] input").edit("Edited value");
+    expect(".o_form_button_save").toBeVisible();
+    await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+    expect(".o_statusbar_button_dropdown_item button[name=do_something]").toBeVisible();
+
+    await contains(".o_statusbar_button_dropdown_item button[name=do_something]").click();
+    expect(".o_form_buttons_view .o_form_button_save").not.toBeVisible();
+});
+
 test("debugManager is active for views", async () => {
     serverState.debug = "1";
     onRpc("has_access", () => true);
     await mountWithCleanup(WebClient);
     await getService("action").doAction(1);
-    expect(".o-dropdown--menu .o-dropdown-item:contains('Edit View: Kanban')").toHaveCount(0);
+    expect(".o-dropdown--menu .o-dropdown-item:contains('View: Kanban')").toHaveCount(0);
     await contains(".o_debug_manager .dropdown-toggle").click();
-    expect(".o-dropdown--menu .o-dropdown-item:contains('Edit View: Kanban')").toHaveCount(1);
+    expect(".o-dropdown--menu .o-dropdown-item:contains('View: Kanban')").toHaveCount(1);
 });
 
 test.tags("desktop")("reload a view via the view switcher keep state", async () => {
@@ -2375,7 +2399,7 @@ test("doAction supports being passed globalState prop", async () => {
     });
 });
 
-test("window action in target new fails (onchange)", async () => {
+test.tags("desktop")("window action in target new fails (onchange) on desktop", async () => {
     expect.errors(1);
 
     onRpc("partner", "onchange", () => {
@@ -2385,7 +2409,7 @@ test("window action in target new fails (onchange)", async () => {
     Partner._views["form,74"] = /*xml*/ `
         <form>
             <header>
-                <button name="5" type="action"/>
+                <button name="5" string="Test" type="action"/>
             </header>
             <field name="display_name"/>
         </form>`;
@@ -2399,7 +2423,32 @@ test("window action in target new fails (onchange)", async () => {
     expect(".modal .modal-title").toHaveText("Validation Error");
 });
 
-test("Uncaught error in target new is catch only once", async () => {
+test.tags("mobile")("window action in target new fails (onchange) on mobile", async () => {
+    expect.errors(1);
+
+    onRpc("partner", "onchange", () => {
+        throw makeServerError({ type: "ValidationError" });
+    });
+
+    Partner._views["form,74"] = /*xml*/ `
+        <form>
+            <header>
+                <button name="5" string="Test" type="action"/>
+            </header>
+            <field name="display_name"/>
+        </form>`;
+
+    await mountWithCleanup(WebClient);
+    await getService("action").doAction(2);
+    await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+    await contains(".o_statusbar_button_dropdown_item button[name='5']").click();
+    await waitFor(".modal"); // errors are async
+    expect(".modal").toHaveCount(1);
+    expect(".modal .o_error_dialog").toHaveCount(1);
+    expect(".modal .modal-title").toHaveText("Validation Error");
+});
+
+test.tags("desktop")("Uncaught error in target new is catch only once on desktop", async () => {
     expect.errors(1);
 
     defineActions([
@@ -2420,7 +2469,7 @@ test("Uncaught error in target new is catch only once", async () => {
     Partner._views["form,74"] = /*xml*/ `
         <form>
             <header>
-                <button name="26" type="action"/>
+                <button name="26" string="Test" type="action"/>
             </header>
             <field name="display_name"/>
         </form>`;
@@ -2428,6 +2477,42 @@ test("Uncaught error in target new is catch only once", async () => {
     await mountWithCleanup(WebClient);
     await getService("action").doAction(2);
     await contains(".o_form_view button[name='26']").click();
+    await waitFor(".modal"); // errors are async
+    expect(".modal").toHaveCount(1);
+    expect(".modal .o_error_dialog").toHaveCount(1);
+    expect(".modal .modal-title").toHaveText("Validation Error");
+});
+
+test.tags("mobile")("Uncaught error in target new is catch only once on mobile", async () => {
+    expect.errors(1);
+
+    defineActions([
+        {
+            id: 26,
+            name: "Partner",
+            res_model: "partner",
+            target: "new",
+            type: "ir.actions.act_window",
+            views: [[false, "list"]],
+        },
+    ]);
+
+    onRpc("partner", "web_search_read", () => {
+        throw makeServerError({ type: "ValidationError" });
+    });
+
+    Partner._views["form,74"] = /*xml*/ `
+        <form>
+            <header>
+                <button name="26" string="Test" type="action"/>
+            </header>
+            <field name="display_name"/>
+        </form>`;
+
+    await mountWithCleanup(WebClient);
+    await getService("action").doAction(2);
+    await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+    await contains(".o_statusbar_button_dropdown_item button[name='26']").click();
     await waitFor(".modal"); // errors are async
     expect(".modal").toHaveCount(1);
     expect(".modal .o_error_dialog").toHaveCount(1);
@@ -2546,7 +2631,7 @@ test.tags("desktop")("sample server: populate groups", async () => {
         "kanban,false": `
             <kanban sample="1" default_group_by="write_date:month">
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="display_name"/>
                     </t>
                 </templates>
@@ -2592,7 +2677,7 @@ test.tags("desktop")("sample server: populate groups", async () => {
     });
 
     expect(".o_kanban_view .o_view_sample_data").toHaveCount(1);
-    expect(".o_column_title").toHaveText("December 2022\n(16)");
+    expect(".o_column_title").toHaveText("December 2022");
 
     await switchView("pivot");
     expect(".o_pivot_view .o_view_sample_data").toHaveCount(1);

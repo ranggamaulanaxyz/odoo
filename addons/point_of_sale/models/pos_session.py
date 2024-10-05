@@ -566,9 +566,12 @@ class PosSession(models.Model):
                 'redirect': True
             }
 
-        self.message_post(body='Point of Sale Session ended')
+        self.post_close_register_message()
 
         return {'successful': True}
+
+    def post_close_register_message(self):
+        self.message_post(body=_('Closed Register'))
 
     def update_closing_control_state_session(self, notes):
         # Prevent closing the session again if it was already closed
@@ -625,7 +628,7 @@ class PosSession(models.Model):
     def _get_diff_vals(self, payment_method_id, diff_amount):
         payment_method = self.env['pos.payment.method'].browse(payment_method_id)
         diff_compare_to_zero = self.currency_id.compare_amounts(diff_amount, 0)
-        source_account = payment_method.outstanding_account_id or self.company_id.account_journal_payment_debit_account_id
+        source_account = payment_method.outstanding_account_id
         destination_account = self.env['account.account']
 
         if (diff_compare_to_zero > 0):
@@ -780,8 +783,11 @@ class PosSession(models.Model):
         return self._credit_amounts(partial_vals, imbalance_amount_session, imbalance_amount)
 
     def _get_balancing_account(self):
-        propoerty_account = self.env['ir.property']._get('property_account_receivable_id', 'res.partner')
-        return self.company_id.account_default_pos_receivable_account_id or propoerty_account or self.env['account.account']
+        return (
+            self.company_id.account_default_pos_receivable_account_id
+            or self.env['res.partner']._fields['property_account_receivable_id'].get_company_dependent_fallback(self.env['res.partner'])
+            or self.env['account.account']
+        )
 
     def _create_account_move(self, balancing_account=False, amount_to_balance=0, bank_payment_method_diffs=None):
         """ Create account.move and account.move.line records for this session.
@@ -816,6 +822,7 @@ class PosSession(models.Model):
         # E.g. `combine_receivables_bank` is derived from pos.payment records
         # in the self.order_ids with group key of the `payment_method_id`
         # field of the pos.payment record.
+        AccountTax = self.env['account.tax']
         amounts = lambda: {'amount': 0.0, 'amount_converted': 0.0}
         tax_amounts = lambda: {'amount': 0.0, 'amount_converted': 0.0, 'base_amount': 0.0, 'base_amount_converted': 0.0}
         split_receivables_bank = defaultdict(amounts)
@@ -885,23 +892,29 @@ class PosSession(models.Model):
                         combine_receivables_pay_later[payment_method] = self._update_amounts(combine_receivables_pay_later[payment_method], {'amount': amount}, date)
 
             if not order_is_invoiced:
-                base_lines = order._prepare_tax_base_line_values(sign=1)
-                tax_results = self.env['account.tax']._compute_taxes(base_lines, order.company_id)
+                base_lines = order._prepare_tax_base_line_values()
+                AccountTax._add_tax_details_in_base_lines(base_lines, order.company_id)
+                AccountTax._round_base_lines_tax_details(base_lines, order.company_id)
+                AccountTax._add_accounting_data_in_base_lines_tax_details(base_lines, order.company_id)
+                tax_results = AccountTax._prepare_tax_lines(base_lines, order.company_id)
                 for base_line, to_update in tax_results['base_lines_to_update']:
                     # Combine sales/refund lines
                     sale_key = (
                         # account
-                        base_line['account'].id,
+                        base_line['account_id'].id,
                         # sign
                         -1 if base_line['is_refund'] else 1,
                         # for taxes
                         tuple(base_line['record'].tax_ids_after_fiscal_position.flatten_taxes_hierarchy().ids),
-                        tuple(to_update['tax_tag_ids'][0][2]),
-                        base_line['product'].id if self.config_id.is_closing_entry_by_product else False,
+                        tuple(base_line['tax_tag_ids'].ids),
+                        base_line['product_id'].id if self.config_id.is_closing_entry_by_product else False,
                     )
                     sales[sale_key] = self._update_amounts(
                         sales[sale_key],
-                        {'amount': to_update['price_subtotal']},
+                        {
+                            'amount': to_update['amount_currency'],
+                            'amount_converted': to_update['balance'],
+                        },
                         order.date_order,
                     )
                     if self.config_id.is_closing_entry_by_product:
@@ -916,7 +929,11 @@ class PosSession(models.Model):
                     )
                     taxes[tax_key] = self._update_amounts(
                         taxes[tax_key],
-                        {'amount': -tax_line['tax_amount_currency'], 'base_amount': -tax_line['base_amount_currency']},
+                        {
+                            'amount': tax_line['amount_currency'],
+                            'amount_converted': tax_line['balance'],
+                            'base_amount': tax_line['tax_base_amount']
+                        },
                         order.date_order,
                     )
 
@@ -1050,14 +1067,11 @@ class PosSession(models.Model):
             vals.append(self._get_combine_receivable_vals(payment_method, amounts['amount'], amounts['amount_converted']))
         for payment, amounts in split_receivables_pay_later.items():
             vals.append(self._get_split_receivable_vals(payment, amounts['amount'], amounts['amount_converted']))
-        # Entries related to 'pay_later' payment method- should not be excluded from follow-ups
-        for val in vals:
-            val['blocked'] = False
         MoveLine.create(vals)
         return data
 
     def _create_combine_account_payment(self, payment_method, amounts, diff_amount):
-        outstanding_account = payment_method.outstanding_account_id or self.company_id.account_journal_payment_debit_account_id
+        outstanding_account = payment_method.outstanding_account_id
         destination_account = self._get_receivable_account(payment_method)
 
         if float_compare(amounts['amount'], 0, precision_rounding=self.currency_id.rounding) < 0:
@@ -1068,25 +1082,26 @@ class PosSession(models.Model):
             'amount': abs(amounts['amount']),
             'journal_id': payment_method.journal_id.id,
             'force_outstanding_account_id': outstanding_account.id,
-            'destination_account_id':  destination_account.id,
-            'ref': _('Combine %(payment_method)s POS payments from %(session)s', payment_method=payment_method.name, session=self.name),
+            'destination_account_id': destination_account.id,
+            'memo': _('Combine %(payment_method)s POS payments from %(session)s', payment_method=payment_method.name, session=self.name),
             'pos_payment_method_id': payment_method.id,
             'pos_session_id': self.id,
             'company_id': self.company_id.id,
         })
+        account_payment.action_post()
 
         diff_amount_compare_to_zero = self.currency_id.compare_amounts(diff_amount, 0)
         if diff_amount_compare_to_zero != 0:
             self._apply_diff_on_account_payment_move(account_payment, payment_method, diff_amount)
 
-        account_payment.action_post()
-        return account_payment.move_id.line_ids.filtered(lambda line: line.account_id == account_payment.destination_account_id)
+        return account_payment.move_id.line_ids.filtered(lambda line: line.account_id == self._get_receivable_account(payment_method))
 
     def _apply_diff_on_account_payment_move(self, account_payment, payment_method, diff_amount):
         source_vals, dest_vals = self._get_diff_vals(payment_method.id, diff_amount)
         outstanding_line = account_payment.move_id.line_ids.filtered(lambda line: line.account_id.id == source_vals['account_id'])
         new_balance = outstanding_line.balance + self._amount_converter(diff_amount, self.stop_at, False)
         new_balance_compare_to_zero = self.currency_id.compare_amounts(new_balance, 0)
+        account_payment.move_id.button_draft()
         account_payment.move_id.write({
             'line_ids': [
                 Command.create(dest_vals),
@@ -1096,12 +1111,13 @@ class PosSession(models.Model):
                 })
             ]
         })
+        account_payment.move_id.action_post()
 
     def _create_split_account_payment(self, payment, amounts):
         payment_method = payment.payment_method_id
         if not payment_method.journal_id:
             return self.env['account.move.line']
-        outstanding_account = payment_method.outstanding_account_id or self.company_id.account_journal_payment_debit_account_id
+        outstanding_account = payment_method.outstanding_account_id
         accounting_partner = self.env["res.partner"]._find_accounting_partner(payment.partner_id)
         destination_account = accounting_partner.property_account_receivable_id
 
@@ -1115,12 +1131,12 @@ class PosSession(models.Model):
             'journal_id': payment_method.journal_id.id,
             'force_outstanding_account_id': outstanding_account.id,
             'destination_account_id': destination_account.id,
-            'ref': _('%(payment_method)s POS payment of %(partner)s in %(session)s', payment_method=payment_method.name, partner=payment.partner_id.display_name, session=self.name),
+            'memo': _('%(payment_method)s POS payment of %(partner)s in %(session)s', payment_method=payment_method.name, partner=payment.partner_id.display_name, session=self.name),
             'pos_payment_method_id': payment_method.id,
             'pos_session_id': self.id,
         })
         account_payment.action_post()
-        return account_payment.move_id.line_ids.filtered(lambda line: line.account_id == account_payment.destination_account_id)
+        return account_payment.move_id.line_ids.filtered(lambda line: line.account_id == accounting_partner.property_account_receivable_id)
 
     def _create_cash_statement_lines_and_cash_move_lines(self, data):
         # Create the split and combine cash statement lines and account move lines.
@@ -1368,25 +1384,31 @@ class PosSession(models.Model):
             'tax_tag_ids': [(6, 0, base_tag_ids)],
             'product_id': product_id,
             'display_type': 'product',
-            'product_uom_id': product_uom
+            'product_uom_id': product_uom,
+            'currency_id': self.currency_id.id,
+            'amount_currency': amount,
+            'balance': amount_converted,
         }
         if partial_vals.get('product_id'):
             partial_vals['quantity'] = sale_vals.get('quantity') or 1
-        return self._credit_amounts(partial_vals, amount, amount_converted)
+        return partial_vals
 
     def _get_tax_vals(self, key, amount, amount_converted, base_amount_converted):
         account_id, repartition_line_id, tag_ids = key
         tax_rep = self.env['account.tax.repartition.line'].browse(repartition_line_id)
         tax = tax_rep.tax_id
-        partial_args = {
+        return {
             'name': tax.name,
             'account_id': account_id,
             'move_id': self.move_id.id,
             'tax_base_amount': abs(base_amount_converted),
             'tax_repartition_line_id': repartition_line_id,
             'tax_tag_ids': [(6, 0, tag_ids)],
+            'display_type': 'tax',
+            'currency_id': self.currency_id.id,
+            'amount_currency': amount,
+            'balance': amount_converted,
         }
-        return self._debit_amounts(partial_args, amount, amount_converted)
 
     def _get_stock_expense_vals(self, exp_account, amount, amount_converted):
         partial_args = {'account_id': exp_account.id, 'move_id': self.move_id.id}

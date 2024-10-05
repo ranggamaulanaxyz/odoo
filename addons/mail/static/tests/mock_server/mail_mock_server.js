@@ -69,12 +69,12 @@ export const parseRequestParams = async (request) => {
     return response.params;
 };
 
-const onRpcBeforeGlobal = {
-    cb: (route, args) => {},
-};
+const onRpcBeforeGlobal = { cb: (route, args) => {} };
+const onRpcAfterGlobal = { cb: (route, args) => {} };
 // using a registry category to not expose for manual import
-// We should use `onRpcBefore` with 1st parameter being (route, args) callback function
+// We should use `onRpcBefore`/`onRpcAfter` with 1st parameter being (route, args) callback function
 registry.category("mail.on_rpc_before_global").add(true, onRpcBeforeGlobal);
+registry.category("mail.on_rpc_after_global").add(true, onRpcAfterGlobal);
 export function registerRoute(route, handler) {
     const beforeCallableHandler = async function (request) {
         let args;
@@ -91,7 +91,12 @@ export function registerRoute(route, handler) {
         if (res !== undefined) {
             return res;
         }
-        return handler.call(this, request);
+        const response = handler.call(this, request);
+        res = await beforeCallableHandler.after?.(response);
+        if (res !== undefined) {
+            return res;
+        }
+        return response;
     };
     registry.category("mock_rpc").add(route, beforeCallableHandler);
 }
@@ -326,6 +331,41 @@ async function discuss_channel_messages(request) {
         ).get_result(),
         messages: mailDataHelpers.Store.many_ids(messages),
     };
+}
+
+registerRoute("/discuss/channel/sub_channel/create", discuss_channel_sub_channel_create);
+async function discuss_channel_sub_channel_create(request) {
+    /** @type {import("mock_models").DiscussChannel} */
+    const DiscussChannel = this.env["discuss.channel"];
+    const { from_message_id, parent_channel_id, name } = await parseRequestParams(request);
+    return DiscussChannel._create_sub_channel(
+        [parent_channel_id],
+        makeKwArgs({ from_message_id, name })
+    );
+}
+
+registerRoute("/discuss/channel/sub_channel/fetch", discuss_channel_sub_channel_fetch);
+async function discuss_channel_sub_channel_fetch(request) {
+    /** @type {import("mock_models").DiscussChannel} */
+    const DiscussChannel = this.env["discuss.channel"];
+    /** @type {import("mock_models").MailMessage} */
+    const MailMessage = this.env["mail.message"];
+    const { parent_channel_id, before, limit } = await parseRequestParams(request);
+    const domain = [["parent_channel_id", "=", parent_channel_id]];
+    if (before) {
+        domain.push(["id", "<", before]);
+    }
+    const subChannels = DiscussChannel.search(domain, makeKwArgs({ limit, order: "id DESC" }));
+    const store = new mailDataHelpers.Store(subChannels);
+    const lastMessageIds = [];
+    for (const channel of subChannels) {
+        const lastMessageId = Math.max(channel.message_ids);
+        if (lastMessageId) {
+            lastMessageIds.push(lastMessageId);
+        }
+    }
+    store.add(MailMessage.browse(lastMessageIds));
+    return store.get_result();
 }
 
 registerRoute("/discuss/settings/mute", discuss_settings_mute);
@@ -657,7 +697,11 @@ async function mail_message_update_content(request) {
 
     const { attachment_ids, body, message_id } = await parseRequestParams(request);
     const [message] = MailMessage.browse(message_id);
-    const msg_values = { body };
+    const msg_values = {};
+    if (body !== null) {
+        const edit_label = "<span class='o-mail-Message-edited'/>";
+        msg_values.body = body === "" && attachment_ids.length === 0 ? "" : body + edit_label;
+    }
     if (attachment_ids.length === 0) {
         IrAttachment.unlink(message.attachment_ids);
     } else {

@@ -5,7 +5,7 @@ import {
     changeOption,
     clickOnEditAndWaitEditMode,
     clickOnSave,
-    dragNDrop,
+    insertSnippet,
     goBackToBlocks,
     registerWebsitePreviewTour,
 } from '@website/js/tours/tour_utils';
@@ -779,8 +779,8 @@ registerWebsitePreviewTour('website_form_conditional_required_checkboxes', {
     {
         content: "Select the form by clicking on an input field",
         trigger: ':iframe section.s_website_form input',
-        run: function (actions) {
-            actions.click();
+        async run(actions) {
+            await actions.click();
 
             // The next steps will be about removing non essential required
             // fields. For the robustness of the test, check that amount
@@ -820,7 +820,7 @@ registerWebsitePreviewTour('website_form_conditional_required_checkboxes', {
         content: "Choose first checkbox as condition item",
         trigger: 'we-button[data-set-visibility-dependency="Checkbox 1"]',
         async run(helpers) {
-            helpers.click();
+            await helpers.click();
             // TODO:to be removed
             await new Promise((r) => setTimeout(r, 300));
         }
@@ -835,7 +835,7 @@ registerWebsitePreviewTour('website_form_conditional_required_checkboxes', {
         content: "Choose 'not equal to' comparator",
         trigger: 'we-button[data-select-data-attribute="!selected"]',
         async run(helpers) {
-            helpers.click();
+            await helpers.click();
             // TODO: to be removed
             await new Promise((r) => setTimeout(r, 300));
         }
@@ -921,7 +921,7 @@ registerWebsitePreviewTour("website_form_editable_content", {
         trigger: ".o_website_preview.editor_enable.editor_has_snippets",
     },
     {
-        trigger: `#oe_snippets .oe_snippet[name="Form"].o_we_draggable .oe_snippet_thumbnail:not(.o_we_already_dragging)`,
+        trigger: `#oe_snippets .oe_snippet[name="Form"].o_we_draggable .oe_snippet_thumbnail:not(.o_we_ongoing_insertion)`,
         run: "drag_and_drop :iframe #wrap",
     },
     {
@@ -941,7 +941,7 @@ registerWebsitePreviewTour("website_form_editable_content", {
         trigger: ".o_we_add_snippet_btn",
         run: "click",
     },
-    ...dragNDrop({id: "s_three_columns", name: "Columns", groupName: "Columns"}),
+    ...insertSnippet({id: "s_three_columns", name: "Columns", groupName: "Columns"}),
     {
         content: "Select the first column",
         trigger: ":iframe .s_three_columns .row > :nth-child(1)",
@@ -986,7 +986,7 @@ registerWebsitePreviewTour("website_form_special_characters", {
         trigger: ".o_website_preview.editor_enable.editor_has_snippets",
     },
     {
-        trigger: `#oe_snippets .oe_snippet[name="Form"].o_we_draggable .oe_snippet_thumbnail:not(.o_we_already_dragging)`,
+        trigger: `#oe_snippets .oe_snippet[name="Form"].o_we_draggable .oe_snippet_thumbnail:not(.o_we_ongoing_insertion)`,
         run: "drag_and_drop :iframe #wrap",
     },
     {

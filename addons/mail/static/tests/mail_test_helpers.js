@@ -56,6 +56,7 @@ import { MailMessageReaction } from "./mock_server/mock_models/mail_message_reac
 import { MailMessageSubtype } from "./mock_server/mock_models/mail_message_subtype";
 import { MailNotification } from "./mock_server/mock_models/mail_notification";
 import { MailPushDevice } from "./mock_server/mock_models/mail_push_device";
+import { MailScheduledMessage } from "./mock_server/mock_models/mail_scheduled_message";
 import { MailTemplate } from "./mock_server/mock_models/mail_template";
 import { MailThread } from "./mock_server/mock_models/mail_thread";
 import { MailTrackingValue } from "./mock_server/mock_models/mail_tracking_value";
@@ -86,7 +87,7 @@ patch(busService, {
         if (type === "mail.record/insert") {
             const recordsByModelName = Object.entries(payload);
             for (const [modelName, records] of recordsByModelName) {
-                for (const record of records) {
+                for (const record of Array.isArray(records) ? records : [records]) {
                     logger.logDebug(modelName, record);
                 }
             }
@@ -127,6 +128,7 @@ export const mailModels = {
     MailMessageSubtype,
     MailNotification,
     MailPushDevice,
+    MailScheduledMessage,
     MailTemplate,
     MailThread,
     MailTrackingValue,
@@ -154,6 +156,18 @@ export function onRpcBefore(route, callback) {
         const onRpcBeforeGlobal = registry.category("mail.on_rpc_before_global").get(true);
         patchWithCleanup(onRpcBeforeGlobal, { cb: route });
     }
+}
+
+/**
+ * Register a callback to be executed just before end of an RPC request being processed.
+ * Useful to do all server processing but delay the response received by web client.
+ *
+ * @param {string} route the route to put callback just before returning response.
+ * @param {Function} callback - The function to execute just before the end of RPC call.
+ */
+export function onRpcAfter(route, callback) {
+    const handler = registry.category("mock_rpc").get(route);
+    patchWithCleanup(handler, { after: callback });
 }
 
 let archs = {};
@@ -393,19 +407,20 @@ function getSizeFromWidth(width) {
  * @param {number|undefined} [params.width]
  * @param {number|undefined} [params.height]
  */
-export function patchUiSize({ height, size, width }) {
+export async function patchUiSize({ height, size, width }) {
     if ((!size && !width) || (size && width)) {
         throw new Error("Either size or width must be given to the patchUiSize function");
     }
     size = size === undefined ? getSizeFromWidth(width) : size;
     width = width || getWidthFromSize(size);
 
-    resize({ width, height });
     patchWithCleanup(uiUtils, {
         getSize() {
             return size;
         },
     });
+
+    await resize({ width, height });
 }
 
 /**
@@ -622,5 +637,5 @@ export function isInViewportOf(parent, child) {
 
 export async function hover(selector) {
     await contains(selector);
-    hootHover(selector);
+    await hootHover(selector);
 }

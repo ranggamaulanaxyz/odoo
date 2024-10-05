@@ -7,13 +7,20 @@
         <field name="arch" type="xml">
             <form string="Website Public Categories">
                 <sheet>
-                    <field name="image_1920" widget="image" class="oe_avatar" options="{'preview_image': 'image_128'}"/>
+                    <field
+                        name="image_1920"
+                        widget="image"
+                        class="oe_avatar"
+                        options="{'convert_to_webp': True, 'preview_image': 'image_128'}"
+                    />
                     <div>
                         <group class="col-md-4 col-lg-6 pe-3">
                             <field name="name"/>
                             <field name="parent_id"/>
                             <field name="website_id" options="{'no_create': True}" groups="website.group_multi_website"/>
                             <field name="sequence" groups="base.group_no_one"/>
+                            <field name="website_description"
+                                   placeholder="Description displayed on the eCommerce categories page."/>
                         </group>
                     </div>
                 </sheet>

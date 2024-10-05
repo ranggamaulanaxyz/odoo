@@ -12,7 +12,7 @@ import { Input } from "@point_of_sale/app/generic_components/inputs/input/input"
 export class CashMovePopup extends Component {
     static template = "point_of_sale.CashMovePopup";
     static components = { Input, Dialog };
-    static props = ["confirmKey?", "close"];
+    static props = ["confirmKey?", "close", "getPayload?"];
     setup() {
         super.setup();
         this.notification = useService("notification");
@@ -41,10 +41,13 @@ export class CashMovePopup extends Component {
         const translatedType = _t(type);
         const extras = { formattedAmount, translatedType };
         const reason = this.state.reason.trim();
+
         await this.pos.data.call(
             "pos.session",
             "try_cash_in_out",
-            this._prepare_try_cash_in_out_payload(type, amount, reason, extras)
+            this._prepare_try_cash_in_out_payload(type, amount, reason, extras),
+            {},
+            true
         );
         await this.pos.logEmployeeMessage(
             `${_t("Cash")} ${translatedType} - ${_t("Amount")}: ${formattedAmount}`,
@@ -57,6 +60,7 @@ export class CashMovePopup extends Component {
             headerData: this.pos.getReceiptHeaderData(),
             date: new Date().toLocaleString(),
         });
+
         this.props.close();
         this.notification.add(
             _t("Successfully made a cash %s of %s.", type, formattedAmount),

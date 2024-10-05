@@ -122,6 +122,7 @@
                                 decoration-warning="parts_availability_state == 'expected'"
                                 decoration-danger="parts_availability_state == 'late'"/>
                         </group>
+                        <field name="repair_properties" nolabel="1" columns="2" hideAddButton="1"/>
                     </group>
                 <notebook>
                     <page string="Parts" name="parts">
@@ -186,8 +187,8 @@
                             <field name="picking_type_id" options="{'no_create': True}" readonly="state in ('done', 'cancel')"/>
                         </group>
                         <group string="Locations" groups="stock.group_stock_multi_locations" name="locations">
+                            <field name="product_location_src_id" readonly="state != 'draft'" options="{'no_create': True}"/>
                             <field name="location_id" readonly="state != 'draft'" options="{'no_create': True}"/>
-                            <field name="recycle_location_id" readonly="state != 'draft'" options="{'no_create': True}"/>
                         </group>
                     </page>
                 </notebook>
@@ -205,7 +206,7 @@
             <kanban class="o_kanban_mobile" sample="1" quick_create="false">
                 <progressbar field="activity_state" colors='{"planned": "success", "today": "warning", "overdue": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <div class="row">
                             <field name="name" class="col-6 fw-bolder mb-1"/>
                             <field name="state" class="col-6 text-end mb-1" widget="label_selection" options="{'classes': {'draft': 'info', 'cancel': 'danger', 'done': 'success', 'under_repair': 'secondary'}}"/>
@@ -390,8 +391,36 @@
             </field>
         </record>
 
+        <record id="action_repair_picking_type_kanban" model="ir.actions.act_window">
+            <field name="name">Repair Overview</field>
+            <field name="path">repair-types</field>
+            <field name="res_model">stock.picking.type</field>
+            <field name="view_mode">kanban,form</field>
+            <field name="domain">[('code', '=', 'repair_operation')]</field>
+            <field name="view_id" ref="stock.stock_picking_type_kanban"/>
+        </record>
+
+        <record id="action_repair_overview" model="ir.actions.server">
+            <field name="name">stock.repair.type.overview</field>
+            <field name="model_id" ref="model_stock_picking_type"/>
+            <field name="groups_id" eval="[(4, ref('stock.group_stock_user'))]"/>
+            <field name="state">code</field>
+            <field name="code">
+                action = model.action_repair_overview()
+            </field>
+        </record>
+
         <menuitem id="menu_repair_order" groups="stock.group_stock_user" name="Repairs" sequence="165"
                   web_icon="repair,static/description/icon.png"/>
+
+        <menuitem
+            id="repair_picking_type_menu"
+            name="Overview"
+            action="action_repair_overview"
+            groups="stock.group_stock_user"
+            parent="menu_repair_order"
+            sequence="0"
+        />
 
         <menuitem id="repair_order_menu" name="Orders" action="action_repair_order_tree" groups="stock.group_stock_user"
                   parent="menu_repair_order"/>
@@ -402,6 +431,10 @@
 
         <menuitem id="repair_menu_config" name="Configuration" parent="menu_repair_order" groups="stock.group_stock_manager"/>
 
-        <menuitem id="repair_menu_tag" name="Repair Orders Tags" parent="repair_menu_config" action="action_repair_order_tag"/>
+        <menuitem id="repair_menu_tag" name="Repair Orders Tags" parent="repair_menu_config" action="action_repair_order_tag" sequence="1"/>
+        <menuitem id="repair_menu_product_template" name="Products" action="stock.product_template_action_product"
+            parent="repair_menu_config" sequence="2"/>
+        <menuitem id="repair_menu_product_product" name="Product Variants" action="stock.stock_product_normal_action"
+            parent="repair_menu_config" sequence="3" groups="product.group_product_variant"/>
     </data>
 </odoo>

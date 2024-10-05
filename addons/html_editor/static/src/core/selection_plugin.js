@@ -4,11 +4,11 @@ import {
     isMediaElement,
     isProtected,
     isProtecting,
-    isTextNode,
+    isUnprotecting,
     paragraphRelatedElements,
     previousLeaf,
 } from "@html_editor/utils/dom_info";
-import { closestElement, descendants } from "@html_editor/utils/dom_traversal";
+import { childNodes, closestElement, descendants } from "@html_editor/utils/dom_traversal";
 import { getActiveHotkey } from "@web/core/hotkeys/hotkey_service";
 import { Plugin } from "../plugin";
 import { DIRECTIONS, boundariesIn, endPos, leftPos, nodeSize, rightPos } from "../utils/position";
@@ -120,14 +120,14 @@ export class SelectionPlugin extends Plugin {
         "getTraversedBlocks",
         "modifySelection",
         "rectifySelection",
+        "focusEditable",
         // "collapseIfZWS",
     ];
-    static resources = (p) => ({
+    static resources = () => ({
         shortcuts: [{ hotkey: "control+a", command: "SELECT_ALL" }],
     });
 
     setup() {
-        this.canApplySelectionToDocument = true;
         this.resetSelection();
         this.addDomListener(this.document, "selectionchange", this.updateActiveSelection);
         this.addDomListener(this.editable, "mousedown", (ev) => {
@@ -218,7 +218,6 @@ export class SelectionPlugin extends Plugin {
                 direction: DIRECTIONS.RIGHT,
                 textContent: () => "",
                 intersectsNode: () => false,
-                isDefault: true,
             };
         } else {
             range = selection.getRangeAt(0);
@@ -261,7 +260,6 @@ export class SelectionPlugin extends Plugin {
                 direction,
                 textContent: () => (range.collapsed ? "" : selection.toString()),
                 intersectsNode: (node) => range.intersectsNode(node),
-                isDefault: false,
             };
         }
 
@@ -419,10 +417,12 @@ export class SelectionPlugin extends Plugin {
         if (!this.isSelectionInEditable({ anchorNode, focusNode })) {
             throw new Error("Selection is not in editor");
         }
-        [anchorNode, anchorOffset] = normalizeCursorPosition(anchorNode, anchorOffset, "left");
+        const isCollapsed = anchorNode === focusNode && anchorOffset === focusOffset;
         [focusNode, focusOffset] = normalizeCursorPosition(focusNode, focusOffset, "right");
+        [anchorNode, anchorOffset] = isCollapsed
+            ? [focusNode, focusOffset]
+            : normalizeCursorPosition(anchorNode, anchorOffset, "left");
         if (normalize) {
-            const isCollapsed = anchorNode === focusNode && anchorOffset === focusOffset;
             // normalize selection
             [anchorNode, anchorOffset] = normalizeDeepCursorPosition(anchorNode, anchorOffset);
             [focusNode, focusOffset] = isCollapsed
@@ -433,8 +433,9 @@ export class SelectionPlugin extends Plugin {
         [anchorNode, anchorOffset] = normalizeFakeBR(anchorNode, anchorOffset);
         [focusNode, focusOffset] = normalizeFakeBR(focusNode, focusOffset);
         const selection = this.document.getSelection();
+        const documentSelectionIsInEditable = selection && this.isSelectionInEditable(selection);
         if (selection) {
-            if (this.canApplySelectionToDocument) {
+            if (documentSelectionIsInEditable) {
                 if (
                     selection.anchorNode !== anchorNode ||
                     selection.focusNode !== focusNode ||
@@ -500,12 +501,8 @@ export class SelectionPlugin extends Plugin {
         const anchor = { node: selection.anchorNode, offset: selection.anchorOffset };
         const focus = { node: selection.focusNode, offset: selection.focusOffset };
 
-        this.canApplySelectionToDocument = selectionData.documentSelectionIsInEditable;
         return {
             restore: () => {
-                if (selection.isDefault) {
-                    return;
-                }
                 this.setSelection(
                     {
                         anchorNode: anchor.node,
@@ -515,7 +512,6 @@ export class SelectionPlugin extends Plugin {
                     },
                     { normalize: false }
                 );
-                this.canApplySelectionToDocument = true;
             },
             update(callback) {
                 callback(anchor);
@@ -586,10 +582,6 @@ export class SelectionPlugin extends Plugin {
             (nodes) => {
                 const edgeNodes = getUnselectedEdgeNodes(selection);
                 return nodes.filter((node) => !edgeNodes.has(node));
-            },
-            // Filter whitespace
-            (nodes) => {
-                return nodes.filter((node) => !isTextNode(node) || node.textContent !== "\n");
             },
             // Custom modifiers
             ...(this.resources.modifyTraversedNodes || []),
@@ -784,18 +776,40 @@ export class SelectionPlugin extends Plugin {
         if (!this.isSelectionInEditable(selection)) {
             return null;
         }
-        const anchorSize = nodeSize(selection.anchorNode);
-        const focusSize = nodeSize(selection.focusNode);
-        if (anchorSize < selection.anchorOffset || focusSize < selection.focusOffset) {
-            return this.setSelection({
-                anchorNode: selection.anchorNode,
-                anchorOffset: anchorSize,
-                focusNode: selection.focusNode,
-                focusOffset: focusSize,
-            });
-        } else {
-            return this.setSelection(selection);
+        const anchorNode = selection.anchorNode;
+        let anchorOffset = selection.anchorOffset;
+        const focusNode = selection.focusNode;
+        let focusOffset = selection.focusOffset;
+        const anchorSize = nodeSize(anchorNode);
+        const focusSize = nodeSize(focusNode);
+        if (anchorSize < anchorOffset) {
+            anchorOffset = anchorSize;
         }
+        if (focusSize < focusOffset) {
+            focusOffset = focusSize;
+        }
+        const anchorTarget = childNodes(anchorNode).at(anchorOffset);
+        const focusTarget = childNodes(focusNode).at(focusOffset);
+        const protectionCheck = (node) =>
+            isProtecting(node) || (isProtected(node) && !isUnprotecting(node));
+        if (
+            focusTarget !== anchorTarget &&
+            focusTarget.previousSibling === anchorTarget &&
+            protectionCheck(anchorTarget)
+        ) {
+            return;
+        }
+        if (protectionCheck(anchorNode) || protectionCheck(focusNode)) {
+            // TODO @phoenix, TODO ABD: better handle setSelection on protected
+            // elements
+            return;
+        }
+        return this.setSelection({
+            anchorNode,
+            anchorOffset,
+            focusNode,
+            focusOffset,
+        });
     }
 
     /**
@@ -867,5 +881,17 @@ export class SelectionPlugin extends Plugin {
             this.editable.contains(anchorNode) &&
             (focusNode === anchorNode || this.editable.contains(focusNode))
         );
+    }
+
+    focusEditable() {
+        const { editableSelection, documentSelectionIsInEditable } = this.getSelectionData();
+        if (documentSelectionIsInEditable) {
+            return;
+        }
+        const { anchorNode, anchorOffset, focusNode, focusOffset } = editableSelection;
+        const selection = this.document.getSelection();
+        if (selection) {
+            selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+        }
     }
 }

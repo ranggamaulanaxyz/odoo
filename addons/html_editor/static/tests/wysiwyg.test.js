@@ -78,7 +78,7 @@ describe("Wysiwyg Component", () => {
         await animationFrame();
         expect(".o-we-toolbar .btn[name='bold']").toHaveClass("active");
 
-        click(document.body);
+        await click(document.body);
         moveSelectionOutsideEditor();
         await animationFrame();
         expect(getContent(el)).toBe("<p>test <strong>some</strong> text</p>");
@@ -91,12 +91,12 @@ describe("Wysiwyg Component", () => {
         });
         await waitFor(".o-we-toolbar .btn[name='bold']:not(.active)");
 
-        click(document.body);
+        await click(document.body);
         moveSelectionOutsideEditor();
         await animationFrame();
         expect(getContent(el)).toBe("<p>test some text</p>");
         await waitFor(".o-we-toolbar .btn[name='bold']:not(.active)");
-        click(".o-we-toolbar .btn[name='bold']");
+        await click(".o-we-toolbar .btn[name='bold']");
         expect(getContent(el)).toBe("<p>test <strong>[some]</strong> text</p>");
         await waitFor(".o-we-toolbar .btn[name='bold'].active");
     });
@@ -109,7 +109,7 @@ describe("Wysiwyg Component", () => {
         expect(":iframe .test.odoo-editor-editable").toHaveCount(1);
     });
 
-    test("wysiwyg in iframe: toolbar should be well positioned", async () => {
+    test.tags("desktop")("wysiwyg in iframe: toolbar should be well positioned", async () => {
         const CLOSE_ENOUGH = 10;
         const { el } = await setupWysiwyg({
             iframe: true,

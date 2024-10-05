@@ -192,18 +192,19 @@ class TestSaleProject(HttpCase, TestSaleProjectCommon):
         self.assertEqual(self.project_global._get_sale_orders(), sale_order | sale_order_2)
 
         sale_order_lines = sale_order.order_line + sale_line_1_order_2  # exclude the Section and Note Sales Order Items
-        sale_items_data = self.project_global.get_sale_items_data(limit=5, with_action=False)
+        sale_items_data = self.project_global.get_sale_items_data(limit=5, with_action=False, section_id='billable_fixed')
+
         expected_sale_line_dict = {
             sol_read['id']: sol_read
-            for sol_read in sale_order_lines._read_format(['name', 'product_uom_qty', 'qty_delivered', 'qty_invoiced', 'product_uom', 'product_id'])
+            for sol_read in sale_order_lines._read_format(
+                ['name', 'product_uom_qty', 'qty_delivered', 'qty_invoiced', 'product_uom', 'product_id'])
         }
         actual_sol_ids = []
-        for section in sale_items_data:
-            for line in sale_items_data[section]['data']:
-                sol_id = line['id']
-                actual_sol_ids.append(sol_id)
-                self.assertIn(sol_id, expected_sale_line_dict)
-                self.assertDictEqual(line, expected_sale_line_dict[sol_id])
+        for line in sale_items_data['sol_items']:
+            sol_id = line['id']
+            actual_sol_ids.append(sol_id)
+            self.assertIn(sol_id, expected_sale_line_dict)
+            self.assertDictEqual(line, expected_sale_line_dict[sol_id])
         self.assertNotIn(section_sale_line_order_2.id, actual_sol_ids, 'The section Sales Order Item should not be takken into account in the Sales section of project.')
         self.assertNotIn(note_sale_line_order_2.id, actual_sol_ids, 'The note Sales Order Item should not be takken into account in the Sales section of project.')
 
@@ -950,3 +951,67 @@ class TestSaleProject(HttpCase, TestSaleProjectCommon):
             'sale_line_id': sale_order.order_line.id,
         })
         self.assertEqual(task3.sale_order_id, sale_order, "Task matches SO's partner_id")
+
+    def test_project_template_company(self):
+        """
+        When exactly one project is created on SO confirmation, and a project template is being used,
+        the company of the created project should be the same as on the template.
+        """
+        product_with_project_template = self.env['product.product'].create({
+            'name': 'product with template',
+            'list_price': 1,
+            'type': 'service',
+            'service_tracking': 'project_only',
+            'project_template_id': self.project_template.id,
+        })
+
+        # SOs with one created project
+        for company_id in (False, self.company.id):
+            self.project_template.company_id = company_id
+
+            sale_order = self.env['sale.order'].create({'partner_id': self.partner.id})
+            self.env['sale.order.line'].create({
+                'product_id': product_with_project_template.id,
+                'order_id': sale_order.id,
+            })
+            sale_order.action_confirm()
+            self.assertEqual(self.project_template.company_id, sale_order.project_ids[0].company_id, "The created project should have the same company as the template")
+
+        # SO with two created projects
+        self.project_template.company_id = False
+        other_product = self.env['product.product'].create({
+            'name': 'other product',
+            'list_price': 1,
+            'type': 'service',
+            'service_tracking': 'task_in_project',
+        })
+
+        sale_order = self.env['sale.order'].create({'partner_id': self.partner.id})
+        self.env['sale.order.line'].create([{
+            'product_id': product.id,
+            'order_id': sale_order.id,
+        } for product in (other_product, product_with_project_template)])
+        sale_order.action_confirm()
+        for project in sale_order:
+            self.assertEqual(project.company_id, sale_order.company_id, "The company of the created project should be unchanged (and therefore the company of the SO)")
+
+    def test_action_view_project_ids(self):
+        order = self.env['sale.order'].create({
+            'name': 'Project Order',
+            'partner_id': self.partner.id
+        })
+
+        sol = self.env['sale.order.line'].create({
+            'product_id': self.product_order_service4.id,
+            'order_id': order.id,
+        })
+
+        order.action_confirm()
+        action = order.action_view_project_ids()
+        self.assertEqual(action['type'], 'ir.actions.act_window', 'Should return a window action')
+        self.assertEqual(action['context']['default_sale_line_id'], sol.id, 'The SOL linked to the SO should be chosen as default value')
+
+        self.product_order_service4.type = 'consu'
+        action = order.action_view_project_ids()
+        self.assertEqual(action['type'], 'ir.actions.act_window', 'Should return a window action')
+        self.assertFalse(action['context']['default_sale_line_id'], 'No SOL should be set by default since the product changed')

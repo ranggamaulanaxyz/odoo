@@ -164,7 +164,7 @@ class AccountMoveLine(models.Model):
     payment_id = fields.Many2one(
         comodel_name='account.payment',
         string="Originator Payment",
-        related='move_id.payment_id', store=True,
+        related='move_id.origin_payment_id', store=True,
         auto_join=True,
         index='btree_not_null',
         help="The payment that created this entry")
@@ -371,9 +371,6 @@ class AccountMoveLine(models.Model):
         string='Tax calculation rounding method', readonly=True)
     # === Invoice sync fields === #
     term_key = fields.Binary(compute='_compute_term_key', exportable=False)
-    tax_key = fields.Binary(compute='_compute_tax_key', exportable=False)
-    compute_all_tax = fields.Binary(compute='_compute_all_tax', exportable=False)
-    compute_all_tax_dirty = fields.Boolean(compute='_compute_all_tax')
     epd_key = fields.Binary(compute='_compute_epd_key', exportable=False)
     epd_needed = fields.Binary(compute='_compute_epd_needed', exportable=False)
     epd_dirty = fields.Boolean(compute='_compute_epd_needed')
@@ -419,12 +416,6 @@ class AccountMoveLine(models.Model):
     )
 
     # === Misc Information === #
-    blocked = fields.Boolean(
-        string='No Follow-up',
-        compute='_compute_blocked', store=True, readonly=False, precompute=True,
-        help="You can check this box to mark this journal item as a litigation with the "
-             "associated partner",
-    )
     is_refund = fields.Boolean(compute='_compute_is_refund')
 
     _sql_constraints = [
@@ -471,11 +462,6 @@ class AccountMoveLine(models.Model):
     # -------------------------------------------------------------------------
     # COMPUTE METHODS
     # -------------------------------------------------------------------------
-
-    @api.depends('journal_id.type')
-    def _compute_blocked(self):
-        for line in self:
-            line.blocked = line.journal_id and line.journal_id.type == 'general'
 
     @api.depends('move_id')
     def _compute_display_type(self):
@@ -554,38 +540,6 @@ class AccountMoveLine(models.Model):
                        AND line.display_type = 'payment_term'
                        AND line.id != ANY(%(current_ids)s)
                 ),
-                properties AS(
-                    SELECT DISTINCT ON (property.company_id, property.name, property.res_id)
-                           'res.partner' AS model,
-                           SPLIT_PART(property.res_id, ',', 2)::integer AS id,
-                           CASE
-                               WHEN property.name = 'property_account_receivable_id' THEN 'asset_receivable'
-                               ELSE 'liability_payable'
-                           END AS account_type,
-                           SPLIT_PART(property.value_reference, ',', 2)::integer AS account_id
-                      FROM ir_property property
-                      JOIN res_company company ON property.company_id = company.id
-                     WHERE property.name IN ('property_account_receivable_id', 'property_account_payable_id')
-                       AND property.company_id = ANY(%(company_ids)s)
-                       AND property.res_id = ANY(%(partners)s)
-                  ORDER BY property.company_id, property.name, property.res_id, account_id
-                ),
-                default_properties AS(
-                    SELECT DISTINCT ON (property.company_id, property.name)
-                           'res.partner' AS model,
-                           company.partner_id AS id,
-                           CASE
-                               WHEN property.name = 'property_account_receivable_id' THEN 'asset_receivable'
-                               ELSE 'liability_payable'
-                           END AS account_type,
-                           SPLIT_PART(property.value_reference, ',', 2)::integer AS account_id
-                      FROM ir_property property
-                      JOIN res_company company ON property.company_id = company.id
-                     WHERE property.name IN ('property_account_receivable_id', 'property_account_payable_id')
-                       AND property.company_id = ANY(%(company_ids)s)
-                       AND property.res_id IS NULL
-                  ORDER BY property.company_id, property.name, account_id
-                ),
                 fallback AS (
                     SELECT DISTINCT ON (account_companies.res_company_id, account.account_type)
                            'res.company' AS model,
@@ -600,10 +554,6 @@ class AccountMoveLine(models.Model):
                        AND account.deprecated = 'f'
                 )
                 SELECT * FROM previous
-                UNION ALL
-                SELECT * FROM default_properties
-                UNION ALL
-                SELECT * FROM properties
                 UNION ALL
                 SELECT * FROM fallback
             """, {
@@ -621,8 +571,8 @@ class AccountMoveLine(models.Model):
                 move = line.move_id
                 account_id = (
                     accounts.get(('account.move', move.id, None))
-                    or accounts.get(('res.partner', move.commercial_partner_id.id, account_type))
-                    or accounts.get(('res.partner', move.company_id.partner_id.id, account_type))
+                    or move.with_company(move.company_id).commercial_partner_id['property_account_receivable_id' if account_type == 'asset_receivable' else 'property_account_payable_id'].id
+                    or move.with_company(move.company_id).company_id.partner_id['property_account_receivable_id' if account_type == 'asset_receivable' else 'property_account_payable_id'].id
                     or accounts.get(('res.company', move.company_id.id, account_type))
                 )
                 if line.move_id.fiscal_position_id:
@@ -822,7 +772,10 @@ class AccountMoveLine(models.Model):
                 tax = record.tax_repartition_line_id.tax_id or record.tax_ids[:1]
                 is_refund = record.is_refund
                 tax_type = tax.type_tax_use
-                record.tax_tag_invert = (tax_type == 'purchase' and is_refund) or (tax_type == 'sale' and not is_refund)
+                if record.display_type == 'epd':  # In case of early payment, tax_tag_invert is independent of the balance of the line
+                    record.tax_tag_invert = tax_type == 'purchase'
+                else:
+                    record.tax_tag_invert = (tax_type == 'purchase' and is_refund) or (tax_type == 'sale' and not is_refund)
             else:
                 # For invoices with taxes
                 record.tax_tag_invert = origin_move_id.is_inbound()
@@ -856,27 +809,20 @@ class AccountMoveLine(models.Model):
 
     @api.depends('quantity', 'discount', 'price_unit', 'tax_ids', 'currency_id')
     def _compute_totals(self):
+        """ Compute 'price_subtotal' / 'price_total' outside of `_sync_tax_lines` because those values must be visible for the
+        user on the UI with draft moves and the dynamic lines are synchronized only when saving the record.
+        """
+        AccountTax = self.env['account.tax']
         for line in self:
-            if line.display_type != 'product':
+            # TODO remove the need of cogs lines to have a price_subtotal/price_total
+            if line.display_type not in ('product', 'cogs'):
                 line.price_total = line.price_subtotal = False
-            # Compute 'price_subtotal'.
-            line_discount_price_unit = line.price_unit * (1 - (line.discount / 100.0))
-            subtotal = line.quantity * line_discount_price_unit
+                continue
 
-            # Compute 'price_total'.
-            if line.tax_ids:
-                taxes_res = line.tax_ids.compute_all(
-                    line_discount_price_unit,
-                    quantity=line.quantity,
-                    currency=line.currency_id,
-                    product=line.product_id,
-                    partner=line.partner_id,
-                    is_refund=line.is_refund,
-                )
-                line.price_subtotal = taxes_res['total_excluded']
-                line.price_total = taxes_res['total_included']
-            else:
-                line.price_total = line.price_subtotal = subtotal
+            base_line = line.move_id._prepare_product_base_line_for_taxes_computation(line)
+            AccountTax._add_tax_details_in_base_line(base_line, line.company_id)
+            line.price_subtotal = base_line['tax_details']['total_excluded_currency']
+            line.price_total = base_line['tax_details']['total_included_currency']
 
     @api.depends('product_id', 'product_uom_id')
     def _compute_price_unit(self):
@@ -931,80 +877,6 @@ class AccountMoveLine(models.Model):
             tax_ids = self.move_id.fiscal_position_id.map_tax(tax_ids)
 
         return tax_ids
-
-    @api.depends('tax_ids', 'currency_id', 'partner_id', 'account_id', 'group_tax_id', 'analytic_distribution')
-    def _compute_tax_key(self):
-        for line in self:
-            if line.tax_repartition_line_id:
-                line.tax_key = frozendict({
-                    'tax_repartition_line_id': line.tax_repartition_line_id.id,
-                    'group_tax_id': line.group_tax_id.id,
-                    'account_id': line.account_id.id,
-                    'currency_id': line.currency_id.id,
-                    'analytic_distribution': line.analytic_distribution,
-                    'tax_ids': [(6, 0, line.tax_ids.ids)],
-                    'tax_tag_ids': [(6, 0, line.tax_tag_ids.ids)],
-                    'partner_id': line.partner_id.id,
-                    'move_id': line.move_id.id,
-                    'display_type': line.display_type,
-                })
-            else:
-                line.tax_key = frozendict({'id': line.id})
-
-    @api.depends('tax_ids', 'currency_id', 'partner_id', 'analytic_distribution', 'balance', 'partner_id', 'move_id.partner_id', 'price_unit', 'quantity')
-    def _compute_all_tax(self):
-        for line in self:
-            if line.display_type == 'tax':
-                line.compute_all_tax = {}
-                line.compute_all_tax_dirty = False
-                continue
-            if line.display_type == 'product' and line.move_id.is_invoice(True):
-                sign = line.move_id.direction_sign
-                price_unit = line.price_unit * (1 - line.discount / 100)
-                handle_price_include = True
-                quantity = line.quantity
-            else:
-                sign = 1
-                price_unit = line.amount_currency
-                handle_price_include = False
-                quantity = 1
-            compute_all_currency = line.tax_ids.compute_all(
-                price_unit,
-                currency=line.currency_id,
-                quantity=quantity,
-                product=line.product_id,
-                partner=line.move_id.partner_id or line.partner_id,
-                is_refund=line.is_refund,
-                handle_price_include=handle_price_include,
-                include_caba_tags=line.move_id.always_tax_exigible,
-            )
-            rate = line.amount_currency / line.balance if line.balance else 1
-            line.compute_all_tax_dirty = True
-            line.compute_all_tax = {
-                frozendict({
-                    'tax_repartition_line_id': tax['tax_repartition_line_id'],
-                    'group_tax_id': tax['group'] and tax['group'].id or False,
-                    'account_id': tax['account_id'] or line.account_id.id,
-                    'currency_id': line.currency_id.id,
-                    'analytic_distribution': (tax['analytic'] or not tax['use_in_tax_closing']) and line.analytic_distribution,
-                    'tax_ids': [(6, 0, tax['tax_ids'])],
-                    'tax_tag_ids': [(6, 0, tax['tag_ids'])],
-                    'partner_id': line.move_id.partner_id.id or line.partner_id.id,
-                    'move_id': line.move_id.id,
-                    'display_type': line.display_type,
-                }): {
-                    'name': self.env._('%(tax_name)s (Discount)', tax_name=tax['name']) if line.display_type == 'epd' else tax['name'],
-                    'balance': sign * tax['amount'] / rate,
-                    'amount_currency': sign * tax['amount'],
-                    'tax_base_amount': sign * tax['base'] / rate * (-1 if line.tax_tag_invert else 1),
-                }
-                for tax in compute_all_currency['taxes']
-                if tax['amount']
-            }
-            if not line.tax_repartition_line_id:
-                line.compute_all_tax[frozendict({'id': line.id})] = {
-                    'tax_tag_ids': [(6, 0, compute_all_currency['base_tags'])],
-                }
 
     @api.depends('account_id', 'company_id')
     def _compute_discount_allocation_key(self):
@@ -1075,6 +947,11 @@ class AccountMoveLine(models.Model):
 
     @api.depends('move_id.needed_terms', 'account_id', 'analytic_distribution', 'tax_ids', 'tax_tag_ids', 'company_id')
     def _compute_epd_needed(self):
+        # TODO: The computation of early payment is weird because based on the 'price_subtotal'
+        # that already have it's own taxes computation (by design because the sync_dynamic lines only
+        # work when saving the record).
+        # However, the early payment lines also have some taxes and the sync_dynamic_line will compute the tax lines based on
+        # product base lines + epd base lines that could lead to a different amount when using the round globally.
         for line in self:
             line.epd_dirty = True
             line.epd_needed = False
@@ -1093,19 +970,20 @@ class AccountMoveLine(models.Model):
                     'account_id': line.account_id.id,
                     'analytic_distribution': line.analytic_distribution,
                     'tax_ids': [Command.set(taxes.ids)],
-                    'tax_tag_ids': line.compute_all_tax[frozendict({'id': line.id})]['tax_tag_ids'],
                     'display_type': 'epd',
                 }),
                 {
                     'name': _("Early Payment Discount (%s)", discount_percentage_name),
                     'amount_currency': 0.0,
                     'balance': 0.0,
-                    'price_subtotal': 0.0,
                 },
             )
-            epd_needed_vals['amount_currency'] -= line.currency_id.round(line.amount_currency * percentage)
-            epd_needed_vals['balance'] -= line.currency_id.round(line.balance * percentage)
-            epd_needed_vals['price_subtotal'] -= line.currency_id.round(line.price_subtotal * percentage)
+            sign = line.move_id.direction_sign
+            rate = line.move_id.invoice_currency_rate
+            amount_currency = line.currency_id.round(sign * line.price_subtotal * percentage)
+            balance = line.company_currency_id.round(sign * line.price_subtotal * percentage / rate) if rate else 0.0
+            epd_needed_vals['amount_currency'] -= amount_currency
+            epd_needed_vals['balance'] -= balance
             epd_needed_vals = epd_needed.setdefault(
                 frozendict({
                     'move_id': line.move_id.id,
@@ -1116,13 +994,11 @@ class AccountMoveLine(models.Model):
                     'name': _("Early Payment Discount (%s)", discount_percentage_name),
                     'amount_currency': 0.0,
                     'balance': 0.0,
-                    'price_subtotal': 0.0,
                     'tax_ids': [Command.clear()],
                 },
             )
-            epd_needed_vals['amount_currency'] += line.currency_id.round(line.amount_currency * percentage)
-            epd_needed_vals['balance'] += line.currency_id.round(line.balance * percentage)
-            epd_needed_vals['price_subtotal'] += line.currency_id.round(line.price_subtotal * percentage)
+            epd_needed_vals['amount_currency'] += amount_currency
+            epd_needed_vals['balance'] += balance
             line.epd_needed = {k: frozendict(v) for k, v in epd_needed.items()}
 
     @api.depends('move_id.move_type', 'balance', 'tax_repartition_line_id', 'tax_ids')
@@ -1204,7 +1080,7 @@ class AccountMoveLine(models.Model):
         if ctx:
             context.update(ctx)
         return {
-            'name': _('Register Payment'),
+            'name': _('Pay'),
             'res_model': 'account.payment.register',
             'view_mode': 'form',
             'views': [[False, 'form']],
@@ -1445,8 +1321,8 @@ class AccountMoveLine(models.Model):
     # -------------------------------------------------------------------------
     def check_field_access_rights(self, operation, field_names):
         result = super().check_field_access_rights(operation, field_names)
-        if not fields:
-            weirdos = ['term_key', 'tax_key', 'compute_all_tax', 'epd_key', 'epd_needed', 'discount_allocation_key', 'discount_allocation_needed']
+        if not field_names:
+            weirdos = ['term_key', 'epd_key', 'epd_needed', 'discount_allocation_key', 'discount_allocation_needed']
             result = [fname for fname in result if fname not in weirdos]
         return result
 
@@ -1509,7 +1385,7 @@ class AccountMoveLine(models.Model):
     def default_get(self, fields_list):
         defaults = super().default_get(fields_list)
         quick_encode_suggestion = self.env.context.get('quick_encoding_vals')
-        if quick_encode_suggestion:
+        if quick_encode_suggestion and self.env.context.get('default_display_type') not in ('line_section', 'line_note'):
             defaults['account_id'] = quick_encode_suggestion['account_id']
             defaults['price_unit'] = quick_encode_suggestion['price_unit']
             defaults['tax_ids'] = [Command.set(quick_encode_suggestion['tax_ids'])]
@@ -1576,18 +1452,7 @@ class AccountMoveLine(models.Model):
         before = existing()
         yield
         after = existing()
-        for line in after:
-            if (
-                line.display_type == 'product'
-                and (not changed('amount_currency') or line not in before)
-            ):
-                amount_currency = line.move_id.direction_sign * line.currency_id.round(line.price_subtotal)
-                if line.amount_currency != amount_currency or line not in before:
-                    line.amount_currency = amount_currency
-                if line.currency_id == line.company_id.currency_id:
-                    line.balance = amount_currency
 
-        after = existing()
         for line in after:
             if (
                 (changed('amount_currency') or changed('currency_rate') or changed('move_type'))
@@ -1595,6 +1460,7 @@ class AccountMoveLine(models.Model):
             ):
                 balance = line.company_id.currency_id.round(line.amount_currency / line.currency_rate)
                 line.balance = balance
+
         # Since this method is called during the sync, inside of `create`/`write`, these fields
         # already have been computed and marked as so. But this method should re-trigger it since
         # it changes the dependencies.
@@ -1748,6 +1614,15 @@ class AccountMoveLine(models.Model):
                         "with the payment terms"
                     ))
 
+    @api.ondelete(at_uninstall=False)  # Hashed entres are legally required to not be deleted.
+    def _except_hashed_entry_lines(self):
+        """ Lines belonginig to a hashed (locked) entry should not be allowed to be deleted in order to protect the
+        hash chain.
+        """
+        for line in self:
+            if line.move_id.inalterable_hash:
+                raise UserError(_('You cannot delete journal items belonging to a locked journal entry.'))
+
     def unlink(self):
         if not self:
             return True
@@ -1883,7 +1758,7 @@ class AccountMoveLine(models.Model):
         """
 
         def is_payment(aml):
-            return aml.move_id.payment_id or aml.move_id.statement_line_id
+            return aml.move_id.origin_payment_id or aml.move_id.statement_line_id
 
         def get_odoo_rate(aml, other_aml, currency):
             if forced_rate := self._context.get('forced_rate_from_register_payment'):
@@ -2679,26 +2554,6 @@ class AccountMoveLine(models.Model):
 
         all_amls._reconcile_post_hook(pre_hook_data)
 
-    def _create_reconciliation_partials(self):
-        '''create the partial reconciliation between all the records in self
-         :return: A recordset of account.partial.reconcile.
-        '''
-        partials_vals_list, exchange_data = self._prepare_reconciliation_partials([
-            {
-                'aml': line,
-                'amount_residual': line.amount_residual,
-                'amount_residual_currency': line.amount_residual_currency,
-            }
-            for line in self
-        ])
-        partials = self.env['account.partial.reconcile'].create(partials_vals_list)
-
-        # ==== Create exchange difference moves ====
-        for index, exchange_values in exchange_data.items():
-            partials[index].exchange_move_id = self._create_exchange_difference_move(exchange_values)
-
-        return partials
-
     def _prepare_exchange_difference_move_vals(self, amounts_list, company=None, exchange_date=None, **kwargs):
         """ Prepare values to create later the exchange difference journal entry.
         The exchange difference journal entry is there to fix the debit/credit of lines when the journal items are
@@ -3165,7 +3020,7 @@ class AccountMoveLine(models.Model):
     # INSTALLMENTS
     # -------------------------------------------------------------------------
 
-    def _get_installments_data(self, payment_currency=None, payment_date=None):
+    def _get_installments_data(self, payment_currency=None, payment_date=None, next_payment_date=None):
         move = self.move_id
         move.ensure_one()
 
@@ -3202,6 +3057,8 @@ class AccountMoveLine(models.Model):
                     'amount_residual': line.discount_balance,
                     'amount_residual_currency_unsigned': -sign * line.discount_amount_currency,
                     'amount_residual_unsigned': -sign * line.discount_balance,
+                    'discount_amount_currency': line.amount_currency - line.discount_amount_currency,
+                    'discount_amount': line.balance - line.discount_balance,
                     'type': 'early_payment_discount',
                 })
                 continue
@@ -3210,7 +3067,9 @@ class AccountMoveLine(models.Model):
             # In case of overdue, all of them are sum as a default amount to be paid.
             # The next installment is added for the difference.
             if line.display_type == 'payment_term':
-                if (line.date_maturity or line.date) < payment_date:
+                if next_payment_date and (line.date_maturity or line.date) <= next_payment_date:
+                    current_installment_mode = 'before_date'
+                elif (line.date_maturity or line.date) < payment_date:
                     # Collect all overdue installments.
                     first_installment_mode = current_installment_mode = 'overdue'
                 elif not first_installment_mode:
@@ -3299,53 +3158,6 @@ class AccountMoveLine(models.Model):
             '|', ('tax_line_id.tax_exigibility', '!=', 'on_payment'),
             ('tax_ids.tax_exigibility', '!=', 'on_payment'), # So: exigible if at least one tax from tax_ids isn't on_payment
         ]
-
-    def _convert_to_tax_base_line_dict(self):
-        """ Convert the current record to a dictionary in order to use the generic taxes computation method
-        defined on account.tax.
-        :return: A python dictionary.
-        """
-        self.ensure_one()
-        is_invoice = self.move_id.is_invoice(include_receipts=True)
-        sign = -1 if self.move_id.is_inbound(include_receipts=True) else 1
-
-        return self.env['account.tax']._convert_to_tax_base_line_dict(
-            self,
-            partner=self.partner_id,
-            currency=self.currency_id,
-            product=self.product_id,
-            taxes=self.tax_ids,
-            price_unit=self.price_unit if is_invoice else self.amount_currency,
-            quantity=self.quantity if is_invoice else 1.0,
-            discount=self.discount if is_invoice else 0.0,
-            account=self.account_id,
-            analytic_distribution=self.analytic_distribution,
-            price_subtotal=sign * self.amount_currency,
-            is_refund=self.is_refund,
-            rate=(abs(self.amount_currency) / abs(self.balance)) if self.balance else 1.0
-        )
-
-    def _convert_to_tax_line_dict(self):
-        """ Convert the current record to a dictionary in order to use the generic taxes computation method
-        defined on account.tax.
-        :return: A python dictionary.
-        """
-        self.ensure_one()
-        sign = -1 if self.move_id.is_inbound(include_receipts=True) else 1
-
-        return self.env['account.tax']._convert_to_tax_line_dict(
-            self,
-            partner=self.partner_id,
-            currency=self.currency_id,
-            taxes=self.tax_ids,
-            tax_tags=self.tax_tag_ids,
-            tax_repartition_line=self.tax_repartition_line_id,
-            group_tax=self.group_tax_id,
-            account=self.account_id,
-            analytic_distribution=self.analytic_distribution,
-            tax_amount_currency=sign * self.amount_currency,
-            tax_amount=sign * self.balance,
-        )
 
     def _get_invoiced_qty_per_product(self):
         qties = defaultdict(float)

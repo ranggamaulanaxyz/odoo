@@ -50,7 +50,7 @@
                 <field name="check_in"/>
                 <field name="check_out"/>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="employee_id" widget="many2one_avatar_user" options="{'display_avatar_name': True}" class="fs-5 fw-bold mb-2"/>
                         <hr class="mt4 mb8"/>
                         <div>
@@ -205,8 +205,8 @@
                 <field name="check_in" type="col" interval="month"/>
                 <field name="worked_hours" type="measure" widget="float_time"/>
                 <field name="expected_hours" type="measure" widget="float_time"/>
-                <field name="overtime_hours" string="Balance" type="measure" widget="float_time"/>
-                <field name="validated_overtime_hours" string="Validated Extra Hours" type="measure" widget="float_time"/>
+                <field name="overtime_hours" string="Difference" type="measure" widget="float_time"/>
+                <field name="validated_overtime_hours" string="Balance" type="measure" widget="float_time"/>
             </pivot>
         </field>
     </record>
@@ -308,7 +308,7 @@
                 <filter string="My Attendances" name="myattendances" domain="[('employee_id.user_id', '=', uid)]" />
                 <filter string="My Team" name="myteam" domain="[('employee_id.parent_id.user_id', '=', uid)]"/>
                 <separator/>
-                <filter string="To Approve" name="to_approve" domain="[('overtime_status','=', 'to_approve')]"/>
+                <filter string="To Approve" name="to_approve" domain="[('overtime_status','=', 'to_approve'), ('overtime_hours', '!=', 0)]"/>
                 <filter string="Approved" name="approved" domain="[('overtime_status','=', 'approved')]"/>
                 <filter string="Refused" name="refused" domain="[('overtime_status','=', 'refused')]"/>
                 <group string="Group By">

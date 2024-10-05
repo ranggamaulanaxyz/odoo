@@ -23,7 +23,6 @@
         'views/subcontracting_portal_views.xml',
         'views/subcontracting_portal_templates.xml',
         'views/stock_location_views.xml',
-        'wizard/stock_picking_return_views.xml',
     ],
     'demo': [
         'data/mrp_subcontracting_demo.xml',
@@ -35,6 +34,7 @@
         'web.assets_backend': [
             'mrp_subcontracting/static/src/components/**/*',
             'mrp_subcontracting/static/src/views/**/*',
+            'mrp_subcontracting/static/src/subcontracting_portal/move_list_view.js',
         ],
         'web.assets_frontend': [
             'mrp_subcontracting/static/src/scss/subcontracting_portal.scss',

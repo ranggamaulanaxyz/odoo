@@ -105,9 +105,7 @@ class TestSubcontractingDropshippingValuation(ValuationReconciliationTestCommon)
         ])
 
         # return to subcontracting location
-        sbc_location = self.env.company.subcontracting_location_id
         return_form = Form(self.env['stock.return.picking'].with_context(active_id=delivery.id, active_model='stock.picking'))
-        return_form.location_id = sbc_location
         with return_form.product_return_moves.edit(0) as line:
             line.quantity = 1
         return_wizard = return_form.save()
@@ -126,15 +124,14 @@ class TestSubcontractingDropshippingValuation(ValuationReconciliationTestCommon)
         # return to stock location
         warehouse = self.env['stock.warehouse'].search([('company_id', '=', self.env.company.id)], limit=1)
         stock_location = warehouse.lot_stock_id
-        stock_location.return_location = True
         return_form = Form(self.env['stock.return.picking'].with_context(active_id=delivery.id, active_model='stock.picking'))
-        return_form.location_id = stock_location
         with return_form.product_return_moves.edit(0) as line:
             line.quantity = 1
         return_wizard = return_form.save()
         return_picking = return_wizard._create_return()
         return_picking.move_ids.quantity = 1
         return_picking.move_ids.picked = True
+        return_picking.location_dest_id = stock_location
         return_picking.button_validate()
 
         amls = self.env['account.move.line'].search([('id', 'not in', all_amls_ids)])
@@ -255,13 +252,13 @@ class TestSubcontractingDropshippingValuation(ValuationReconciliationTestCommon)
         account_move.action_post()
 
         self.assertRecordValues(
-            account_move.line_ids,
+            account_move.line_ids.sorted('balance'),
             [
+                {'name': 'product_a',                       'debit': 0.0,       'credit': 4000.0},
                 {'name': 'product_a',                       'debit': 0.0,       'credit': 1800.0},
                 {'name': '15% (Copy)',                      'debit': 0.0,       'credit': 270.0},
                 {'name': 'INV/2024/00001 installment #1',   'debit': 621.0,     'credit': 0.0},
                 {'name': 'INV/2024/00001 installment #2',   'debit': 1449.0,    'credit': 0.0},
-                {'name': 'product_a',                       'debit': 0.0,       'credit': 4000.0},
                 {'name': 'product_a',                       'debit': 4000.0,    'credit': 0.0},
             ]
         )

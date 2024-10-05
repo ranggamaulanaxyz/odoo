@@ -22,6 +22,7 @@ export class TourStartWidget extends CharField {
             mode: "manual",
             url: this.tourData.url,
             fromDB: this.tourData.custom,
+            rainbowManMessage: this.tourData.rainbow_man_message,
         });
     }
 
@@ -32,6 +33,7 @@ export class TourStartWidget extends CharField {
             fromDB: this.tourData.custom,
             stepDelay: 500,
             showPointerDuration: 250,
+            rainbowManMessage: this.tourData.rainbow_man_message,
         });
     }
 }

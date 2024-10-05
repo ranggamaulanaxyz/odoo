@@ -55,7 +55,7 @@
                         </list>
                         <kanban class="o_kanban_mobile">
                             <templates>
-                                <t t-name="kanban-card" class="row g-0">
+                                <t t-name="card" class="row g-0">
                                     <field name="employee_id" class="col-6 fw-bold"/>
                                     <field name="date" class="col-6 text-end fw-bold" />
                                     <field name="name" class="col-6 text-muted"/>
@@ -121,7 +121,7 @@
                     <t t-set="badge" t-value="'border border-danger'" t-if="record.remaining_hours.raw_value &lt; 0"/>
                     <t t-set="title" t-value="'Remaining days'" t-if="record.encode_uom_in_days.raw_value"/>
                     <t t-set="title" t-value="'Time Remaining'" t-else=""/>
-                    <div t-attf-class="oe_kanban_align badge {{ badge }}" t-att-title="title">
+                    <div t-attf-class="badge {{ badge }} bg-transparent flex-shrink-0" t-att-title="title">
                         <field name="remaining_hours" widget="timesheet_uom" />
                     </div>
                 </t>

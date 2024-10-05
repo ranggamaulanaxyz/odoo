@@ -15,7 +15,8 @@ import { useViewCompiler } from "@web/views/view_compiler";
 import { Widget } from "@web/views/widgets/widget";
 import { getFormattedValue } from "../utils";
 import {
-    KANBAN_BOX_ATTRIBUTE,
+    LEGACY_KANBAN_BOX_ATTRIBUTE,
+    LEGACY_KANBAN_MENU_ATTRIBUTE,
     KANBAN_CARD_ATTRIBUTE,
     KANBAN_MENU_ATTRIBUTE,
 } from "./kanban_arch_parser";
@@ -191,7 +192,8 @@ export class KanbanRecord extends Component {
         "progressBarState?",
     ];
     static Compiler = KanbanCompiler;
-    static KANBAN_BOX_ATTRIBUTE = KANBAN_BOX_ATTRIBUTE;
+    static LEGACY_KANBAN_BOX_ATTRIBUTE = LEGACY_KANBAN_BOX_ATTRIBUTE;
+    static LEGACY_KANBAN_MENU_ATTRIBUTE = LEGACY_KANBAN_MENU_ATTRIBUTE;
     static KANBAN_CARD_ATTRIBUTE = KANBAN_CARD_ATTRIBUTE;
     static KANBAN_MENU_ATTRIBUTE = KANBAN_MENU_ATTRIBUTE;
     static menuTemplate = "web.KanbanRecordMenu";
@@ -203,14 +205,16 @@ export class KanbanRecord extends Component {
         this.dialog = useService("dialog");
         this.notification = useService("notification");
 
-        const { Compiler, templates } = this.props;
+        const { archInfo, Compiler, templates } = this.props;
         const ViewCompiler = Compiler || this.constructor.Compiler;
+        const isLegacy = archInfo.isLegacyArch;
 
-        this.templates = useViewCompiler(ViewCompiler, templates);
+        this.templates = useViewCompiler(ViewCompiler, templates, { isLegacy });
 
-        if (this.constructor.KANBAN_MENU_ATTRIBUTE in templates) {
-            this.showMenu = true;
-        }
+        this.menuTemplateName = this.props.archInfo.isLegacyArch
+            ? this.constructor.LEGACY_KANBAN_MENU_ATTRIBUTE
+            : this.constructor.KANBAN_MENU_ATTRIBUTE;
+        this.showMenu = this.menuTemplateName in templates;
 
         this.dataState = useState({ record: {}, widget: {} });
         this.createWidget(this.props);
@@ -246,8 +250,10 @@ export class KanbanRecord extends Component {
         this.dataState.widget = {
             deletable,
             editable,
-            isHtmlEmpty,
         };
+        if (archInfo.isLegacyArch) {
+            this.dataState.widget.isHtmlEmpty = isHtmlEmpty;
+        }
     }
 
     getRecordClasses() {
@@ -278,6 +284,14 @@ export class KanbanRecord extends Component {
             classes.push("o_legacy_kanban_record");
         }
         return classes.join(" ");
+    }
+
+    getMenuClasses() {
+        if (this.props.archInfo.isLegacyArch) {
+            return "o-dropdown--legacy-kanban-record-menu";
+        } else {
+            return "o-dropdown--kanban-record-menu";
+        }
     }
 
     /**
@@ -350,24 +364,21 @@ export class KanbanRecord extends Component {
                 break;
             }
             default: {
-                return this.notification.add(
-                    _t("Kanban: no action for type: %(type)s", { type }),
-                    {
-                        type: "danger",
-                    }
-                );
+                return this.notification.add(_t("Kanban: no action for type: %(type)s", { type }), {
+                    type: "danger",
+                });
             }
         }
     }
 
     get mainTemplate() {
         return this.props.archInfo.isLegacyArch
-            ? this.templates[this.constructor.KANBAN_BOX_ATTRIBUTE]
+            ? this.templates[this.constructor.LEGACY_KANBAN_BOX_ATTRIBUTE]
             : this.templates[this.constructor.KANBAN_CARD_ATTRIBUTE];
     }
 
     /**
-     * Returns the kanban-box template's rendering context.
+     * Returns the card template's rendering context.
      *
      * Note: the keys answer to outdated standards but should not be altered for
      * the sake of compatibility.
@@ -382,7 +393,6 @@ export class KanbanRecord extends Component {
             read_only_mode: this.props.readonly,
             record: this.dataState.record,
             selection_mode: this.props.forceGlobalClick,
-            user_context: user.context,
             widget: this.dataState.widget,
             __comp__: Object.assign(Object.create(this), { this: this }),
         };
@@ -390,6 +400,8 @@ export class KanbanRecord extends Component {
             // deprecated, use <field name="" widget="image"/>
             renderingContext.kanban_image = (...args) =>
                 getImageSrcFromRecordInfo(this.props.record, ...args);
+            // deprecated, use context instead
+            renderingContext.user_context = user.context;
         }
         return renderingContext;
     }

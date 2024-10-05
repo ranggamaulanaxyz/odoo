@@ -3,6 +3,7 @@ import { PosStore } from "@point_of_sale/app/store/pos_store";
 import { PaymentScreen } from "@point_of_sale/app/screens/payment_screen/payment_screen";
 import { FloorScreen } from "@pos_restaurant/app/floor_screen/floor_screen";
 import { ConnectionLostError } from "@web/core/network/rpc";
+import { _t } from "@web/core/l10n/translation";
 
 const NON_IDLE_EVENTS = [
     "mousemove",
@@ -21,7 +22,6 @@ patch(PosStore.prototype, {
      * @override
      */
     async setup() {
-        this.orderToTransferUuid = null; // table transfer feature
         this.isEditMode = false;
         this.tableSyncing = false;
         await super.setup(...arguments);
@@ -57,9 +57,10 @@ patch(PosStore.prototype, {
         await this.data.read("pos.order", [...orderToLoad]);
     },
     get categoryCount() {
-        const orderChange = this.getOrderChanges().orderlines;
+        const orderChanges = this.getOrderChanges();
+        const linesChanges = orderChanges.orderlines;
 
-        const categories = Object.values(orderChange).reduce((acc, curr) => {
+        const categories = Object.values(linesChanges).reduce((acc, curr) => {
             const categories =
                 this.models["product.product"].get(curr.product_id)?.pos_categ_ids || [];
 
@@ -76,7 +77,11 @@ patch(PosStore.prototype, {
 
             return acc;
         }, {});
-        return Object.values(categories);
+
+        return [
+            ...Object.values(categories),
+            ...("generalNote" in orderChanges ? [{ count: 1, name: _t("General Note") }] : []),
+        ];
     },
     createNewOrder() {
         const order = super.createNewOrder(...arguments);
@@ -189,24 +194,6 @@ patch(PosStore.prototype, {
         }
         return context;
     },
-    getPendingOrder() {
-        const context = this.getSyncAllOrdersContext();
-        const { orderToCreate, orderToUpdate, paidOrdersNotSent } = super.getPendingOrder();
-
-        if (!this.config.module_pos_restaurant || !context.table_ids || !context.table_ids.length) {
-            return { orderToCreate, orderToUpdate, paidOrdersNotSent };
-        }
-
-        return {
-            paidOrdersNotSent,
-            orderToCreate: orderToCreate.filter(
-                (o) => context.table_ids.includes(o.table_id?.id) && !this.tableSyncing
-            ),
-            orderToUpdate: orderToUpdate.filter(
-                (o) => context.table_ids.includes(o.table_id?.id) && !this.tableSyncing
-            ),
-        };
-    },
     async addLineToCurrentOrder(vals, opts = {}, configure = true) {
         if (this.config.module_pos_restaurant && !this.get_order().uiState.booked) {
             this.get_order().setBooked(true);
@@ -238,7 +225,7 @@ patch(PosStore.prototype, {
         this.selectedTable = table;
         try {
             this.loadingOrderState = true;
-            const orders = await this.syncAllOrders();
+            const orders = await this.syncAllOrders({ throw: true });
             const orderUuids = orders.map((order) => order.uuid);
 
             for (const order of table.orders) {
@@ -294,8 +281,11 @@ patch(PosStore.prototype, {
             const orders = this.getTableOrders(table.id);
             if (orders.length > 0) {
                 this.set_order(orders[0]);
-                this.orderToTransferUuid = null;
-                this.showScreen(orders[0].get_screen_data().name);
+                const props = {};
+                if (orders[0].get_screen_data().name === "PaymentScreen") {
+                    props.orderUuid = orders[0].uuid;
+                }
+                this.showScreen(orders[0].get_screen_data().name, props);
             } else {
                 this.add_new_order();
                 this.showScreen("ProductScreen");
@@ -327,13 +317,17 @@ patch(PosStore.prototype, {
         );
     },
     tableHasOrders(table) {
-        return this.getActiveOrdersOnTable(table).length > 0;
+        return Boolean(table.getOrder());
     },
-    async transferOrder(destinationTable) {
-        const order = this.models["pos.order"].getBy("uuid", this.orderToTransferUuid);
+    getTableFromElement(el) {
+        return this.models["restaurant.table"].get(
+            [...el.classList].find((c) => c.includes("tableId")).split("-")[1]
+        );
+    },
+    async transferOrder(orderUuid, destinationTable) {
+        const order = this.models["pos.order"].getBy("uuid", orderUuid);
         const originalTable = order.table_id;
         this.loadingOrderState = false;
-        this.orderToTransferUuid = null;
         this.alert.dismiss();
         if (destinationTable.id === originalTable?.id) {
             this.set_order(order);
@@ -343,8 +337,10 @@ patch(PosStore.prototype, {
         if (!this.tableHasOrders(destinationTable)) {
             order.update({ table_id: destinationTable });
             this.set_order(order);
+            this.addPendingOrder([order.id]);
         } else {
             const destinationOrder = this.getActiveOrdersOnTable(destinationTable)[0];
+            const linesToUpdate = [];
             for (const orphanLine of order.lines) {
                 const adoptingLine = destinationOrder.lines.find((l) =>
                     l.can_be_merged_with(orphanLine)
@@ -352,10 +348,16 @@ patch(PosStore.prototype, {
                 if (adoptingLine) {
                     adoptingLine.merge(orphanLine);
                 } else {
-                    orphanLine.update({ order_id: destinationOrder });
+                    linesToUpdate.push(orphanLine);
                 }
             }
+            linesToUpdate.forEach((orderline) => {
+                orderline.update({ order_id: destinationOrder.id });
+            });
             this.set_order(destinationOrder);
+            if (destinationOrder?.id) {
+                this.addPendingOrder([destinationOrder.id]);
+            }
             await this.deleteOrders([order]);
         }
         await this.setTable(destinationTable);

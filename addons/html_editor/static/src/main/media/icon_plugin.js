@@ -4,7 +4,7 @@ import { _t } from "@web/core/l10n/translation";
 export class IconPlugin extends Plugin {
     static name = "icon";
     static dependencies = ["history", "link", "selection", "color"];
-
+    /** @type { (p: IconPlugin) => Record<string, any> } */
     static resources(p) {
         return {
             toolbarNamespace: [
@@ -16,7 +16,7 @@ export class IconPlugin extends Plugin {
                                 // All nodes should be icons, its ZWS child or its ancestors
                                 node.classList?.contains("fa") ||
                                 node.parentElement.classList.contains("fa") ||
-                                node.querySelector?.(".fa")
+                                (node.querySelector?.(".fa") && node.isContentEditable !== false)
                         ),
                 },
             ],

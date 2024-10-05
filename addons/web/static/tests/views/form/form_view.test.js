@@ -282,16 +282,6 @@ test(`form view with a group that contains an invisible group`, async () => {
     expect(`.o_form_view .o_group`).toHaveCount(1);
 });
 
-test(`status bar rendering without buttons`, async () => {
-    await mountView({
-        resModel: "partner",
-        type: "form",
-        arch: `<form><header/><sheet/></form>`,
-        resId: 2,
-    });
-    expect(`.o_form_sheet_bg > .o_form_statusbar > .o_statusbar_buttons`).toHaveCount(1);
-});
-
 test.tags("mobile")(`button box rendering on small screen`, async () => {
     await mountView({
         resModel: "partner",
@@ -459,7 +449,7 @@ test(`duplicate fields rendered properly (one2many)`, async () => {
         "hello",
         { confirm: false }
     );
-    click(`.o_content`); // confirm change by focusing out the input.
+    await click(`.o_content`); // confirm change by focusing out the input.
     await animationFrame();
     await animationFrame();
     await animationFrame();
@@ -904,7 +894,7 @@ test(`Form and subview with _view_ref contexts`, async () => {
         kanban: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="color"/>
                     </t>
                 </templates>
@@ -969,7 +959,7 @@ test(`Form and subsubview with only _view_ref contexts`, async () => {
         kanban: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                     </t>
                 </templates>
@@ -983,7 +973,7 @@ test(`Form and subsubview with only _view_ref contexts`, async () => {
         kanban: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="name"/>
                     </t>
                 </templates>
@@ -2521,22 +2511,22 @@ test.tags("desktop")(`tooltips on multiple occurrences of fields and labels`, as
             </form>
         `,
     });
-    hover(".o_form_label[for=foo_0] sup");
+    await hover(".o_form_label[for=foo_0] sup");
     await runAllTimers();
     await animationFrame();
     expect(".o-tooltip .o-tooltip--help").toHaveText("foo tooltip");
 
-    hover(".o_form_label[for=bar_0] sup");
+    await hover(".o_form_label[for=bar_0] sup");
     await runAllTimers();
     await animationFrame();
     expect(".o-tooltip .o-tooltip--help").toHaveText("bar tooltip");
 
-    hover(".o_form_label[for=foo_1] sup");
+    await hover(".o_form_label[for=foo_1] sup");
     await runAllTimers();
     await animationFrame();
     expect(".o-tooltip .o-tooltip--help").toHaveText("foo tooltip");
 
-    hover(".o_form_label[for=bar_1] sup");
+    await hover(".o_form_label[for=bar_1] sup");
     await runAllTimers();
     await animationFrame();
     expect(".o-tooltip .o-tooltip--help").toHaveText("bar tooltip");
@@ -2627,8 +2617,8 @@ test.tags("desktop")(`readonly attrs on lines are re-evaluated on field change 2
     await contains(`.dropdown .dropdown-item:contains(first record)`).click();
     expect(`.o_field_one2many[name="product_ids"]`).not.toHaveClass("o_readonly_modifier");
 
-    clear();
-    click(`.o_content`); // blur input to trigger change
+    await clear();
+    await click(`.o_content`); // blur input to trigger change
     await animationFrame();
     expect(`.o_field_one2many[name="product_ids"]`).toHaveClass("o_readonly_modifier");
 
@@ -2636,8 +2626,8 @@ test.tags("desktop")(`readonly attrs on lines are re-evaluated on field change 2
     await contains(`.dropdown .dropdown-item:contains(second record)`).click();
     expect(`.o_field_one2many[name="product_ids"]`).not.toHaveClass("o_readonly_modifier");
 
-    clear();
-    click(`.o_content`); // blur input to trigger change
+    await clear();
+    await click(`.o_content`); // blur input to trigger change
     await animationFrame();
     expect(`.o_field_one2many[name="product_ids"]`).toHaveClass("o_readonly_modifier");
 });
@@ -3129,7 +3119,28 @@ test.tags("desktop")(`buttons classes in form view`, async () => {
     expect(`button[name="15"]`).toHaveClass("btn o_this_is_a_button");
 });
 
-test.tags("desktop")(`buttons should be in .o_statusbar_buttons in form view header on desktop`, async () => {
+test.tags("desktop")(
+    `buttons should be in .o_statusbar_buttons in form view header on desktop`,
+    async () => {
+        await mountView({
+            resModel: "partner",
+            type: "form",
+            arch: `
+            <form>
+                <header>
+                    <button name="0"/>
+                    <field name="foo" widget="url" class="btn btn-secondary" text="My Button" readonly="1"/>
+                </header>
+            </form>
+        `,
+            resId: 2,
+        });
+        expect(`.o_statusbar_buttons > button:eq(0)`).toHaveAttribute("name", "0");
+        expect(`.o_statusbar_buttons > div:eq(0)`).toHaveAttribute("name", "foo");
+    }
+);
+
+test.tags("mobile")(`buttons should be in CogMenu in form view header on mobile`, async () => {
     await mountView({
         resModel: "partner",
         type: "form",
@@ -3143,31 +3154,49 @@ test.tags("desktop")(`buttons should be in .o_statusbar_buttons in form view hea
         `,
         resId: 2,
     });
-    expect(`.o_statusbar_buttons > button:eq(0)`).toHaveAttribute("name", "0");
-    expect(`.o_statusbar_buttons > div:eq(0)`).toHaveAttribute("name", "foo");
-});
 
-test.tags("mobile")(`buttons should be in .o_statusbar_buttons in form view header on mobile`, async () => {
-    await mountView({
-        resModel: "partner",
-        type: "form",
-        arch: `
-            <form>
-                <header>
-                    <button name="0"/>
-                    <field name="foo" widget="url" class="btn btn-secondary" text="My Button" readonly="1"/>
-                </header>
-            </form>
-        `,
-        resId: 2,
-    });
-
-    await contains(`.o_statusbar_buttons .dropdown-toggle`).click();
+    await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
     expect(`.o_statusbar_button_dropdown_item > button`).toHaveAttribute("name", "0");
     expect(`.o_statusbar_button_dropdown_item > div`).toHaveAttribute("name", "foo");
 });
 
 test(`button in form view and long willStart`, async () => {
+    let rpcCount = 0;
+    class AsyncField extends CharField {
+        setup() {
+            onWillStart(async () => {
+                expect.step("willStart");
+            });
+        }
+    }
+    fieldsRegistry.add("asyncwidget", { component: AsyncField });
+
+    onRpc("web_read", () => {
+        rpcCount++;
+        expect.step(`web_read${rpcCount}`);
+    });
+    await mountView({
+        resModel: "partner",
+        type: "form",
+        arch: `
+            <form>
+                <field name="state" invisible="1"/>
+                <header>
+                    <button name="post" class="child_ids" string="Confirm" type="object"/>
+                </header>
+                <sheet>
+                    <group>
+                        <field name="foo" widget="asyncwidget"/>
+                    </group>
+                </sheet>
+            </form>
+        `,
+        resId: 2,
+    });
+    expect.verifySteps(["web_read1", "willStart"]);
+});
+
+test.tags("desktop")(`button in form view and long willStart on desktop`, async () => {
     mockService("action", {
         doActionButton(params) {
             params.onClose();
@@ -3177,9 +3206,6 @@ test(`button in form view and long willStart`, async () => {
     let rpcCount = 0;
     class AsyncField extends CharField {
         setup() {
-            onWillStart(async () => {
-                expect.step("willStart");
-            });
             onWillUpdateProps(async () => {
                 expect.step("willUpdateProps");
                 if (rpcCount === 1) {
@@ -3212,12 +3238,65 @@ test(`button in form view and long willStart`, async () => {
         `,
         resId: 2,
     });
-    expect.verifySteps(["web_read1", "willStart"]);
+    expect.verifySteps(["web_read1"]);
 
     await contains(`.o_form_statusbar button.child_ids`).click();
     expect.verifySteps(["web_read2", "willUpdateProps"]);
 
     await contains(`.o_form_statusbar button.child_ids`).click();
+    expect.verifySteps(["web_read3", "willUpdateProps"]);
+});
+
+test.tags("mobile")(`button in form view and long willStart on mobile`, async () => {
+    mockService("action", {
+        doActionButton(params) {
+            params.onClose();
+        },
+    });
+
+    let rpcCount = 0;
+    class AsyncField extends CharField {
+        setup() {
+            onWillUpdateProps(async () => {
+                expect.step("willUpdateProps");
+                if (rpcCount === 1) {
+                    return new Promise(() => {});
+                }
+            });
+        }
+    }
+    fieldsRegistry.add("asyncwidget", { component: AsyncField });
+
+    onRpc("web_read", () => {
+        rpcCount++;
+        expect.step(`web_read${rpcCount}`);
+    });
+    await mountView({
+        resModel: "partner",
+        type: "form",
+        arch: `
+            <form>
+                <field name="state" invisible="1"/>
+                <header>
+                    <button name="post" class="child_ids" string="Confirm" type="object"/>
+                </header>
+                <sheet>
+                    <group>
+                        <field name="foo" widget="asyncwidget"/>
+                    </group>
+                </sheet>
+            </form>
+        `,
+        resId: 2,
+    });
+    expect.verifySteps(["web_read1"]);
+
+    await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+    await contains(`.o_statusbar_button_dropdown_item button.child_ids`).click();
+    expect.verifySteps(["web_read2", "willUpdateProps"]);
+
+    await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+    await contains(`.o_statusbar_button_dropdown_item button.child_ids`).click();
     expect.verifySteps(["web_read3", "willUpdateProps"]);
 });
 
@@ -3262,32 +3341,34 @@ test.tags("desktop")(`buttons in form view, new record`, async () => {
     expect.verifySteps(["web_save", "execute_action", "web_read"]);
 });
 
-test(`buttons in form view, new record, with field id in view`, async () => {
-    // buttons in form view are one of the rare example of situation when we
-    // save a record without reloading it immediately, because we only care
-    // about its id for the next step.  But at some point, if the field id
-    // is in the view, it was registered in the changes, and caused invalid
-    // values in the record (data.id was set to null)
+test.tags("desktop")(
+    `buttons in form view, new record, with field id in view on desktop`,
+    async () => {
+        // buttons in form view are one of the rare example of situation when we
+        // save a record without reloading it immediately, because we only care
+        // about its id for the next step.  But at some point, if the field id
+        // is in the view, it was registered in the changes, and caused invalid
+        // values in the record (data.id was set to null)
 
-    let resId = null;
-    mockService("action", {
-        doActionButton(params) {
-            expect.step("execute_action");
-            expect(params.resId).toBe(resId);
-            params.onClose();
-        },
-    });
+        let resId = null;
+        mockService("action", {
+            doActionButton(params) {
+                expect.step("execute_action");
+                expect(params.resId).toBe(resId);
+                params.onClose();
+            },
+        });
 
-    onRpc("web_save", ({ parent }) => {
-        const result = parent();
-        resId = result[0].id;
-        return result;
-    });
-    onRpc(({ method }) => expect.step(method));
-    await mountView({
-        resModel: "partner",
-        type: "form",
-        arch: `
+        onRpc("web_save", ({ parent }) => {
+            const result = parent();
+            resId = result[0].id;
+            return result;
+        });
+        onRpc(({ method }) => expect.step(method));
+        await mountView({
+            resModel: "partner",
+            type: "form",
+            arch: `
             <form>
                 <header>
                     <button name="post" class="child_ids" string="Confirm" type="object"/>
@@ -3300,10 +3381,59 @@ test(`buttons in form view, new record, with field id in view`, async () => {
                 </sheet>
             </form>
         `,
-    });
-    await contains(`.o_form_statusbar button.child_ids`).click();
-    expect.verifySteps(["get_views", "onchange", "web_save", "execute_action", "web_read"]);
-});
+        });
+        await contains(`.o_form_statusbar button.child_ids`).click();
+        expect.verifySteps(["get_views", "onchange", "web_save", "execute_action", "web_read"]);
+    }
+);
+
+test.tags("mobile")(
+    `buttons in form view, new record, with field id in view on mobile`,
+    async () => {
+        // buttons in form view are one of the rare example of situation when we
+        // save a record without reloading it immediately, because we only care
+        // about its id for the next step.  But at some point, if the field id
+        // is in the view, it was registered in the changes, and caused invalid
+        // values in the record (data.id was set to null)
+
+        let resId = null;
+        mockService("action", {
+            doActionButton(params) {
+                expect.step("execute_action");
+                expect(params.resId).toBe(resId);
+                params.onClose();
+            },
+        });
+
+        onRpc("web_save", ({ parent }) => {
+            const result = parent();
+            resId = result[0].id;
+            return result;
+        });
+        onRpc(({ method }) => expect.step(method));
+        await mountView({
+            resModel: "partner",
+            type: "form",
+            arch: `
+            <form>
+                <header>
+                    <button name="post" class="child_ids" string="Confirm" type="object"/>
+                </header>
+                <sheet>
+                    <group>
+                        <field name="id" invisible="1"/>
+                        <field name="foo"/>
+                    </group>
+                </sheet>
+            </form>
+        `,
+        });
+
+        await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+        await contains(`.o_statusbar_button_dropdown_item button.child_ids`).click();
+        expect.verifySteps(["get_views", "onchange", "web_save", "execute_action", "web_read"]);
+    }
+);
 
 test(`buttons with data-hotkey attribute`, async () => {
     mockService("action", {
@@ -3324,7 +3454,7 @@ test(`buttons with data-hotkey attribute`, async () => {
     });
     expect(`.o_form_view button[data-hotkey=v]`).toHaveCount(1);
 
-    press(["alt", "v"]);
+    await press(["alt", "v"]);
     await animationFrame();
     expect.verifySteps(["validate"]);
 });
@@ -4744,6 +4874,126 @@ test.tags("desktop")(`discard changes on relational data on new record`, async (
     expect(`.o_data_row`).toHaveCount(0);
 });
 
+test("discard changes on relational data on existing record", async () => {
+    Partner._records[0].product_ids = [37];
+    Partner._records[0].bar = false;
+    Partner._onChanges = {
+        bar(record) {
+            // when bar changes, push another record in product_ids.
+            record.product_ids = [[4, 41]];
+        },
+    };
+    await mountView({
+        type: "form",
+        resModel: "partner",
+        resId: 1,
+        arch: `
+            <form>
+                <field name="bar"/>
+                <field name="product_ids" widget="one2many">
+                    <list>
+                        <field name="display_name"/>
+                    </list>
+                </field>
+            </form>`,
+    });
+
+    expect(queryAllTexts`.o_data_cell`).toEqual(["xphone"]);
+    expect(`.o_field_widget[name=bar] input:checked`).toHaveCount(0);
+
+    // Click on bar
+    await contains(`.o_field_widget[name=bar] input`).click();
+    expect(`.o_field_widget[name=bar] input:checked`).toHaveCount(1);
+    expect(queryAllTexts`.o_data_cell`).toEqual(["xphone", "xpad"]);
+
+    // click on discard
+    await contains(`.o_form_button_cancel`).click();
+    expect(queryAllTexts`.o_data_cell`).toEqual(["xphone"]);
+    expect(`.o_field_widget[name=bar] input:checked`).toHaveCount(0);
+});
+
+test("discard changes on relational data on new record (1)", async () => {
+    // When bar is changed, it pushes a record in product_ids
+    // After discarding, product_ids should be empty
+    Partner._onChanges = {
+        bar(record) {
+            if (record.bar) {
+                // when bar changes, push another record in product_ids.
+                record.product_ids = [[4, 41]];
+            }
+        },
+    };
+    await mountView({
+        type: "form",
+        resModel: "partner",
+        arch: `
+            <form>
+                <field name="bar"/>
+                <field name="product_ids" widget="one2many">
+                    <list>
+                        <field name="display_name"/>
+                    </list>
+                </field>
+            </form>`,
+    });
+
+    expect(queryAllTexts`.o_data_cell`).toEqual([]);
+    expect(`.o_field_widget[name=bar] input:checked`).toHaveCount(0);
+
+    // Click on bar
+    await contains(`.o_field_widget[name=bar] input`).click();
+    expect(`.o_field_widget[name=bar] input:checked`).toHaveCount(1);
+    expect(queryAllTexts`.o_data_cell`).toEqual(["xpad"]);
+
+    // click on discard
+    await contains(`.o_form_button_cancel`).click();
+    expect(queryAllTexts`.o_data_cell`).toEqual([]);
+    expect(`.o_field_widget[name=bar] input:checked`).toHaveCount(0);
+});
+
+test("discard changes on relational data on new record (2)", async () => {
+    // An initial onChange push a record in product_ids
+    // When bar is changed, it pushes a second record in product_ids
+    // After discarding, product_ids should contain the inital record pushed by the inital onChange
+    Partner._onChanges = {
+        product_ids(record) {
+            record.product_ids = [[4, 41]];
+        },
+        bar(record) {
+            if (record.bar) {
+                // when bar changes, push another record in product_ids.
+                record.product_ids = [[4, 37]];
+            }
+        },
+    };
+    await mountView({
+        type: "form",
+        resModel: "partner",
+        arch: `
+            <form>
+                <field name="bar"/>
+                <field name="product_ids" widget="one2many">
+                    <list>
+                        <field name="display_name"/>
+                    </list>
+                </field>
+            </form>`,
+    });
+
+    expect(queryAllTexts`.o_data_cell`).toEqual(["xpad"]);
+    expect(`.o_field_widget[name=bar] input:checked`).toHaveCount(0);
+
+    // Click on bar
+    await contains(`.o_field_widget[name=bar] input`).click();
+    expect(`.o_field_widget[name=bar] input:checked`).toHaveCount(1);
+    expect(queryAllTexts`.o_data_cell`).toEqual(["xpad", "xphone"]);
+
+    // click on discard
+    await contains(`.o_form_button_cancel`).click();
+    expect(queryAllTexts`.o_data_cell`).toEqual(["xpad"]);
+    expect(`.o_field_widget[name=bar] input:checked`).toHaveCount(0);
+});
+
 test(`discard changes on a new (non dirty, except for defaults) form view`, async () => {
     Partner._fields.foo = fields.Char({ default: "ABC" });
 
@@ -5090,7 +5340,7 @@ test(`keynav: switching to another record from an invalid one`, async () => {
     expect(`.o_field_widget[name=foo]`).toHaveClass("o_required_modifier");
 
     await contains(`.o_field_widget[name=foo] input`).edit("");
-    press(["alt", "n"]);
+    await press(["alt", "n"]);
     await animationFrame();
     expect(`.o_breadcrumb`).toHaveText("first record");
     expect(`.o_form_status_indicator .text-danger`).toHaveAttribute(
@@ -5116,7 +5366,7 @@ test.tags("desktop")(
         expect(`.o_pager_counter`).toHaveText("1 / 2");
 
         await contains(`.o_field_widget[name=foo] input`).edit("");
-        press(["alt", "n"]);
+        await press(["alt", "n"]);
         await animationFrame();
         expect(`.o_pager_counter`).toHaveText("1 / 2");
     }
@@ -5178,12 +5428,12 @@ test(`keynav: switching to another record from a dirty one`, async () => {
     expect(`.o_field_widget[name=foo] input`).toHaveValue("yop");
 
     await contains(`.o_field_widget[name=foo] input`).edit("new value", { confirm: false });
-    press(["alt", "n"]);
+    await press(["alt", "n"]);
     await animationFrame();
     expect.verifySteps(["web_save"]);
     expect(`.o_field_widget[name=foo] input`).toHaveValue("blip");
 
-    press(["alt", "p"]);
+    await press(["alt", "p"]);
     await animationFrame();
     expect.verifySteps([]);
     expect(`.o_field_widget[name=foo] input`).toHaveValue("new value");
@@ -5203,11 +5453,11 @@ test.tags("desktop")(
         expect(getPagerLimit()).toBe(2);
 
         await contains(`.o_field_widget[name=foo] input`).edit("new value", { confirm: false });
-        press(["alt", "n"]);
+        await press(["alt", "n"]);
         await animationFrame();
         expect(`.o_pager_counter`).toHaveText("2 / 2");
 
-        press(["alt", "p"]);
+        await press(["alt", "p"]);
         await animationFrame();
         expect(`.o_pager_counter`).toHaveText("1 / 2");
     }
@@ -7041,7 +7291,7 @@ test(`non inline subview and create=0 in action context`, async () => {
     Product._views = {
         kanban: `
             <kanban>
-                <templates><t t-name="kanban-card">
+                <templates><t t-name="card">
                     <field name="name"/>
                 </t></templates>
             </kanban>
@@ -8445,18 +8695,20 @@ test.tags("desktop")(`buttons are disabled until status bar action is resolved`,
     expect(`.o-form-buttonbox button:not(:disabled)`).toHaveCount(1);
 });
 
-test(`buttons with "confirm" attribute save before calling the method`, async () => {
-    mockService("action", {
-        doActionButton() {
-            expect.step("execute_action");
-        },
-    });
+test.tags("desktop")(
+    `buttons with "confirm" attribute save before calling the method on desktop`,
+    async () => {
+        mockService("action", {
+            doActionButton() {
+                expect.step("execute_action");
+            },
+        });
 
-    onRpc(({ method }) => expect.step(method));
-    await mountView({
-        resModel: "partner",
-        type: "form",
-        arch: `
+        onRpc(({ method }) => expect.step(method));
+        await mountView({
+            resModel: "partner",
+            type: "form",
+            arch: `
             <form>
                 <header>
                     <button name="post" class="child_ids" string="Confirm" type="object" confirm="Very dangerous. U sure?"/>
@@ -8466,30 +8718,76 @@ test(`buttons with "confirm" attribute save before calling the method`, async ()
                 </sheet>
             </form>
         `,
-    });
+        });
 
-    // click on button, and cancel in confirm dialog
-    await contains(`.o_statusbar_buttons button`).click();
-    expect(`.o_statusbar_buttons button`).not.toBeEnabled();
+        // click on button, and cancel in confirm dialog
+        await contains(`.o_statusbar_buttons button`).click();
+        expect(`.o_statusbar_buttons button`).not.toBeEnabled();
 
-    await contains(`.modal-footer button.btn-secondary`).click();
-    expect(`.o_statusbar_buttons button`).toBeEnabled();
+        await contains(`.modal-footer button.btn-secondary`).click();
+        expect(`.o_statusbar_buttons button`).toBeEnabled();
 
-    expect.verifySteps(["get_views", "onchange"]);
+        expect.verifySteps(["get_views", "onchange"]);
 
-    // click on button, and click on ok in confirm dialog
-    await contains(`.o_statusbar_buttons button`).click();
-    expect.verifySteps([]);
-    await contains(`.modal-footer button.btn-primary`).click();
-    expect.verifySteps(["web_save", "execute_action"]);
-});
+        // click on button, and click on ok in confirm dialog
+        await contains(`.o_statusbar_buttons button`).click();
+        expect.verifySteps([]);
+        await contains(`.modal-footer button.btn-primary`).click();
+        expect.verifySteps(["web_save", "execute_action"]);
+    }
+);
 
-test(`buttons with "confirm-title" and "confirm-label" attributes`, async () => {
-    onRpc(({ method }) => expect.step(method));
-    await mountView({
-        resModel: "partner",
-        type: "form",
-        arch: `
+test.tags("mobile")(
+    `buttons with "confirm" attribute save before calling the method on mobile`,
+    async () => {
+        mockService("action", {
+            doActionButton() {
+                expect.step("execute_action");
+            },
+        });
+
+        onRpc(({ method }) => expect.step(method));
+        await mountView({
+            resModel: "partner",
+            type: "form",
+            arch: `
+            <form>
+                <header>
+                    <button name="post" class="child_ids" string="Confirm" type="object" confirm="Very dangerous. U sure?"/>
+                </header>
+                <sheet>
+                    <field name="foo"/>
+                </sheet>
+            </form>
+        `,
+        });
+
+        // click on button, and cancel in confirm dialog
+        await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+        await contains(`.o_statusbar_button_dropdown_item button`).click();
+        expect(`.o_statusbar_button_dropdown_item button`).not.toBeEnabled();
+
+        await contains(`.modal-footer button.btn-secondary`).click();
+        expect(`.o_statusbar_button_dropdown_item button`).toBeEnabled();
+
+        expect.verifySteps(["get_views", "onchange"]);
+
+        // click on button, and click on ok in confirm dialog
+        await contains(`.o_statusbar_button_dropdown_item button`).click();
+        expect.verifySteps([]);
+        await contains(`.modal-footer button.btn-primary`).click();
+        expect.verifySteps(["web_save", "execute_action"]);
+    }
+);
+
+test.tags("desktop")(
+    `buttons with "confirm-title" and "confirm-label" attributes on desktop`,
+    async () => {
+        onRpc(({ method }) => expect.step(method));
+        await mountView({
+            resModel: "partner",
+            type: "form",
+            arch: `
             <form>
                 <header>
                     <button name="post" class="child_ids" string="Confirm" type="object" confirm="Very dangerous. U sure?"
@@ -8500,14 +8798,75 @@ test(`buttons with "confirm-title" and "confirm-label" attributes`, async () => 
                 </sheet>
             </form>
         `,
-    });
-    await contains(`.o_statusbar_buttons button`).click();
-    expect(`.modal-title`).toHaveText("Confirm Title");
-    expect(`.modal-footer button.btn-primary`).toHaveText("Confirm Label");
-    expect.verifySteps(["get_views", "onchange"]);
-});
+        });
+        await contains(`.o_statusbar_buttons button`).click();
+        expect(`.modal-title`).toHaveText("Confirm Title");
+        expect(`.modal-footer button.btn-primary`).toHaveText("Confirm Label");
+        expect.verifySteps(["get_views", "onchange"]);
+    }
+);
 
-test(`buttons with "confirm" attribute: click twice on "Ok"`, async () => {
+test.tags("mobile")(
+    `buttons with "confirm-title" and "confirm-label" attributes on mobile`,
+    async () => {
+        onRpc(({ method }) => expect.step(method));
+        await mountView({
+            resModel: "partner",
+            type: "form",
+            arch: `
+            <form>
+                <header>
+                    <button name="post" class="child_ids" string="Confirm" type="object" confirm="Very dangerous. U sure?"
+                        confirm-title="Confirm Title" confirm-label="Confirm Label"/>
+                </header>
+                <sheet>
+                    <field name="foo"/>
+                </sheet>
+            </form>
+        `,
+        });
+        await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+        await contains(`.o_statusbar_button_dropdown_item button`).click();
+        expect(`.modal-title`).toHaveText("Confirm Title");
+        expect(`.modal-footer button.btn-primary`).toHaveText("Confirm Label");
+        expect.verifySteps(["get_views", "onchange"]);
+    }
+);
+
+test.tags("desktop")(
+    `buttons with "confirm" attribute: click twice on "Ok" on desktop`,
+    async () => {
+        mockService("action", {
+            doActionButton() {
+                expect.step("execute_action"); // should be called only once
+            },
+        });
+
+        onRpc(({ method }) => expect.step(method));
+        await mountView({
+            resModel: "partner",
+            type: "form",
+            arch: `
+            <form>
+                <header>
+                    <button name="post" class="child_ids" string="Confirm" type="object" confirm="U sure?"/>
+                </header>
+            </form>
+        `,
+        });
+        expect.verifySteps(["get_views", "onchange"]);
+
+        await contains(`.o_statusbar_buttons button`).click();
+        expect.verifySteps([]);
+
+        contains(`.modal-footer button.btn-primary`).click();
+        await animationFrame();
+        expect(`.modal-footer button.btn-primary`).not.toBeEnabled();
+        expect.verifySteps(["web_save", "execute_action"]);
+    }
+);
+
+test.tags("mobile")(`buttons with "confirm" attribute: click twice on "Ok" on mobile`, async () => {
     mockService("action", {
         doActionButton() {
             expect.step("execute_action"); // should be called only once
@@ -8528,7 +8887,8 @@ test(`buttons with "confirm" attribute: click twice on "Ok"`, async () => {
     });
     expect.verifySteps(["get_views", "onchange"]);
 
-    await contains(`.o_statusbar_buttons button`).click();
+    await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+    await contains(`.o_statusbar_button_dropdown_item button`).click();
     expect.verifySteps([]);
 
     contains(`.modal-footer button.btn-primary`).click();
@@ -8790,15 +9150,15 @@ test.tags("desktop")(`display tooltips for buttons (debug = false)`, async () =>
         `,
     });
 
-    hover(`button[name='empty_method']`);
+    await hover(`button[name='empty_method']`);
     await runAllTimers();
     expect(`.o-tooltip`).toHaveCount(0);
 
-    hover(`button[name='some_method']`);
+    await hover(`button[name='some_method']`);
     await runAllTimers();
     expect(`.o-tooltip`).toHaveText("This is title");
 
-    hover(`button[name='other_method']`);
+    await hover(`button[name='other_method']`);
     await runAllTimers();
     expect(`.o-tooltip`).toHaveText("Button2\n\nhelp Button2");
 });
@@ -8820,19 +9180,19 @@ test.tags("desktop")(`display tooltips for buttons (debug = true)`, async () => 
         `,
     });
 
-    hover(`button[name='empty_method']`);
+    await hover(`button[name='empty_method']`);
     await runAllTimers();
     expect(`.o-tooltip`).toHaveText(
         "Button : Empty Button\nObject:partner\nButton Type:object\nMethod:empty_method"
     );
 
-    hover(`button[name='some_method']`);
+    await hover(`button[name='some_method']`);
     await runAllTimers();
     expect(`.o-tooltip`).toHaveText(
         `Button : Button\n\nThis is title\n\nObject:partner\nReadonly:display_name == 'readonly'\nButton Type:object\nMethod:some_method`
     );
 
-    hover(`button[name='other_method']`);
+    await hover(`button[name='other_method']`);
     await runAllTimers();
     expect(`.o-tooltip`).toHaveText(
         `Button : Button2\n\nhelp Button2\n\nObject:partner\nButton Type:object\nMethod:other_method`
@@ -8992,28 +9352,58 @@ test(`can toggle column in x2many in sub form view`, async () => {
     expect(queryAllTexts`.o_dialog:not(.o_inactive_modal) .o_data_cell`).toEqual(["blip", "yop"]);
 });
 
-test(`rainbowman attributes correctly passed on button click`, async () => {
-    mockService("action", {
-        doActionButton({ effect }) {
-            expect.step("doActionButton");
-            expect(effect).toBe("{'message': 'Congrats!'}");
-        },
-    });
+test.tags("desktop")(
+    `rainbowman attributes correctly passed on button click on desktop`,
+    async () => {
+        mockService("action", {
+            doActionButton({ effect }) {
+                expect.step("doActionButton");
+                expect(effect).toBe("{'message': 'Congrats!'}");
+            },
+        });
 
-    await mountView({
-        resModel: "partner",
-        type: "form",
-        arch: `
+        await mountView({
+            resModel: "partner",
+            type: "form",
+            arch: `
             <form>
                 <header>
                     <button name="action_won" string="Won" type="object" effect="{'message': 'Congrats!'}"/>
                 </header>
             </form>
         `,
-    });
-    await contains(`.o_form_statusbar .btn-secondary`).click();
-    expect.verifySteps(["doActionButton"]);
-});
+        });
+        await contains(`.o_form_statusbar .btn-secondary`).click();
+        expect.verifySteps(["doActionButton"]);
+    }
+);
+
+test.tags("mobile")(
+    `rainbowman attributes correctly passed on button click on mobile`,
+    async () => {
+        mockService("action", {
+            doActionButton({ effect }) {
+                expect.step("doActionButton");
+                expect(effect).toBe("{'message': 'Congrats!'}");
+            },
+        });
+
+        await mountView({
+            resModel: "partner",
+            type: "form",
+            arch: `
+            <form>
+                <header>
+                    <button name="action_won" string="Won" type="object" effect="{'message': 'Congrats!'}"/>
+                </header>
+            </form>
+        `,
+        });
+        await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
+        await contains(`.o_statusbar_button_dropdown_item button`).click();
+        expect.verifySteps(["doActionButton"]);
+    }
+);
 
 test(`basic support for widgets`, async () => {
     class MyComponent extends Component {
@@ -9085,12 +9475,23 @@ test(`widget with readonly attribute`, async () => {
     expect(`.o_widget`).toHaveText("readonly");
 });
 
-test(`support header button as widgets on form statusbar`, async () => {
+test.tags("desktop")(`support header button as widgets on form statusbar on desktop`, async () => {
     await mountView({
         resModel: "partner",
         type: "form",
         arch: `<form><header><widget name="attach_document" string="Attach document"/></header></form>`,
     });
+    expect(`button.o_attachment_button`).toHaveCount(1);
+    expect(`span.o_attach_document`).toHaveText("Attach document");
+});
+
+test.tags("mobile")(`support header button as widgets on form statusbar on mobile`, async () => {
+    await mountView({
+        resModel: "partner",
+        type: "form",
+        arch: `<form><header><widget name="attach_document" string="Attach document"/></header></form>`,
+    });
+    await contains(`.o_cp_action_menus button:has(.fa-cog)`).click();
     expect(`button.o_attachment_button`).toHaveCount(1);
     expect(`span.o_attach_document`).toHaveText("Attach document");
 });
@@ -9135,7 +9536,7 @@ test.tags("desktop")(`proper stringification in debug mode tooltip`, async () =>
         `,
     });
 
-    hover(`[name='product_id']`);
+    await hover(`[name='product_id']`);
     await runAllTimers();
     expect(`.o-tooltip--technical > li[data-item="context"]`).toHaveCount(1);
     expect(`.o-tooltip--technical > li[data-item="context"]`).toHaveText(/{'lang': 'en_US'}/);
@@ -9164,7 +9565,7 @@ test.tags("desktop")(`field tooltip in debug mode, on field with domain attr`, a
         `,
     });
 
-    hover(`[name='product_id']`);
+    await hover(`[name='product_id']`);
     await runAllTimers();
     expect(`.o-tooltip--technical > li[data-item="domain"]`).toHaveCount(1);
     expect(`.o-tooltip--technical > li[data-item="domain"]`).toHaveText(/\[\['id', '>', 3\]\]/);
@@ -9185,7 +9586,7 @@ test.tags("desktop")(`do not display unset attributes in debug field tooltip`, a
         `,
     });
 
-    hover(`[name='product_id']`);
+    await hover(`[name='product_id']`);
     await runAllTimers();
     expect(queryAllTexts`.o-tooltip--technical > li`).toEqual([
         "Label:Product",
@@ -9568,7 +9969,7 @@ test.tags("desktop")(`discard after a failed save (and close notifications)`, as
         kanban: `
             <kanban>
                 <templates>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="foo" />
                     </t>
                 </templates>
@@ -9613,7 +10014,7 @@ test(`one2many create record dialog shouldn't have a 'remove' button`, async () 
                 <field name="child_ids">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="foo"/>
                             </t>
                         </templates>
@@ -9700,7 +10101,7 @@ test(`form view with inline list view with optional fields and local storage moc
 
     const localStorageKey = "partner,form,123456789,child_ids,list,bar,foo";
     expect.verifySteps([
-        "getItem pwa.installationState",
+        "getItem pwaService.installationState",
         `getItem optional_fields,${localStorageKey}`,
         `getItem debug_open_view,${localStorageKey}`,
     ]);
@@ -9765,7 +10166,7 @@ test.tags("desktop")(
 
         const localStorageKey = "partner,form,123456789,child_ids,list,bar,foo";
         expect.verifySteps([
-            "getItem pwa.installationState",
+            "getItem pwaService.installationState",
             `getItem optional_fields,${localStorageKey}`,
             `getItem debug_open_view,${localStorageKey}`,
         ]);
@@ -9907,13 +10308,13 @@ test.tags("desktop")(`company_dependent field in form view, in multi company gro
         `,
     });
 
-    hover(`.o_form_label[for=product_id_0] sup`);
+    await hover(`.o_form_label[for=product_id_0] sup`);
     await runAllTimers();
     expect(`.o-tooltip .o-tooltip--help`).toHaveText(
         "this is a tooltip\n\nValues set here are company-specific."
     );
 
-    hover(`.o_form_label[for=foo_0] sup`);
+    await hover(`.o_form_label[for=foo_0] sup`);
     await runAllTimers();
     expect(`.o-tooltip .o-tooltip--help`).toHaveText("Values set here are company-specific.");
 });
@@ -9940,7 +10341,7 @@ test.tags("desktop")(
             `,
         });
 
-        hover(`.o_form_label sup`);
+        await hover(`.o_form_label sup`);
         await runAllTimers();
         expect(`.o-tooltip .o-tooltip--help`).toHaveText("this is a tooltip");
     }
@@ -10336,11 +10737,11 @@ test.tags("desktop")(`help on field is shown without debug mode -- form`, async 
         `,
     });
 
-    hover(`.o_form_label[for=foo_0] sup`);
+    await hover(`.o_form_label[for=foo_0] sup`);
     await runAllTimers();
     expect(`.o-tooltip .o-tooltip--help`).toHaveText(/foo xml tooltip/);
 
-    hover(`.o_form_label[for=bar_0] sup`);
+    await hover(`.o_form_label[for=bar_0] sup`);
     await runAllTimers();
     expect(`.o-tooltip .o-tooltip--help`).toHaveText(/bar xml tooltip/);
 });
@@ -10402,7 +10803,7 @@ test.tags("desktop")(`empty x2manys when coming form a list with sample data`, a
                 <field name="child_ids">
                     <kanban>
                         <templates>
-                            <t t-name="kanban-card">
+                            <t t-name="card">
                                 <field name="name"/>
                             </t>
                         </templates>

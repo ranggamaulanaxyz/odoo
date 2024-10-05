@@ -9,7 +9,7 @@ patch(ReceiptScreen.prototype, {
         onWillUnmount(() => {
             // When leaving the receipt screen to the floor screen the order is paid and can be removed
             if (this.pos.mainScreen.component === FloorScreen && this.currentOrder.finalized) {
-                this.pos.removeOrder(this.currentOrder);
+                this.pos.removeOrder(this.currentOrder, false);
             }
         });
     },
@@ -27,7 +27,11 @@ patch(ReceiptScreen.prototype, {
         this.pos.showScreen("ProductScreen");
     },
     isContinueSplitting() {
-        if (this.pos.config.module_pos_restaurant && this.pos.selectedTable) {
+        if (
+            this.pos.config.module_pos_restaurant &&
+            !this.pos.selectedTable &&
+            !this.currentOrder.originalSplittedOrder
+        ) {
             const originalOrderUuid = this.currentOrder.uiState.splittedOrderUuid;
 
             if (!originalOrderUuid) {
@@ -40,12 +44,6 @@ patch(ReceiptScreen.prototype, {
         } else {
             return false;
         }
-    },
-    isResumeVisible() {
-        if (this.isContinueSplitting()) {
-            return false;
-        }
-        return super.isResumeVisible(...arguments);
     },
     //@override
     get nextScreen() {

@@ -14,7 +14,7 @@ from odoo import Command, api, models
 from odoo.addons.base.models.ir_model import MODULE_UNINSTALL_FLAG
 from odoo.exceptions import AccessError, UserError
 from odoo.modules import get_resource_from_path
-from odoo.tools import file_open, get_lang, groupby, SQL
+from odoo.tools import file_open, float_compare, get_lang, groupby, SQL
 from odoo.tools.translate import _, code_translations, TranslationImporter
 
 _logger = logging.getLogger(__name__)
@@ -297,7 +297,7 @@ class AccountChartTemplate(models.AbstractModel):
             template_line_ids = [x for x in template.get('repartition_line_ids', []) if x[0] != Command.CLEAR]
             return (
                 tax.amount_type != template.get('amount_type', 'percent')
-                or tax.amount != template.get('amount', 0)
+                or float_compare(tax.amount, template.get('amount', 0), precision_digits=4) != 0
                 # Taxes that don't have repartition lines in their templates get theirs created by default
                 or len(template_line_ids) not in (0, len(tax.repartition_line_ids))
             )
@@ -398,7 +398,10 @@ class AccountChartTemplate(models.AbstractModel):
                     and isinstance(values[fname], (list, tuple))
                 ]
                 if x2manyfields:
-                    rec = self.ref(xmlid, raise_if_not_found=False)
+                    if isinstance(xmlid, int):
+                        rec = self.env[model_name].browse(xmlid).exists()
+                    else:
+                        rec = self.ref(xmlid, raise_if_not_found=False)
                     if rec:
                         for fname in x2manyfields:
                             for i, (line, (command, _id, vals)) in enumerate(zip(rec[fname], values[fname])):
@@ -664,22 +667,25 @@ class AccountChartTemplate(models.AbstractModel):
         if not company.parent_id and self.env['account.tax'].search_count([('tax_exigibility', '=', 'on_payment')], limit=1):
             company.tax_exigibility = True
 
-        for field, model in {
+        for field, model in self._get_property_accounts(additional_properties).items():
+            value = template_data.get(field)
+            if value and field in self.env[model]._fields:
+                self.env['ir.default'].set(model, field, self.ref(value).id, company_id=company.id)
+
+        # Set default transfer account on the internal transfer reconciliation model
+        reco = self.ref('internal_transfer_reco', raise_if_not_found=False)
+        if reco:
+            reco.line_ids.write({'account_id': company.transfer_account_id.id})
+
+    def _get_property_accounts(self, additional_properties):
+        return {
             **additional_properties,
             'property_account_receivable_id': 'res.partner',
             'property_account_payable_id': 'res.partner',
             'property_account_expense_categ_id': 'product.category',
             'property_account_income_categ_id': 'product.category',
             'property_stock_journal': 'product.category',
-        }.items():
-            value = template_data.get(field)
-            if value and field in self.env[model]._fields:
-                self.env['ir.property']._set_default(field, model, self.ref(value).id, company=company)
-
-        # Set default transfer account on the internal transfer reconciliation model
-        reco = self.ref('internal_transfer_reco', raise_if_not_found=False)
-        if reco:
-            reco.line_ids.write({'account_id': company.transfer_account_id.id})
+        }
 
     def _get_chart_template_data(self, template_code):
         template_data = defaultdict(lambda: defaultdict(dict))
@@ -727,20 +733,6 @@ class AccountChartTemplate(models.AbstractModel):
                 'prefix': bank_prefix,
                 'code_digits': code_digits,
                 'account_type': 'asset_current',
-            },
-            'account_journal_payment_debit_account_id': {
-                'name': _("Outstanding Receipts"),
-                'prefix': bank_prefix,
-                'code_digits': code_digits,
-                'account_type': 'asset_current',
-                'reconcile': True,
-            },
-            'account_journal_payment_credit_account_id': {
-                'name': _("Outstanding Payments"),
-                'prefix': bank_prefix,
-                'code_digits': code_digits,
-                'account_type': 'asset_current',
-                'reconcile': True,
             },
             'account_journal_early_pay_discount_loss_account_id': {
                 'name': _("Cash Discount Loss"),
@@ -1136,12 +1128,17 @@ class AccountChartTemplate(models.AbstractModel):
         assert re.fullmatch(r"[a-z0-9_]+", module)
 
         def evaluate(key, value, model_fields):
+            if not value:
+                return value
             if '@' in key:
                 return value
             if '/' in key:
                 return []
-            if model_fields and model_fields[key].type in ('boolean', 'int', 'float'):
-                return ast.literal_eval(value) if value else False
+            if model_fields:
+                if model_fields[key].type in ('boolean', 'int', 'float'):
+                    return ast.literal_eval(value)
+                if model_fields[key].type == 'char':
+                    return value.strip()
             return value
 
         res = {}

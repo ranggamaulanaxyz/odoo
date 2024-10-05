@@ -40,6 +40,14 @@ export class ProductProduct extends Base {
         return this.attribute_line_ids.map((a) => a.product_template_value_ids).flat().length > 1;
     }
 
+    needToConfigure() {
+        return (
+            this.isConfigurable() &&
+            this.attribute_line_ids.length > 0 &&
+            !this.attribute_line_ids.every((l) => l.attribute_id.create_variant === "always")
+        );
+    }
+
     isCombo() {
         return this.combo_ids.length;
     }
@@ -193,6 +201,21 @@ export class ProductProduct extends Base {
     exactMatch(searchWord) {
         const fields = ["barcode", "default_code"];
         return fields.some((field) => this[field] && this[field].includes(searchWord));
+    }
+
+    _isArchivedCombination(attributeValueIds) {
+        if (!this._archived_combinations) {
+            return false;
+        }
+        for (const archivedCombination of this._archived_combinations) {
+            const ptavCommon = archivedCombination.filter((ptav) =>
+                attributeValueIds.includes(ptav)
+            );
+            if (ptavCommon.length === attributeValueIds.length) {
+                return true;
+            }
+        }
+        return false;
     }
 }
 registry.category("pos_available_models").add(ProductProduct.pythonModel, ProductProduct);

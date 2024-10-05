@@ -2,7 +2,7 @@
 
 import { _t } from "@web/core/l10n/translation";
 import {
-    dragNDrop,
+    insertSnippet,
     goBackToBlocks,
     registerWebsitePreviewTour,
 } from '@website/js/tours/tour_utils';
@@ -11,7 +11,6 @@ import { markup } from "@odoo/owl";
 
 registerWebsitePreviewTour("test_01_admin_shop_tour", {
     url: '/shop',
-    sequence: 130,
 },
 () => [
 {
@@ -71,7 +70,7 @@ goBackToBlocks(),
     isActive: ["auto"],
     trigger: "body:not(.modal-open)",
 },
-...dragNDrop({
+...insertSnippet({
     id: "s_text_image",
     name: "Text - Image",
     groupName: "Content",

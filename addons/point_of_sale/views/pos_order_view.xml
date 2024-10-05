@@ -62,7 +62,7 @@
                     <page string="Products" name="products">
                       <field name="lines" colspan="4" nolabel="1" readonly="state != 'draft'" mode="list,kanban">
                             <kanban class="o_kanban_mobile">
-                                <t t-name="kanban-card" class="row g-0">
+                                <t t-name="card" class="row g-0">
                                     <aside class="col-2 pe-3">
                                         <field name="product_id" widget="image" options="{'preview_image': 'image_128'}"/>
                                     </aside>
@@ -94,7 +94,7 @@
                                 <field name="total_cost" invisible="not is_total_cost_computed" optional="hide" widget="monetary"/>
                                 <field name="margin" invisible="not is_total_cost_computed" optional="hide" widget="monetary"/>
                                 <field name="margin_percent" invisible="not is_total_cost_computed" optional="hide" widget="percentage"/>
-                                <field name="discount" string="Disc.%"/>
+                                <field name="discount" width="50px" string="Disc.%"/>
                                 <field name="tax_ids_after_fiscal_position" widget="many2many_tags" string="Taxes"/>
                                 <field name="tax_ids" widget="many2many_tags" column_invisible="True"/>
                                 <field name="price_subtotal" widget="monetary" force_save="1"/>
@@ -150,7 +150,7 @@
                         <div class="clearfix"/>
                     </page>
                     <page string="Payments" name="payments">
-                        <field name="payment_ids" colspan="4" nolabel="1" readonly="state in ['invoiced', 'done']">
+                        <field name="payment_ids" colspan="4" nolabel="1" readonly="state in ['invoiced', 'done'] or nb_print > 0">
                             <list string="Payments" create="1" editable="bottom">
                                 <field name="currency_id" column_invisible="True" />
                                 <field name="payment_date"/>
@@ -182,6 +182,7 @@
                                 <field name="country_code" invisible="1"/>
                                 <field name="company_id" groups="base.group_multi_company"/>
                                 <field name="pricelist_id" groups="product.group_product_pricelist" readonly="state != 'draft'"/>
+                                <field name="floating_order_name" invisible="not floating_order_name"/>
                             </group>
                             <group string="Contact Info">
                                 <group class="w-75">
@@ -198,8 +199,8 @@
                             </group>
                         </group>
                     </page>
-                    <page string="Notes" name="notes">
-                        <field name="note"/>
+                    <page string="General Notes" name="notes">
+                        <field name="general_note" readonly="1"/>
                     </page>
                 </notebook>
             </sheet>
@@ -215,22 +216,22 @@
             <kanban class="o_kanban_mobile" create="0" sample="1">
                 <field name="currency_id"/>
                 <templates>
-                    <t t-name="kanban-card">
-                            <div class="d-flex mb-1">
-                                <span t-if="record.partner_id.value">
-                                    <field name="partner_id" class="fw-bolder"/>
-                                </span>
-                                <span t-else="">
-                                    <field name="name" class="fw-bolder"/>
-                                </span>
-                                <field name="amount_total" widget="monetary" class="fw-bolder ms-auto"/>
-                            </div>
-                            <field name="pos_reference" />
-                            <div class="d-flex">
-                                <field name="date_order" class="text-muted"/>
-                                <field name="state" widget="label_selection" options="{'classes': {'draft': 'default',
-                                'invoiced': 'success', 'cancel': 'danger'}}" class="ms-auto"/>
-                            </div>
+                    <t t-name="card">
+                        <div class="d-flex align-items-baseline mb-1">
+                            <span t-if="record.partner_id.value">
+                                <field name="partner_id" class="fw-bolder me-2"/>
+                            </span>
+                            <span t-else="">
+                                <field name="name" class="fw-bolder me-2"/>
+                            </span>
+                            <field name="amount_total" widget="monetary" class="fw-bolder ms-auto flex-shrink-0"/>
+                        </div>
+                        <field name="pos_reference" />
+                        <footer class="flex-wrap">
+                            <field name="date_order" class="text-muted text-nowrap"/>
+                            <field name="state" widget="label_selection" options="{'classes': {'draft': 'default',
+                            'invoiced': 'success', 'cancel': 'danger'}}" class="ms-auto text-truncate"/>
+                        </footer>
                     </t>
                 </templates>
             </kanban>

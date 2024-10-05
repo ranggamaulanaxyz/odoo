@@ -70,6 +70,8 @@
  * @property { CollaborationOdooPlugin['getPeerMetadata'] } getPeerMetadata
  */
 
+import { isProtected, isProtecting, isUnprotecting } from "./utils/dom_info";
+
 export class Plugin {
     static name = "";
     static dependencies = [];
@@ -96,6 +98,7 @@ export class Plugin {
         this.dispatch = dispatch;
         this._cleanups = [];
         this.resources = null; // set before start
+        this.isDestroyed = false;
     }
 
     setup() {}
@@ -112,7 +115,14 @@ export class Plugin {
     handleCommand(command) {}
 
     addDomListener(target, eventName, fn, capture) {
-        const handler = fn.bind(this);
+        const handler = (ev) => {
+            if (
+                !isProtecting(ev.target) &&
+                (!isProtected(ev.target) || isUnprotecting(ev.target))
+            ) {
+                fn?.call(this, ev);
+            }
+        };
         target.addEventListener(eventName, handler, capture);
         this._cleanups.push(() => target.removeEventListener(eventName, handler, capture));
     }
@@ -121,5 +131,6 @@ export class Plugin {
         for (const cleanup of this._cleanups) {
             cleanup();
         }
+        this.isDestroyed = true;
     }
 }

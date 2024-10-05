@@ -2,6 +2,7 @@ import { waitUntilSubscribe } from "@bus/../tests/bus_test_helpers";
 
 import { mailDataHelpers } from "@mail/../tests/mock_server/mail_mock_server";
 import {
+    SIZES,
     assertSteps,
     click,
     contains,
@@ -498,6 +499,39 @@ test("receive new needaction messages", async () => {
     await contains(".o-mail-Message-content", { text: "not empty 2" });
 });
 
+test("receive a message that is not linked to thread", async () => {
+    const pyEnv = await startServer();
+    const partnerId = pyEnv["res.partner"].create({ name: "Frodo Baggins" });
+    await start();
+    await openDiscuss();
+    await contains("button.o-active", { text: "Inbox", contains: [".badge", { count: 0 }] });
+    await contains(".o-mail-Thread .o-mail-Message", { count: 0 });
+    // simulate receiving a new needaction message that is not linked to thread
+    const messageId_1 = pyEnv["mail.message"].create({
+        author_id: partnerId,
+        body: "needaction message",
+        needaction: true,
+    });
+    pyEnv["mail.notification"].create({
+        mail_message_id: messageId_1,
+        notification_status: "sent",
+        notification_type: "inbox",
+        res_partner_id: serverState.partnerId,
+    });
+    const [partner] = pyEnv["res.partner"].read(serverState.partnerId);
+    pyEnv["bus.bus"]._sendone(
+        partner,
+        "mail.message/inbox",
+        new mailDataHelpers.Store(
+            pyEnv["mail.message"].browse(messageId_1),
+            makeKwArgs({ for_current_user: true, add_followers: true })
+        ).get_result()
+    );
+    await contains("button", { text: "Inbox", contains: [".badge", { text: "1" }] });
+    await contains(".o-mail-Message");
+    await contains(".o-mail-Message-content", { text: "needaction message" });
+});
+
 test("basic rendering", async () => {
     await start();
     await openDiscuss();
@@ -882,7 +916,7 @@ test("post a simple message", async () => {
     });
     await start();
     await openDiscuss(channelId);
-    await contains(".o-mail-Thread", { text: "There are no messages in this conversation." });
+    await contains(".o-mail-Thread", { text: "The conversation is empty." });
     await contains(".o-mail-Message", { count: 0 });
     await insertText(".o-mail-Composer-input", "Test");
     await click(".o-mail-Composer-send:enabled");
@@ -911,7 +945,7 @@ test("post several messages with failures", async () => {
     await start();
     await openDiscuss(channelId);
     // post 3 messages
-    await contains(".o-mail-Thread", { text: "There are no messages in this conversation." });
+    await contains(".o-mail-Thread", { text: "The conversation is empty." });
     await contains(".o-mail-Message", { count: 0 });
     await insertText(".o-mail-Composer-input", "0");
     await click(".o-mail-Composer-send:enabled");
@@ -1512,7 +1546,7 @@ test("Channel is added to discuss after invitation", async () => {
 });
 
 test("select another mailbox", async () => {
-    patchUiSize({ height: 360, width: 640 });
+    patchUiSize({ size: SIZES.SM });
     await start();
     await openDiscuss();
     await contains(".o-mail-Discuss");
@@ -1523,7 +1557,7 @@ test("select another mailbox", async () => {
 });
 
 test('auto-select "Inbox nav bar" when discuss had inbox as active thread', async () => {
-    patchUiSize({ height: 360, width: 640 });
+    patchUiSize({ size: SIZES.SM });
     await start();
     await openDiscuss();
     await contains(".o-mail-Discuss-threadName", { value: "Inbox" });

@@ -14,6 +14,7 @@ from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT, mute_logger
 from odoo.exceptions import ValidationError, UserError
 from odoo.addons.base.models.res_partner import WARNING_MESSAGE, WARNING_HELP
 from odoo.tools import SQL, unique
+from odoo.addons.base_vat.models.res_partner import _ref_vat
 
 _logger = logging.getLogger(__name__)
 
@@ -104,14 +105,9 @@ class AccountFiscalPosition(models.Model):
         for record in self:
             if record.foreign_vat:
                 if record.country_id == record.company_id.account_fiscal_country_id:
-                    if record.foreign_vat == record.company_id.vat:
-                        raise ValidationError(_("You cannot create a fiscal position within your fiscal country with the same VAT number as the main one set on your company."))
-
                     if not record.state_ids:
                         if record.company_id.account_fiscal_country_id.state_ids:
                             raise ValidationError(_("You cannot create a fiscal position with a foreign VAT within your fiscal country without assigning it a state."))
-                        else:
-                            raise ValidationError(_("You cannot create a fiscal position with a foreign VAT within your fiscal country."))
                 if record.country_group_id and record.country_id:
                     if record.country_id not in record.country_group_id.country_ids:
                         raise ValidationError(_("You cannot create a fiscal position with a country outside of the selected country group."))
@@ -231,7 +227,7 @@ class AccountFiscalPosition(models.Model):
                 not fpos.country_group_id
                 or (partner.country_id in fpos.country_group_id.country_ids and 2)
             )),
-            ('sequence', lambda fpos: fpos.sequence or 0.1),  # do not filter out sequence=0
+            ('sequence', lambda fpos: -(fpos.sequence or 0.1)),  # do not filter out sequence=0, priority to lowest sequence in `max` method
         ]
 
     @api.model
@@ -338,6 +334,7 @@ class ResPartner(models.Model):
     _inherit = 'res.partner'
 
     fiscal_country_codes = fields.Char(compute='_compute_fiscal_country_codes')
+    partner_vat_placeholder = fields.Char(compute='_compute_partner_vat_placeholder')
 
     @api.depends('company_id')
     @api.depends_context('allowed_company_ids')
@@ -530,18 +527,19 @@ class ResPartner(models.Model):
         string="Account Payable",
         domain="[('account_type', '=', 'liability_payable'), ('deprecated', '=', False)]",
         help="This account will be used instead of the default one as the payable account for the current partner",
-        required=True)
+        ondelete='restrict')
     property_account_receivable_id = fields.Many2one('account.account', company_dependent=True,
         string="Account Receivable",
         domain="[('account_type', '=', 'asset_receivable'), ('deprecated', '=', False)]",
         help="This account will be used instead of the default one as the receivable account for the current partner",
-        required=True)
+        ondelete='restrict')
     property_account_position_id = fields.Many2one('account.fiscal.position', company_dependent=True,
         string="Fiscal Position",
         help="The fiscal position determines the taxes/accounts used for this contact.")
     property_payment_term_id = fields.Many2one('account.payment.term', company_dependent=True,
         string='Customer Payment Terms',
-        help="This payment term will be used instead of the default one for sales orders and customer invoices")
+        help="This payment term will be used instead of the default one for sales orders and customer invoices",
+        ondelete='restrict')
     property_supplier_payment_term_id = fields.Many2one('account.payment.term', company_dependent=True,
         string='Vendor Payment Terms',
         help="This payment term will be used instead of the default one for purchase orders and vendor bills")
@@ -550,11 +548,34 @@ class ResPartner(models.Model):
     invoice_ids = fields.One2many('account.move', 'partner_id', string='Invoices', readonly=True, copy=False)
     contract_ids = fields.One2many('account.analytic.account', 'partner_id', string='Partner Contracts', readonly=True)
     bank_account_count = fields.Integer(compute='_compute_bank_count', string="Bank")
-    trust = fields.Selection([('good', 'Good Debtor'), ('normal', 'Normal Debtor'), ('bad', 'Bad Debtor')], string='Degree of trust you have in this debtor', default='normal', company_dependent=True)
+    trust = fields.Selection([('good', 'Good Debtor'), ('normal', 'Normal Debtor'), ('bad', 'Bad Debtor')], string='Degree of trust you have in this debtor', company_dependent=True)
     ignore_abnormal_invoice_date = fields.Boolean(company_dependent=True)
     ignore_abnormal_invoice_amount = fields.Boolean(company_dependent=True)
     invoice_warn = fields.Selection(WARNING_MESSAGE, 'Invoice', help=WARNING_HELP, default="no-message")
     invoice_warn_msg = fields.Text('Message for Invoice')
+    invoice_sending_method = fields.Selection(
+        string="Invoice sending",
+        selection=[
+            ('manual', 'Download'),
+            ('email', 'by Email'),
+        ],
+        company_dependent=True,
+    )
+    invoice_edi_format = fields.Selection(
+        string="eInvoice format",
+        selection=[],  # to extend
+        compute='_compute_invoice_edi_format',
+        inverse='_inverse_invoice_edi_format',
+    )
+    invoice_edi_format_store = fields.Char(company_dependent=True)
+    display_invoice_edi_format = fields.Boolean(compute='_compute_display_invoice_edi_format')
+    invoice_template_pdf_report_id = fields.Many2one(
+        comodel_name='ir.actions.report',
+        domain="[('is_invoice_report', '=', True)]",
+        readonly=False,
+        store=True,
+    )
+    display_invoice_template_pdf_report_id = fields.Boolean(compute='_compute_display_invoice_template_pdf_report_id')
     # Computed fields to order the partners as suppliers/customers according to the
     # amount of their generated incoming/outgoing account moves
     supplier_rank = fields.Integer(default=0, copy=False)
@@ -607,6 +628,30 @@ class ResPartner(models.Model):
         domain = expression.AND([domain, [('partner_id', '!=', self._origin.id)]])
         return self.env['res.partner.bank'].search(domain)
 
+    def _compute_display_invoice_edi_format(self):
+        self.display_invoice_edi_format = len(self._fields['invoice_edi_format'].selection)
+
+    def _compute_display_invoice_template_pdf_report_id(self):
+        available_templates_count = self.env['ir.actions.report'].search_count([('is_invoice_report', '=', True)], limit=2)
+        self.display_invoice_template_pdf_report_id = available_templates_count > 1
+
+    @api.depends_context('company')
+    def _compute_invoice_edi_format(self):
+        for partner in self:
+            if partner.invoice_edi_format_store == 'none':
+                partner.invoice_edi_format = False
+            else:
+                partner.invoice_edi_format = partner.invoice_edi_format_store or partner._get_suggested_invoice_edi_format()
+
+    def _inverse_invoice_edi_format(self):
+        for partner in self:
+            if partner.invoice_edi_format == partner._get_suggested_invoice_edi_format():
+                partner.invoice_edi_format_store = False
+            elif not partner.invoice_edi_format:
+                partner.invoice_edi_format_store = 'none'
+            else:
+                partner.invoice_edi_format_store = partner.invoice_edi_format
+
     @api.depends('bank_ids')
     def _compute_duplicated_bank_account_partners_count(self):
         for partner in self:
@@ -614,19 +659,25 @@ class ResPartner(models.Model):
 
     @api.depends_context('company')
     def _compute_use_partner_credit_limit(self):
+        company_limit = self._fields['credit_limit'].get_company_dependent_fallback(self)
         for partner in self:
-            company_limit = self.env['ir.property']._get('credit_limit', 'res.partner')
             partner.use_partner_credit_limit = partner.credit_limit != company_limit
 
     def _inverse_use_partner_credit_limit(self):
+        company_limit = self._fields['credit_limit'].get_company_dependent_fallback(self)
         for partner in self:
             if not partner.use_partner_credit_limit:
-                partner.credit_limit = self.env['ir.property']._get('credit_limit', 'res.partner')
+                partner.credit_limit = company_limit
 
     @api.depends_context('company')
     def _compute_show_credit_limit(self):
         for partner in self:
             partner.show_credit_limit = self.env.company.account_use_credit_limit
+
+    def _get_suggested_invoice_edi_format(self):
+        # TO OVERRIDE
+        self.ensure_one()
+        return False
 
     def _find_accounting_partner(self, partner):
         ''' Find the partner for which the accounting entries will be created '''
@@ -922,3 +973,14 @@ class ResPartner(models.Model):
         if self.vat and self.vat[:2].isalpha():
             country_code = self.vat[:2].upper()
         return country_code
+
+    @api.depends('country_id')
+    def _compute_partner_vat_placeholder(self):
+        for partner in self:
+            placeholder = _("/ if not applicable")
+            if partner.country_id:
+                expected_vat = _ref_vat.get(partner.country_id.code.lower())
+                if expected_vat:
+                    placeholder = _("%s, or / if not applicable", expected_vat)
+
+            partner.partner_vat_placeholder = placeholder

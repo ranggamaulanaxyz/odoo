@@ -74,16 +74,16 @@
                 <progressbar field="activity_state"
                     colors='{"planned": "success", "today": "warning", "overdue": "danger"}'/>
                 <templates>
-                    <t t-name="kanban-card">
-                        <div class="d-flex mb-2">
-                            <field name="partner_id" class="fw-bolder fs-5" />
-                            <field name="amount_total" widget="monetary" class="fw-bolder ms-auto"/>
+                    <t t-name="card">
+                        <div class="d-flex align-items-baseline mb-2">
+                            <field name="partner_id" class="fw-bolder fs-5 me-2"/>
+                            <field name="amount_total" widget="monetary" class="fw-bolder ms-auto flex-shrink-0"/>
                         </div>
-                        <footer class="fs-6">
-                            <div class="d-flex text-muted">
+                        <footer class="align-items-end">
+                            <div class="d-flex flex-wrap gap-1 text-muted text-nowrap">
                                 <field name="name"/>
-                                <field name="date_order" class="ms-1"/>
-                                <field name="activity_ids" widget="kanban_activity" class="ms-2"/>
+                                <field name="date_order"/>
+                                <field name="activity_ids" widget="kanban_activity"/>
                             </div>
                             <field name="state"
                                 widget="label_selection"
@@ -91,6 +91,19 @@
                         </footer>
                     </t>
                 </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="sale_order_kanban_upload" model="ir.ui.view">
+        <field name="name">sale.order.kanban.upload (orders)</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="view_sale_order_kanban"/>
+        <field name="mode">primary</field>
+        <field name="priority">32</field>
+        <field name="arch" type="xml">
+            <kanban position="attributes">
+                <attribute name="js_class">file_upload_kanban</attribute>
             </kanban>
         </field>
     </record>
@@ -172,6 +185,19 @@
             <!-- Dummy view content since empty views are not supported atm -->
             <list position="attributes">
                 <attribute name="string">Sales Orders</attribute>
+            </list>
+        </field>
+    </record>
+
+    <record id="sale_order_list_upload" model="ir.ui.view">
+        <field name="name">sale.order.tree.upload (orders)</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="view_order_tree"/>
+        <field name="mode">primary</field>
+        <field name="priority">32</field>
+        <field name="arch" type="xml">
+            <list position="attributes">
+                <attribute name="js_class">file_upload_list</attribute>
             </list>
         </field>
     </record>
@@ -281,6 +307,18 @@
                 invisible="state not in ['draft', 'sent'] or not has_archived_products">
                 <span>Warning: This quote contains archived product(s)</span>
             </div>
+            <div
+                class="alert alert-warning w-100 d-flex align-items-center gap-1"
+                invisible="state != 'draft' or not duplicated_order_ids"
+                role="alert"
+            >
+                <span>Warning: this order might be a duplicate of</span>
+                <field
+                    name="duplicated_order_ids"
+                    widget="x2many_buttons"
+                    string="Duplicated Documents"
+                />
+            </div>
             <sheet>
                 <div class="oe_button_box" name="button_box">
                     <button name="action_view_invoice"
@@ -350,7 +388,7 @@
                         <field name="pricelist_id" invisible="1" readonly="state in ['cancel', 'sale']" groups="!product.group_product_pricelist"/>
                         <field name="tax_country_id" invisible="1"/>
                         <field name="tax_calculation_rounding_method" invisible="1"/>
-                        <field name="payment_term_id" options="{'no_open': True, 'no_create': True}"/>
+                        <field name="payment_term_id" placeholder="Immediate" options="{'no_open': True, 'no_create': True}"/>
                     </group>
                 </group>
                 <notebook>
@@ -533,6 +571,7 @@
                                 <field name="linked_line_id" column_invisible="1"/>
                                 <field name="virtual_id" column_invisible="1"/>
                                 <field name="linked_virtual_id" column_invisible="1"/>
+                                <field name="selected_combo_items" column_invisible="1"/>
                                 <field name="combo_item_id" column_invisible="1"/>
                                 <field
                                     name="name"
@@ -605,7 +644,7 @@
                                     name="discount"
                                     string="Disc.%"
                                     groups="sale.group_discount_per_so_line"
-                                    width="60px"
+                                    width="50px"
                                     optional="show"/>
                                 <field name="is_downpayment" column_invisible="True"/>
                                 <field name="price_subtotal"
@@ -639,7 +678,7 @@
                                             class="btn-secondary"/>
                                 </control>
                                 <templates>
-                                    <t t-name="kanban-card" class="row g-0 ps-0 pe-0">
+                                    <t t-name="card" class="row g-0 ps-0 pe-0">
                                         <t t-if="!record.display_type.raw_value">
                                             <aside class="col-2 p-1">
                                                 <span t-att-title="record.product_id.value">
@@ -861,14 +900,14 @@
     <record id="sale_order_action_view_order_tree" model="ir.actions.act_window.view">
         <field name="sequence" eval="1"/>
         <field name="view_mode">list</field>
-        <field name="view_id" ref="sale.view_order_tree"/>
+        <field name="view_id" ref="sale.sale_order_list_upload"/>
         <field name="act_window_id" ref="action_orders"/>
     </record>
 
     <record id="sale_order_action_view_order_kanban" model="ir.actions.act_window.view">
         <field name="sequence" eval="2"/>
         <field name="view_mode">kanban</field>
-        <field name="view_id" ref="sale.view_sale_order_kanban"/>
+        <field name="view_id" ref="sale.sale_order_kanban_upload"/>
         <field name="act_window_id" ref="action_orders"/>
     </record>
 
@@ -926,6 +965,20 @@
         </field>
     </record>
 
+    <record id="sale_order_action_view_quotation_tree" model="ir.actions.act_window.view">
+        <field name="sequence" eval="1"/>
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="sale.view_quotation_tree_with_onboarding"/>
+        <field name="act_window_id" ref="action_quotations_with_onboarding"/>
+    </record>
+
+    <record id="sale_order_action_view_quotation_kanban" model="ir.actions.act_window.view">
+        <field name="sequence" eval="2"/>
+        <field name="view_mode">kanban</field>
+        <field name="view_id" ref="sale.view_quotation_kanban_with_onboarding"/>
+        <field name="act_window_id" ref="action_quotations_with_onboarding"/>
+    </record>
+
     <record id="action_quotations" model="ir.actions.act_window">
         <field name="name">Quotations</field>
         <field name="res_model">sale.order</field>
@@ -949,18 +1002,18 @@
         </field>
     </record>
 
-    <record id="sale_order_action_view_quotation_tree" model="ir.actions.act_window.view">
+    <record id="action_quotations_tree" model="ir.actions.act_window.view">
         <field name="sequence" eval="1"/>
         <field name="view_mode">list</field>
-        <field name="view_id" ref="sale.view_quotation_tree_with_onboarding"/>
-        <field name="act_window_id" ref="action_quotations_with_onboarding"/>
+        <field name="view_id" ref="sale.view_quotation_tree"/>
+        <field name="act_window_id" ref="action_quotations"/>
     </record>
 
-    <record id="sale_order_action_view_quotation_kanban" model="ir.actions.act_window.view">
+    <record id="action_quotations_kanban" model="ir.actions.act_window.view">
         <field name="sequence" eval="2"/>
         <field name="view_mode">kanban</field>
-        <field name="view_id" ref="sale.view_quotation_kanban_with_onboarding"/>
-        <field name="act_window_id" ref="action_quotations_with_onboarding"/>
+        <field name="view_id" ref="sale.view_sale_order_kanban"/>
+        <field name="act_window_id" ref="action_quotations"/>
     </record>
 
     <record id="sale_order_action_view_quotation_form" model="ir.actions.act_window.view">
@@ -1046,5 +1099,18 @@
         <field name="binding_view_types">form</field>
         <field name="state">code</field>
         <field name="code">action = records.action_share()</field>
+    </record>
+
+    <record id="model_sale_order_send_mail" model="ir.actions.server">
+        <field name="name">Send an email</field>
+        <field name="model_id" ref="sale.model_sale_order"/>
+        <field name="sequence">1</field>
+        <field name="binding_model_id" ref="sale.model_sale_order"/>
+        <field name="binding_view_types">list,form</field>
+        <field name="state">code</field>
+        <field name="code">
+            if records:
+                action = records.with_context(hide_default_template=True).action_quotation_send()
+        </field>
     </record>
 </odoo>

@@ -16,6 +16,7 @@ __all__ = [
 ]
 
 import logging
+import typing
 import warnings
 from collections import defaultdict
 from collections.abc import Mapping
@@ -34,19 +35,19 @@ from .tools import clean_context, frozendict, lazy_property, OrderedSet, Query, 
 from .tools.translate import get_translation, get_translated_module, LazyGettext
 from odoo.tools.misc import StackMap
 
-import typing
 if typing.TYPE_CHECKING:
     from collections.abc import Callable
-    from odoo.sql_db import BaseCursor
     from odoo.models import BaseModel
     try:
         from typing_extensions import Self  # noqa: F401
     except ImportError:
         from typing import Self  # noqa: F401
-    M = typing.TypeVar("M", bound=BaseModel)
-else:
-    Self = None
-    M = typing.TypeVar("M")
+
+    # not sure Self can work outside of a class?
+    S = typing.TypeVar("S", bound=BaseModel)
+    CreateCaller = Callable[[S, 'ValuesType' | list['ValuesType']], S]
+    CreateCallee = Callable[[S, list['ValuesType']], S]
+    CreateLegacyCallee = Callable[[S, 'ValuesType'], S]
 
 DomainType = list[str | tuple[str, str, typing.Any]]
 ContextType = Mapping[str, typing.Any]
@@ -447,16 +448,16 @@ _create_logger = logging.getLogger(__name__ + '.create')
 
 
 @decorator
-def _model_create_single(create, self, arg):
+def _model_create_single(create: CreateLegacyCallee[S], self: S, arg: ValuesType | list[ValuesType]) -> CreateCaller[S]:
     # 'create' expects a dict and returns a record
     if isinstance(arg, Mapping):
-        return create(self, arg)
+        return create(self, typing.cast(ValuesType, arg))
     if len(arg) > 1:
         _create_logger.debug("%s.create() called with %d dicts", self, len(arg))
     return self.browse().concat(*(create(self, vals) for vals in arg))
 
 
-def model_create_single(method: T) -> T:
+def model_create_single(method: CreateLegacyCallee[S]) -> CreateCaller[S]:
     """ Decorate a method that takes a dictionary and creates a single record.
         The method may be called with either a single dict or a list of dicts::
 
@@ -467,20 +468,20 @@ def model_create_single(method: T) -> T:
         f"The model {method.__module__} is not overriding the create method in batch",
         DeprecationWarning
     )
-    wrapper = _model_create_single(method) # pylint: disable=no-value-for-parameter
+    wrapper = typing.cast('CreateCaller[S]', _model_create_single(method))  # pylint: disable=no-value-for-parameter
     wrapper._api = 'model_create'
     return wrapper
 
 
 @decorator
-def _model_create_multi(create, self, arg):
+def _model_create_multi(create: CreateCallee[S], self: S, arg: ValuesType | list[ValuesType]) -> CreateCaller[S]:
     # 'create' expects a list of dicts and returns a recordset
     if isinstance(arg, Mapping):
-        return create(self, [arg])
+        return create(self, [typing.cast(ValuesType, arg)])
     return create(self, arg)
 
 
-def model_create_multi(method: T) -> T:
+def model_create_multi(method: CreateCallee[S]) -> CreateCaller[S]:
     """ Decorate a method that takes a list of dictionaries and creates multiple
         records. The method may be called with either a single dict or a list of
         dicts::
@@ -488,7 +489,7 @@ def model_create_multi(method: T) -> T:
             record = model.create(vals)
             records = model.create([vals, ...])
     """
-    wrapper = _model_create_multi(method) # pylint: disable=no-value-for-parameter
+    wrapper = typing.cast('CreateCaller[S]', _model_create_multi(method))  # pylint: disable=no-value-for-parameter
     wrapper._api = 'model_create'
     return wrapper
 
@@ -968,7 +969,7 @@ class Environment(Mapping):
         """
         rows = self.execute_query(query)
         if not rows:
-            return rows
+            return []
         description = self.cr.description
         return [
             {column.name: row[index] for index, column in enumerate(description)}
@@ -1209,7 +1210,7 @@ class Cache:
         if dirty:
             assert field.column_type and field.store and all(records._ids)
             self._dirty[field].update(records._ids)
-            if field in records.pool.field_depends_context:
+            if not field.company_dependent and field in records.pool.field_depends_context:
                 # put the values under conventional context key values {'context_key': None},
                 # in order to ease the retrieval of those values to flush them
                 records = records.with_env(records.env(context={}))
@@ -1478,7 +1479,7 @@ class Cache:
 
         for field, field_cache in self._data.items():
             # check column fields only
-            if not field.store or not field.column_type or callable(field.translate):
+            if not field.store or not field.column_type or field.translate or field.company_dependent:
                 continue
 
             model = env[field.model_name]
@@ -1496,6 +1497,35 @@ class Cache:
 
         if invalids:
             _logger.warning("Invalid cache: %s", pformat(invalids))
+
+    def _get_grouped_company_dependent_field_cache(self, field):
+        """
+        get a field cache proxy to group up field cache value for a company
+        dependent field
+        cache data: {field: {(company_id,): {id: value}}}
+
+        :param field: a company dependent field
+        :return: a dict like field cache proxy which is logically similar to
+              {id: {company_id, value}}
+        """
+        field_caches = self._data.get(field, EMPTY_DICT)
+        company_field_cache = {
+            context_key[0]: field_cache
+            for context_key, field_cache in field_caches.items()
+        }
+        return GroupedCompanyDependentFieldCache(company_field_cache)
+
+
+class GroupedCompanyDependentFieldCache:
+    def __init__(self, company_field_cache):
+        self._company_field_cache = company_field_cache
+
+    def __getitem__(self, id_):
+        return {
+            company_id: field_cache[id_]
+            for company_id, field_cache in self._company_field_cache.items()
+            if id_ in field_cache
+        }
 
 
 class Starred:

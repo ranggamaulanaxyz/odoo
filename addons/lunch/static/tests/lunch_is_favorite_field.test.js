@@ -21,11 +21,9 @@ class LunchProduct extends models.Model {
         "kanban,false": `
             <kanban class="o_kanban_test" edit="0">
                 <template>
-                    <t t-name="kanban-box">
-                        <div>
-                            <field name="is_favorite" widget="lunch_is_favorite" nolabel="1"/>
-                            <field name="name"/>
-                        </div>
+                    <t t-name="card">
+                        <field name="is_favorite" widget="lunch_is_favorite" nolabel="1"/>
+                        <field name="name"/>
                     </t>
                 </template>
             </kanban>
@@ -51,7 +49,7 @@ test("Check is_favorite field is still editable even if the record/view is in re
 
     expect("div[name=is_favorite] .o_favorite").toHaveCount(1);
     expect.verifySteps([]);
-    click("div[name=is_favorite] .o_favorite");
+    await click("div[name=is_favorite] .o_favorite");
     await animationFrame();
     expect.verifySteps(["web_save"]);
 });
@@ -73,7 +71,7 @@ test("Check is_favorite field is readonly if the field is readonly", async () =>
 
     expect("div[name=is_favorite] .o_favorite").toHaveCount(1);
     expect.verifySteps([]);
-    click("div[name=is_favorite] .o_favorite");
+    await click("div[name=is_favorite] .o_favorite");
     await animationFrame();
     expect.verifySteps([]);
 });

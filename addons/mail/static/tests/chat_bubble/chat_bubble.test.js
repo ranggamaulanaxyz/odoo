@@ -57,7 +57,7 @@ test("'New message' chat window can only be open [REQUIRE FOCUS]", async () => {
     await click(".o-discuss-ChannelSelector-suggestion");
     triggerHotkey("Enter");
     await contains(".o-mail-ChatWindow");
-    await contains(".o-mail-Thread-empty", { text: "There are no messages in this conversation." });
+    await contains(".o-mail-Thread-empty", { text: "The conversation is empty." });
     await click(".o-mail-ChatWindow-command[title='Fold']");
     await contains(".o-mail-ChatBubble", { count: 1 }); // can fold chat
 });
@@ -74,7 +74,7 @@ test("No duplicated chat bubbles [REQUIRE FOCUS]", async () => {
     await click(".o-discuss-ChannelSelector-suggestion");
     triggerHotkey("Enter");
     await contains(".o-mail-ChatWindow", { text: "John" });
-    await contains(".o-mail-ChatWindow", { text: "There are no messages in this conversation." }); // wait fully loaded
+    await contains(".o-mail-ChatWindow", { text: "The conversation is empty." }); // wait fully loaded
     await click("button[title='Fold']");
     await contains(".o-mail-ChatBubble[name='John']");
     // Make bubble of "John" chat again
@@ -198,11 +198,11 @@ test("Hover on chat bubble shows chat name + last message preview", async () => 
     await start();
     await hover(".o-mail-ChatBubble[name='Marc']");
     await contains(".o-mail-ChatBubble-preview", { text: "MarcHello!" });
-    await leave(".o-mail-ChatBubble[name='Marc']");
+    await leave();
     await contains(".o-mail-ChatBubble-preview", { count: 0 });
     await hover(".o-mail-ChatBubble[name='Demo']");
     await contains(".o-mail-ChatBubble-preview", { text: "Demo" });
-    await leave(".o-mail-ChatBubble[name='Demo']");
+    await leave();
     rpc("/mail/message/post", {
         post_data: { body: "Hi", message_type: "comment" },
         thread_id: demoChannelId,
@@ -314,7 +314,7 @@ test("More than 7 actually folded chat windows shows a 'hidden' chat bubble menu
     // Can make chat from hidden menu
     await hover(".o-mail-ChatHub-hiddenBtn");
     await click(".o-mail-ChatHub-hiddenItem");
-    leave(".o-mail-ChatHub-hiddenBtn"); // FIXME: hover is persistent otherwise
+    await leave(); // FIXME: hover is persistent otherwise
     await contains(".o-mail-ChatHub-hiddenItem", { count: 0 });
     await contains(".o-mail-ChatHub-hiddenBtn", { count: 0 });
     await contains(".o-mail-ChatWindow");

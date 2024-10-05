@@ -29,6 +29,7 @@ import functools
 import inspect
 import itertools
 import io
+import json
 import logging
 import operator
 import pytz
@@ -58,7 +59,7 @@ from .tools import (
     clean_context, config, date_utils, discardattr,
     DEFAULT_SERVER_DATE_FORMAT, DEFAULT_SERVER_DATETIME_FORMAT, format_list,
     frozendict, get_lang, lazy_classproperty, OrderedSet,
-    ormcache, partition, populate, Query, split_every, unique,
+    ormcache, partition, Query, split_every, unique,
     SQL, sql,
 )
 from .tools.lru import LRU
@@ -1075,6 +1076,50 @@ class BaseModel(metaclass=MetaModel):
         if not _is_toplevel_call:
             splittor = lambda rs: rs
 
+        # {properties_fname: {record: {property_name: (value, property_type)}}}
+        cache_properties = {}
+
+        def get_property(properties_fname, property_name, record):
+            # FIXME: Only efficient during the _is_toplevel_call == True
+            if properties_fname not in cache_properties:
+                properties_field = self._fields[properties_fname]
+                # each value is either None or a dict
+                result = []
+                for rec in self:
+                    raw_properties = rec[properties_fname]
+                    definition = properties_field._get_properties_definition(rec)
+                    if not raw_properties or not definition:
+                        result.append(definition or [])
+                    else:
+                        assert isinstance(raw_properties, dict), f"Wrong type {raw_properties!r}"
+                        result.append(properties_field._dict_to_list(raw_properties, definition))
+
+                # FIXME: Far from optimal, it will fetch display_name for no reason
+                res_ids_per_model = properties_field._get_res_ids_per_model(self, result)
+
+                cache_properties[properties_fname] = record_map = {}
+                for properties, rec in zip(result, self):
+                    properties_field._parse_json_types(properties, self.env, res_ids_per_model)
+                    record_map[rec] = prop_map = {}
+                    for prop in properties:
+                        value = prop.get('value')
+                        prop_type = prop.get('type')
+                        property_model = prop.get('comodel')
+
+                        if prop_type in ('many2one', 'many2many') and property_model:
+                            value = self.env[property_model].browse(value)
+                        elif prop_type == 'tags' and value:
+                            value = ",".join(
+                                next(iter(tag[1] for tag in prop['tags'] if tag[0] == v), '')
+                                for v in value
+                            )
+                        elif prop_type == 'selection':
+                            value = dict(prop['selection']).get(value, '')
+
+                        prop_map[prop['name']] = (value, prop_type)
+
+            return cache_properties[properties_fname][record].get(property_name, ('', 'char'))
+
         # memory stable but ends up prefetching 275 fields (???)
         for record in splittor(self):
             # main line of record, initially empty
@@ -1098,15 +1143,23 @@ class BaseModel(metaclass=MetaModel):
                 elif name == 'id':
                     current[i] = (record._name, record.id)
                 else:
-                    field = record._fields[name]
-                    value = record[name]
+                    prop_name = None
+                    if '.' in name:
+                        fname, prop_name = name.split('.')
+                        field = record._fields[fname]
+                        assert field.type == 'properties' and prop_name
+                        value, field_type = get_property(fname, prop_name, record)
+                    else:
+                        field = record._fields[name]
+                        field_type = field.type
+                        value = record[name]
 
                     # this part could be simpler, but it has to be done this way
                     # in order to reproduce the former behavior
                     if not isinstance(value, BaseModel):
                         current[i] = field.convert_to_export(value, record)
 
-                    elif import_compatible and field.type == 'reference':
+                    elif import_compatible and field_type == 'reference':
                         current[i] = f"{value._name},{value.id}"
 
                     else:
@@ -1118,7 +1171,7 @@ class BaseModel(metaclass=MetaModel):
 
                         # in import_compat mode, m2m should always be exported as
                         # a comma-separated list of xids or names in a single cell
-                        if import_compatible and field.type == 'many2many':
+                        if import_compatible and field_type == 'many2many':
                             index = None
                             # find out which subfield the user wants & its
                             # location as we might not get it as the first
@@ -1137,7 +1190,7 @@ class BaseModel(metaclass=MetaModel):
                                 xml_ids = [xid for _, xid in value.__ensure_xml_id()]
                                 current[index] = ','.join(xml_ids)
                             else:
-                                current[index] = field.convert_to_export(value, record)
+                                current[index] = ','.join(value.mapped('display_name')) if value else ''
                             continue
 
                         lines2 = value._export_rows(fields2, _is_toplevel_call=False)
@@ -1230,15 +1283,11 @@ class BaseModel(metaclass=MetaModel):
             if field_path[0] in (None, 'id', '.id'):
                 continue
             model_fields = self._fields
-            if isinstance(model_fields[field_path[0]], odoo.fields.Many2one):
-                # this only applies for toplevel m2o (?) fields
-                if field_path[0] in (self.env.context.get('name_create_enabled_fieds') or {}):
-                    creatable_models.add(model_fields[field_path[0]].comodel_name)
             for field_name in field_path:
                 if field_name in (None, 'id', '.id'):
                     break
 
-                if isinstance(model_fields[field_name], odoo.fields.One2many):
+                if isinstance(model_fields.get(field_name), odoo.fields.One2many):
                     comodel = model_fields[field_name].comodel_name
                     creatable_models.add(comodel)
                     model_fields = self.env[comodel]._fields
@@ -1361,14 +1410,7 @@ class BaseModel(metaclass=MetaModel):
             'nextrow': nextrow,
         }
 
-    def _add_fake_fields(self, fields):
-        from odoo.fields import Char, Integer
-        fields[None] = Char('rec_name')
-        fields['id'] = Char('External ID')
-        fields['.id'] = Integer('Database ID')
-        return fields
-
-    def _extract_records(self, fields_, data, log=lambda a: None, limit=float('inf')):
+    def _extract_records(self, field_paths, data, log=lambda a: None, limit=float('inf')):
         """ Generates record dicts from the data sequence.
 
         The result is a generator of dicts mapping field names to raw
@@ -1383,35 +1425,67 @@ class BaseModel(metaclass=MetaModel):
         * "id" is the External ID for the record
         * ".id" is the Database ID for the record
         """
-        fields = dict(self._fields)
-        # Fake fields to avoid special cases in extractor
-        fields = self._add_fake_fields(fields)
-        # m2o fields can't be on multiple lines so exclude them from the
-        # is_relational field rows filter, but special-case it later on to
-        # be handled with relational fields (as it can have subfields)
-        is_relational = lambda field: fields[field].relational
+        fields = self._fields
+
         get_o2m_values = itemgetter_tuple([
             index
-            for index, fnames in enumerate(fields_)
-            if fields[fnames[0]].type == 'one2many'
+            for index, fnames in enumerate(field_paths)
+            if fnames[0] in fields and fields[fnames[0]].type == 'one2many'
         ])
         get_nono2m_values = itemgetter_tuple([
             index
-            for index, fnames in enumerate(fields_)
-            if fields[fnames[0]].type != 'one2many'
+            for index, fnames in enumerate(field_paths)
+            if fnames[0] not in fields or fields[fnames[0]].type != 'one2many'
         ])
         # Checks if the provided row has any non-empty one2many fields
         def only_o2m_values(row):
             return any(get_o2m_values(row)) and not any(get_nono2m_values(row))
+
+        property_definitions = {}
+        property_columns = defaultdict(list)
+        for fname, *__ in field_paths:
+            if not fname:
+                continue
+            if '.' not in fname:
+                if fname not in fields:
+                    raise ValueError(f'Invalid field name {fname!r}')
+                continue
+
+            f_prop_name, property_name = fname.split('.')
+            if f_prop_name not in fields or fields[f_prop_name].type != 'properties':
+                # Can be .id
+                continue
+
+            definition = self.get_property_definition(fname)
+            if not definition:
+                # Can happen if someone remove the property, UserError ?
+                raise ValueError(f"Property {property_name!r} doesn't have any definition on {fname!r} field")
+
+            property_definitions[fname] = definition
+            property_columns[f_prop_name].append(fname)
+
+        # m2o fields can't be on multiple lines so don't take it in account
+        # for only_o2m_values rows filter, but special-case it later on to
+        # be handled with relational fields (as it can have subfields).
+        def is_relational(fname):
+            return (
+                fname in fields and
+                fields[fname].relational
+            ) or (
+                fname in property_definitions and
+                property_definitions[fname].get('type') in ('many2one', 'many2many')
+            )
 
         index = 0
         while index < len(data) and index < limit:
             row = data[index]
 
             # copy non-relational fields to record dict
-            record = {fnames[0]: value
-                      for fnames, value in zip(fields_, row)
-                      if not is_relational(fnames[0])}
+            record = {
+                fnames[0]: value
+                for fnames, value in zip(field_paths, row)
+                if not is_relational(fnames[0])
+            }
 
             # Get all following rows which have relational values attached to
             # the current record (no non-relational values)
@@ -1419,13 +1493,20 @@ class BaseModel(metaclass=MetaModel):
                 only_o2m_values, itertools.islice(data, index + 1, None))
             # stitch record row back on for relational fields
             record_span = list(itertools.chain([row], record_span))
-            for relfield in set(fnames[0] for fnames in fields_ if is_relational(fnames[0])):
-                comodel = self.env[fields[relfield].comodel_name]
+
+            for relfield, *__ in field_paths:
+                if not is_relational(relfield):
+                    continue
+
+                if relfield not in property_definitions:
+                    comodel = self.env[fields[relfield].comodel_name]
+                else:
+                    comodel = self.env[property_definitions[relfield]['comodel']]
 
                 # get only cells for this sub-field, should be strictly
                 # non-empty, field path [None] is for display_name field
                 indices, subfields = zip(*((index, fnames[1:] or [None])
-                                           for index, fnames in enumerate(fields_)
+                                           for index, fnames in enumerate(field_paths)
                                            if fnames[0] == relfield))
 
                 # return all rows which have at least one value for the
@@ -1435,6 +1516,13 @@ class BaseModel(metaclass=MetaModel):
                     subrecord
                     for subrecord, _subinfo in comodel._extract_records(subfields, relfield_data, log=log)
                 ]
+
+            for properties_fname, property_indexes_names in property_columns.items():
+                properties = []
+                for property_name in property_indexes_names:
+                    value = record.pop(property_name)
+                    properties.append(dict(**property_definitions[property_name], value=value))
+                record[properties_fname] = properties
 
             yield record, {'rows': {
                 'from': index,
@@ -1502,20 +1590,26 @@ class BaseModel(metaclass=MetaModel):
         """ Invoke the constraint methods for which at least one field name is
         in ``field_names`` and none is in ``excluded_names``.
         """
+        methods = self._constraint_methods
+        if not methods:
+            return
+        # run constrains just as sudoed computed-stored fields
+        # see Field.compute_value()
+        records = self.sudo()
         field_names = set(field_names)
         excluded_names = set(excluded_names)
-        for check in self._constraint_methods:
+        for check in methods:
             if (not field_names.isdisjoint(check._constrains)
                     and excluded_names.isdisjoint(check._constrains)):
-                check(self)
+                check(records)
 
     @api.model
     def default_get(self, fields_list):
         """ default_get(fields_list) -> default_values
 
         Return default values for the fields in ``fields_list``. Default
-        values are determined by the context, user defaults, and the model
-        itself.
+        values are determined by the context, user defaults, user fallbacks
+        and the model itself.
 
         :param list fields_list: names of field whose default is requested
         :return: a dictionary mapping field names to their corresponding default values,
@@ -1538,20 +1632,27 @@ class BaseModel(metaclass=MetaModel):
                 defaults[name] = self._context[key]
                 continue
 
-            # 2. look up ir.default
-            if name in ir_defaults:
+            field = self._fields.get(name)
+            if not field:
+                continue
+
+            # 2. look up default for non-company_dependent fields
+            if not field.company_dependent and name in ir_defaults:
                 defaults[name] = ir_defaults[name]
                 continue
 
-            field = self._fields.get(name)
-
             # 3. look up field.default
-            if field and field.default:
+            if field.default:
                 defaults[name] = field.default(self)
                 continue
 
-            # 4. delegate to parent model
-            if field and field.inherited:
+            # 4. look up fallback for company_dependent fields
+            if field.company_dependent and name in ir_defaults:
+                defaults[name] = ir_defaults[name]
+                continue
+
+            # 5. delegate to parent model
+            if field.inherited:
                 field = field.related_field
                 parent_fields[field.model_name].append(field.name)
 
@@ -2874,6 +2975,27 @@ class BaseModel(metaclass=MetaModel):
                 return sql_field_langs[0]
             return SQL("COALESCE(%s)", SQL(", ").join(sql_field_langs))
 
+        if field.company_dependent:
+            fallback = field.get_company_dependent_fallback(self)
+            fallback = field.convert_to_column(field.convert_to_write(fallback, self), self)
+            # in _read_group_orderby the result of field to sql will be mogrified and split to
+            # e.g SQL('COALESCE(%s->%s') and SQL('to_jsonb(%s))::boolean') as 2 orderby values
+            # and concatenated by SQL(',') in the final result, which works in an unexpected way
+            sql_field = SQL(
+                "COALESCE(%(column)s->%(company_id)s,to_jsonb(%(fallback)s::%(column_type)s))",
+                column=sql_field,
+                company_id=str(self.env.company.id),
+                fallback=fallback,
+                column_type=SQL(field._column_type[1]),
+            )
+            if field.type in ('boolean', 'integer', 'float', 'monetary'):
+                return SQL('(%s)::%s', sql_field, SQL(field._column_type[1]))
+            # here the specified value for a company might be NULL e.g. '{"1": null}'::jsonb
+            # the result of current sql_field might be 'null'::jsonb
+            # ('null'::jsonb)::text == 'null'
+            # ('null'::jsonb->>0)::text IS NULL
+            return SQL('(%s->>0)::%s', sql_field, SQL(field._column_type[1]))
+
         return sql_field
 
     def _read_group_groupby_properties(self, fname: str, property_name: str, query: Query) -> SQL:
@@ -3048,9 +3170,6 @@ class BaseModel(metaclass=MetaModel):
                 if params:
                     if fname != 'id':
                         params = [field.convert_to_column(p, self, validate=False) for p in params]
-                        if field.translate:
-                            # unwrap actual values from the Json values returned by convert_to_column()
-                            params = [p.adapted['en_US'] for p in params]
                     sql = SQL("(%s %s %s)", sql_field, sql_operator, tuple(params))
                 else:
                     # The case for (fname, 'in', []) or (fname, 'not in', []).
@@ -3099,10 +3218,6 @@ class BaseModel(metaclass=MetaModel):
             sql_value = value
         elif need_wildcard:
             sql_value = SQL("%s", f"%{value}%")
-        elif field.translate:
-            # convert_to_column returns psycopg2.extras.Json({'en_US': text_value})
-            # only take the text_value to compare with the result of field_to_sql
-            sql_value = SQL("%s", field.convert_to_column(value, self, validate=False).adapted['en_US'])
         else:
             sql_value = SQL("%s", field.convert_to_column(value, self, validate=False))
 
@@ -3124,7 +3239,7 @@ class BaseModel(metaclass=MetaModel):
         ):
             sql = SQL("(%s OR %s IS NULL)", sql, sql_field)
 
-        if not need_wildcard and is_number_field:
+        if not need_wildcard and is_number_field and not field.company_dependent:
             cmp_value = field.convert_to_record(field.convert_to_cache(value, self), self)
             if (
                 operator == '>=' and cmp_value <= 0
@@ -3238,7 +3353,7 @@ class BaseModel(metaclass=MetaModel):
         if field.default:
             value = field.default(self)
             value = field.convert_to_write(value, self)
-            value = field.convert_to_column(value, self)
+            value = field.convert_to_column_insert(value, self)
         else:
             value = None
         # Write value if non-NULL, except for booleans for which False means
@@ -3553,6 +3668,7 @@ class BaseModel(metaclass=MetaModel):
 
         # set up fields
         bad_fields = []
+        many2one_company_dependents = self.env.registry.many2one_company_dependents
         for name, field in cls._fields.items():
             try:
                 field.setup(self)
@@ -3565,6 +3681,8 @@ class BaseModel(metaclass=MetaModel):
                     bad_fields.append(name)
                     continue
                 raise
+            if field.type == 'many2one' and field.company_dependent:
+                many2one_company_dependents.add(field.comodel_name, field)
 
         for name in bad_fields:
             self._pop_field(name)
@@ -4392,9 +4510,7 @@ class BaseModel(metaclass=MetaModel):
         cr = self._cr
         Data = self.env['ir.model.data'].sudo().with_context({})
         Defaults = self.env['ir.default'].sudo()
-        Property = self.env['ir.property'].sudo()
         Attachment = self.env['ir.attachment'].sudo()
-        ir_property_unlink = Property
         ir_model_data_unlink = Data
         ir_attachment_unlink = Attachment
 
@@ -4405,17 +4521,6 @@ class BaseModel(metaclass=MetaModel):
 
         for sub_ids in cr.split_for_in_conditions(self.ids):
             records = self.browse(sub_ids)
-
-            # Check if the records are used as default properties.
-            refs = [f'{self._name},{id_}' for id_ in sub_ids]
-            default_properties = Property.search([('res_id', '=', False), ('value_reference', 'in', refs)])
-            if not self._context.get(MODULE_UNINSTALL_FLAG) and default_properties:
-                raise UserError(_('Unable to delete this document because it is used as a default property'))
-            else:
-                ir_property_unlink |= default_properties
-
-            # Delete the records' properties.
-            ir_property_unlink |= Property.search([('res_id', 'in', refs)])
 
             cr.execute(SQL(
                 "DELETE FROM %s WHERE id IN %s",
@@ -4432,10 +4537,6 @@ class BaseModel(metaclass=MetaModel):
             data = Data.search([('model', '=', self._name), ('res_id', 'in', sub_ids)])
             ir_model_data_unlink |= data
 
-            # For the same reason, remove the defaults having some of the
-            # records as value
-            Defaults.discard_records(records)
-
             # For the same reason, remove the relevant records in ir_attachment
             # (the search is performed with sql as the search method of
             # ir_attachment is overridden to hide attachments of deleted
@@ -4446,11 +4547,70 @@ class BaseModel(metaclass=MetaModel):
             ))
             ir_attachment_unlink |= Attachment.browse(row[0] for row in cr.fetchall())
 
+            # don't allow fallback value in ir.default for many2one company dependent fields to be deleted
+            # Exception: when MODULE_UNINSTALL_FLAG, these fallbacks can be deleted by Defaults.discard_records(records)
+            if (many2one_fields := self.env.registry.many2one_company_dependents[self._name]) and not self._context.get(MODULE_UNINSTALL_FLAG):
+                IrModelFields = self.env["ir.model.fields"]
+                field_ids = tuple(IrModelFields._get_ids(field.model_name).get(field.name) for field in many2one_fields)
+                sub_ids_json_text = tuple(json.dumps(id_) for id_ in sub_ids)
+                if default := Defaults.search([('field_id', 'in', field_ids), ('json_value', 'in', sub_ids_json_text)], limit=1, order='id desc'):
+                    ir_field = self.env['ir.model.fields'].browse(default.field_id).sudo()
+                    field = self.env[ir_field.model]._fields[ir_field.name]
+                    record = self.browse(json.loads(default.json_value))
+                    raise UserError(_('Unable to delete %(record)s because it is used as the default value of %(field)s', record=record, field=field))
+
+            # on delete set null/restrict for jsonb company dependent many2one
+            for field in many2one_fields:
+                model = self.env[field.model_name]
+                if field.ondelete == 'restrict' and not self._context.get(MODULE_UNINSTALL_FLAG):
+                    if res := self.env.execute_query(SQL(
+                        """
+                        SELECT id, %(field)s
+                        FROM %(table)s
+                        WHERE %(field)s IS NOT NULL
+                        AND %(field)s @? %(jsonpath)s
+                        ORDER BY id
+                        LIMIT 1
+                        """,
+                        table=SQL.identifier(model._table),
+                        field=SQL.identifier(field.name),
+                        jsonpath=f"$.* ? ({' || '.join(f'@ == {id_}' for id_ in sub_ids)})",
+                    )):
+                        on_restrict_id, field_json = res[0]
+                        to_delete_id = next(iter(id_ for id_ in field_json.values()))
+                        on_restrict_record = model.browse(on_restrict_id)
+                        to_delete_record = self.browse(to_delete_id)
+                        raise UserError(_('You cannot delete %(to_delete_record)s, as it is used by %(on_restrict_record)s',
+                                          to_delete_record=to_delete_record, on_restrict_record=on_restrict_record))
+                else:
+                    self.env.execute_query(SQL(
+                        """
+                        UPDATE %(table)s
+                        SET %(field)s = (
+                            SELECT jsonb_object_agg(
+                                key,
+                                CASE
+                                    WHEN value::int4 in %(ids)s THEN NULL
+                                    ELSE value::int4
+                                END)
+                            FROM jsonb_each_text(%(field)s)
+                        )
+                        WHERE %(field)s IS NOT NULL
+                        AND %(field)s @? %(jsonpath)s
+                        """,
+                        table=SQL.identifier(model._table),
+                        field=SQL.identifier(field.name),
+                        ids=sub_ids,
+                        jsonpath=f"$.* ? ({' || '.join(f'@ == {id_}' for id_ in sub_ids)})",
+                    ))
+
+            # For the same reason, remove the defaults having some of the
+            # records as value
+            Defaults.discard_records(records)
+
         # invalidate the *whole* cache, since the orm does not handle all
         # changes made in the database, like cascading delete!
         self.env.invalidate_all(flush=False)
-        if ir_property_unlink:
-            ir_property_unlink.unlink()
         if ir_model_data_unlink:
             ir_model_data_unlink.unlink()
         if ir_attachment_unlink:
@@ -4707,6 +4867,18 @@ class BaseModel(metaclass=MetaModel):
                         column=column,
                         expr=expr,
                     )
+                if field.company_dependent:
+                    fallbacks = self.env['ir.default']._get_field_column_fallbacks(self._name, fname)
+                    expr = SQL(
+                        """(SELECT jsonb_object_agg(d.key, d.value)
+                        FROM jsonb_each(COALESCE(%(table)s.%(column)s, '{}'::jsonb) || %(expr)s) d
+                        JOIN jsonb_each(%(fallbacks)s) f
+                        ON d.key = f.key AND d.value != f.value)""",
+                        table=SQL.identifier(self._table),
+                        column=column,
+                        expr=expr,
+                        fallbacks=fallbacks
+                    )
                 columns.append(column)
                 assignments.append(SQL("%s = %s", column, expr))
 
@@ -4728,14 +4900,12 @@ class BaseModel(metaclass=MetaModel):
 
     @api.model_create_multi
     def create(self, vals_list: list[ValuesType]) -> Self:
-        """ create(vals_list) -> records
-
-        Creates new records for the model.
+        """Creates new records for the model.
 
         The new records are initialized using the values from the list of dicts
         ``vals_list``, and if necessary those from :meth:`~.default_get`.
 
-        :param Union[list[dict], dict] vals_list:
+        :param vals_list:
             values for the model's fields, as a list of dictionaries::
 
                 [{'field_name': field_value, ...}, ...]
@@ -4778,16 +4948,6 @@ class BaseModel(metaclass=MetaModel):
                 field = self._fields.get(key)
                 if not field:
                     raise ValueError("Invalid field %r on model %r" % (key, self._name))
-                if field.company_dependent:
-                    irprop_def = self.env['ir.property']._get(key, self._name)
-                    cached_def = field.convert_to_cache(irprop_def, self)
-                    cached_val = field.convert_to_cache(val, self)
-                    if cached_val == cached_def:
-                        # val is the same as the default value defined in
-                        # 'ir.property'; by design, 'ir.property' will not
-                        # create entries specific to these records; skipping the
-                        # field inverse saves 4 SQL queries
-                        continue
                 if field.store:
                     stored[key] = val
                 if field.inherited:
@@ -4988,7 +5148,7 @@ class BaseModel(metaclass=MetaModel):
                     columns.append(fname)
                     for stored, row in zip(stored_list, rows):
                         if fname in stored:
-                            row.append(field.convert_to_column(stored[fname], self, stored))
+                            row.append(field.convert_to_column_insert(stored[fname], self, stored))
                         else:
                             row.append(SQL_DEFAULT)
                 else:
@@ -5183,11 +5343,44 @@ class BaseModel(metaclass=MetaModel):
             self.env.cache.update(records, self._fields['parent_path'], updated.values())
             records.modified(['parent_path'])
 
-    def _load_records_write(self, values):
-        self.write(values)
+    def _clean_properties(self) -> None:
+        """ Remove all properties of ``self`` that are no longer in the related definition """
+        for fname, field in self._fields.items():
+            if field.type != 'properties':
+                continue
+            for record in self:
+                old_value = record[fname]
+                if not old_value:
+                    continue
 
-    def _load_records_create(self, values):
-        return self.create(values)
+                definitions = field._get_properties_definition(record)
+                all_names = {definition['name'] for definition in definitions}
+                new_values = {name: value for name, value in old_value.items() if name in all_names}
+                if len(new_values) != len(old_value):
+                    record[fname] = new_values
+
+    def _load_records_write(self, values):
+        self.ensure_one()
+        to_write = {}  # Deferred the write to avoid using the old definition if it changed
+        for fname in list(values):
+            if fname not in self or self._fields[fname].type != 'properties':
+                continue
+            field_converter = self._fields[fname].convert_to_cache
+            to_write[fname] = dict(self[fname], **field_converter(values.pop(fname), self))
+
+        self.write(values)
+        if to_write:
+            self.write(to_write)
+            # Because we don't know which properties was linked to which definition,
+            # we can know clean properties (note that it is not mandatory, we can wait
+            # that client change the record in a Form view)
+            self._clean_properties()
+
+    def _load_records_create(self, vals_list):
+        records = self.create(vals_list)
+        if any(field.type == 'properties' for field in self._fields.values()):
+            records._clean_properties()
+        return records
 
     def _load_records(self, data_list, update=False, ignore_duplicates=False):
         """ Create or update records of this model, and assign XMLIDs.
@@ -5903,6 +6096,7 @@ class BaseModel(metaclass=MetaModel):
 
     def toggle_active(self):
         "Inverses the value of :attr:`active` on the records in ``self``."
+        assert self._active_name, f"No 'active' field on model {self._name}"
         active_recs = self.filtered(self._active_name)
         active_recs[self._active_name] = False
         (self - active_recs)[self._active_name] = True
@@ -5911,12 +6105,14 @@ class BaseModel(metaclass=MetaModel):
         """Sets :attr:`active` to ``False`` on a recordset, by calling
          :meth:`toggle_active` on its currently active records.
         """
+        assert self._active_name, f"No 'active' field on model {self._name}"
         return self.filtered(lambda record: record[self._active_name]).toggle_active()
 
     def action_unarchive(self):
         """Sets :attr:`active` to ``True`` on a recordset, by calling
         :meth:`toggle_active` on its currently inactive records.
         """
+        assert self._active_name, f"No 'active' field on model {self._name}"
         return self.filtered(lambda record: not record[self._active_name]).toggle_active()
 
     def _register_hook(self):
@@ -6434,13 +6630,13 @@ class BaseModel(metaclass=MetaModel):
                     elif comparator == 'not in':
                         ok = not (value and any(x in value for x in data))
                     elif comparator == '<':
-                        ok = any(x is not None and x < value for x in data)
+                        ok = any(x is not False and x is not None and x < value for x in data)
                     elif comparator == '>':
-                        ok = any(x is not None and x > value for x in data)
+                        ok = any(x is not False and x is not None and x > value for x in data)
                     elif comparator == '<=':
-                        ok = any(x is not None and x <= value for x in data)
+                        ok = any(x is not False and x is not None and x <= value for x in data)
                     elif comparator == '>=':
-                        ok = any(x is not None and x >= value for x in data)
+                        ok = any(x is not False and x is not None and x >= value for x in data)
                     elif comparator in ('like', 'ilike', '=like', '=ilike', 'not ilike', 'not like'):
                         ok = any(like_regex.match(unaccent(x)) for x in data)
                         if comparator.startswith('not'):
@@ -6519,15 +6715,6 @@ class BaseModel(metaclass=MetaModel):
             self._flush(fnames)
 
     def _flush(self, fnames=None):
-
-        def convert(record, field, value):
-            if field.translate:
-                return field._convert_from_cache_to_column(value)
-            return field.convert_to_column(
-                field.convert_to_write(value, record),
-                record,
-            )
-
         if fnames is None:
             fields = self._fields.values()
         else:
@@ -6551,7 +6738,11 @@ class BaseModel(metaclass=MetaModel):
         # This avoids allocating extra memory for storing the data taken
         # from cache. Beware that this breaks the cache abstraction!
         dirty_field_cache = {
-            field: self.env.cache._get_field_cache(model, field)
+            field: (
+                self.env.cache._get_field_cache(model, field)
+                if not field.company_dependent else
+                self.env.cache._get_grouped_company_dependent_field_cache(field)
+            )
             for field in dirty_field_ids
         }
 
@@ -6575,7 +6766,7 @@ class BaseModel(metaclass=MetaModel):
                 for id_ in some_ids:
                     record = model.browse(id_)
                     vals_list.append({
-                        f.name: convert(record, f, dirty_field_cache[f][id_])
+                        f.name: f.convert_to_column_update(dirty_field_cache[f][id_], record)
                         for f, ids in dirty_field_ids.items()
                         if id_ in ids
                     })
@@ -7134,90 +7325,6 @@ class BaseModel(metaclass=MetaModel):
             complete path to access it (eg: module/path/to/image.png).
         """
         return False
-
-    def _populate_factories(self):
-        """ Generates a factory for the different fields of the model.
-
-        ``factory`` is a generator of values (dict of field values).
-
-        Factory skeleton::
-
-            def generator(iterator, field_name, model_name):
-                for counter, values in enumerate(iterator):
-                    # values.update(dict())
-                    yield values
-
-        See :mod:`odoo.tools.populate` for population tools and applications.
-
-        :returns: list of pairs(field_name, factory) where `factory` is a generator function.
-        :rtype: list(tuple(str, generator))
-
-        .. note::
-
-            It is the responsibility of the generator to handle the field_name correctly.
-            The generator could generate values for multiple fields together. In this case,
-            the field_name should be more a "field_group" (should be begin by a "_"), covering
-            the different fields updated by the generator (e.g. "_address" for a generator
-            updating multiple address fields).
-        """
-        return []
-
-    @property
-    def _populate_sizes(self):
-        """ Return a dict mapping symbolic sizes (``'small'``, ``'medium'``, ``'large'``) to integers,
-        giving the minimal number of records that :meth:`_populate` should create.
-
-        The default population sizes are:
-
-        * ``small`` : 10
-        * ``medium`` : 100
-        * ``large`` : 1000
-        """
-        return {
-            'small': 10,  # minimal representative set
-            'medium': 100,  # average database load
-            'large': 1000, # maxi database load
-        }
-
-    @property
-    def _populate_dependencies(self):
-        """ Return the list of models which have to be populated before the current one.
-
-        :rtype: list
-        """
-        return []
-
-    def _populate(self, size):
-        """ Create records to populate this model.
-
-        :param str size: symbolic size for the number of records: ``'small'``, ``'medium'`` or ``'large'``
-        """
-        batch_size = 1000
-        min_size = self._populate_sizes[size]
-
-        record_count = 0
-        create_values = []
-        complete = False
-        field_generators = self._populate_factories()
-        if not field_generators:
-            return self.browse() # maybe create an automatic generator?
-
-        records_batches = []
-        generator = populate.chain_factories(field_generators, self._name)
-        while record_count <= min_size or not complete:
-            values = next(generator)
-            complete = values.pop('__complete')
-            create_values.append(values)
-            record_count += 1
-            if len(create_values) >= batch_size:
-                _logger.info('Batch: %s/%s', record_count, min_size)
-                records_batches.append(self.create(create_values))
-                self.env.cr.commit()
-                create_values = []
-
-        if create_values:
-            records_batches.append(self.create(create_values))
-        return self.concat(*records_batches)
 
 
 collections.abc.Set.register(BaseModel)

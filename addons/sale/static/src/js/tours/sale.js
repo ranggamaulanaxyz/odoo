@@ -63,9 +63,9 @@ registry.category("web_tour.tours").add("sale_tour", {
                 ".o_field_widget[name='product_id'], .o_field_widget[name='product_template_id']",
             content: _t("Select a product, or create a new one on the fly."),
             tooltipPosition: "right",
-            run: function (actions) {
+            async run(actions) {
                 const input = this.anchor.querySelector("input");
-                actions.edit("DESK0001", input || this.anchor);
+                await actions.edit("DESK0001", input || this.anchor);
                 const descriptionElement = document.querySelector(
                     ".o_form_editable textarea[name='name']"
                 );
@@ -114,7 +114,7 @@ registry.category("web_tour.tours").add("sale_tour", {
             run: "click",
         },
         {
-            trigger: ".modal-footer button[name='action_send_mail']",
+            trigger: ".modal-footer button.o_mail_send",
             content: _t("Go ahead and send the quotation."),
             tooltipPosition: "bottom",
             run: "click",

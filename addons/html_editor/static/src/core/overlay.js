@@ -1,23 +1,35 @@
 import { Component, onWillDestroy, useEffect, useExternalListener, useRef, xml } from "@odoo/owl";
 import { usePosition } from "@web/core/position/position_hook";
 import { useActiveElement } from "@web/core/ui/ui_service";
-import { omit } from "@web/core/utils/objects";
 
 export class EditorOverlay extends Component {
     static template = xml`
-        <div t-ref="root" class="overlay">
+        <div t-ref="root" class="overlay" t-att-class="props.className" t-on-pointerdown.stop="() => {}">
             <t t-component="props.Component" t-props="props.props"/>
         </div>`;
 
     static props = {
         target: { validate: (el) => el.nodeType === Node.ELEMENT_NODE, optional: true },
         initialSelection: { type: Object, optional: true },
-        config: Object,
         Component: Function,
         props: { type: Object, optional: true },
         editable: { validate: (el) => el.nodeType === Node.ELEMENT_NODE },
         bus: Object,
         getContainer: Function,
+        history: Object,
+        close: Function,
+
+        // Props from createOverlay
+        positionOptions: { type: Object, optional: true },
+        className: { type: String, optional: true },
+        closeOnPointerdown: { type: Boolean, optional: true },
+        hasAutofocus: { type: Boolean, optional: true },
+    };
+
+    static defaultProps = {
+        className: "",
+        closeOnPointerdown: true,
+        hasAutofocus: false,
     };
 
     setup() {
@@ -52,19 +64,28 @@ export class EditorOverlay extends Component {
             () => [rootRef.el]
         );
 
-        if (this.props.config.hasAutofocus) {
+        if (this.props.closeOnPointerdown) {
+            const editableDocument = this.props.editable.ownerDocument;
+            useExternalListener(editableDocument, "pointerdown", this.props.close);
+            // Listen to pointerdown outside the iframe
+            if (editableDocument !== document) {
+                useExternalListener(document, "pointerdown", this.props.close);
+            }
+        }
+
+        if (this.props.hasAutofocus) {
             useActiveElement("root");
         }
-        const positionConfig = {
+        const positionOptions = {
             position: "bottom-start",
             container: this.props.getContainer,
-            ...omit(this.props.config, "hasAutofocus", "onPositioned"),
+            ...this.props.positionOptions,
             onPositioned: (el, solution) => {
-                this.props.config.onPositioned?.(el, solution);
+                this.props.positionOptions?.onPositioned?.(el, solution);
                 this.updateVisibility(el, solution);
             },
         };
-        position = usePosition("root", getTarget, positionConfig);
+        position = usePosition("root", getTarget, positionOptions);
     }
 
     getSelectionTarget() {
@@ -86,6 +107,10 @@ export class EditorOverlay extends Component {
         }
         let rect = range.getBoundingClientRect();
         if (rect.x === 0 && rect.width === 0 && rect.height === 0) {
+            // Attention, using disableObserver and enableObserver is always dangerous (when we add or remove nodes)
+            // because if another mutation uses the target that is not observed, that mutation can never be applied
+            // again (when undo/redo and in collaboration).
+            this.props.history.disableObserver();
             const clonedRange = range.cloneRange();
             const shadowCaret = doc.createTextNode("|");
             clonedRange.insertNode(shadowCaret);
@@ -93,6 +118,7 @@ export class EditorOverlay extends Component {
             rect = clonedRange.getBoundingClientRect();
             shadowCaret.remove();
             clonedRange.detach();
+            this.props.history.enableObserver();
         }
         // Html element with a patched getBoundingClientRect method. It
         // represents the range as a (HTMLElement) target for the usePosition

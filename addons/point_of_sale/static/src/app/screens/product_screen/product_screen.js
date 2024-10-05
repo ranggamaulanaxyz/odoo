@@ -56,7 +56,7 @@ export class ProductScreen extends Component {
         });
         onMounted(() => {
             this.pos.openOpeningControl();
-
+            this.pos.addPendingOrder([this.currentOrder.id]);
             // Call `reset` when the `onMounted` callback in `numberBuffer.use` is done.
             // We don't do this in the `mounted` lifecycle method because it is called before
             // the callbacks in `onMounted` hook.
@@ -65,7 +65,7 @@ export class ProductScreen extends Component {
 
         onWillRender(() => {
             // If its a shared order it can be paid from another POS
-            if (this.currentOrder.state !== "draft") {
+            if (this.currentOrder?.state !== "draft") {
                 this.pos.add_new_order();
             }
         });
@@ -98,9 +98,9 @@ export class ProductScreen extends Component {
             : this.pos.models["pos.category"].filter((category) => !category.parent_id);
     }
     getCategoriesAndSub() {
-        return this.getAncestorsAndCurrent().flatMap((category) =>
-            this.getChildCategoriesInfo(category)
-        );
+        return this.getAncestorsAndCurrent()
+            .flatMap((category) => this.getChildCategoriesInfo(category))
+            .toSorted((a, b) => a.id - b.id);
     }
 
     getChildCategoriesInfo(selectedCategory) {
@@ -205,12 +205,11 @@ export class ProductScreen extends Component {
             return;
         }
 
-        const configure =
-            product.isConfigurable() &&
-            product.attribute_line_ids.length > 0 &&
-            !product.attribute_line_ids.every((l) => l.attribute_id.create_variant === "always");
-
-        await this.pos.addLineToCurrentOrder({ product_id: product }, { code }, configure);
+        await this.pos.addLineToCurrentOrder(
+            { product_id: product },
+            { code },
+            product.needToConfigure()
+        );
         this.numberBuffer.reset();
     }
     async _getPartnerByBarcode(code) {
@@ -346,13 +345,16 @@ export class ProductScreen extends Component {
     }
 
     addMainProductsToDisplay(products) {
-        const uniqueProducts = new Set(products);
+        const uniqueProductsMap = new Map();
         for (const product of products) {
             if (product.id in this.pos.mainProductVariant) {
-                uniqueProducts.add(this.pos.mainProductVariant[product.id]);
+                const mainProduct = this.pos.mainProductVariant[product.id];
+                uniqueProductsMap.set(mainProduct.id, mainProduct);
+            } else {
+                uniqueProductsMap.set(product.id, product);
             }
         }
-        return Array.from(uniqueProducts);
+        return Array.from(uniqueProductsMap.values());
     }
 
     getProductsByCategory(category) {

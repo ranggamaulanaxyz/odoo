@@ -147,7 +147,7 @@ test("setSelection should not set the selection outside the editable", async () 
 
 test("press 'ctrl+a' in 'oe_structure' child should only select his content", async () => {
     const { el } = await setupEditor(`<div class="oe_structure"><p>a[]b</p><p>cd</p></div>`);
-    press(["ctrl", "a"]);
+    await press(["ctrl", "a"]);
     expect(getContent(el)).toBe(`<div class="oe_structure"><p>[ab]</p><p>cd</p></div>`);
 });
 
@@ -155,7 +155,7 @@ test("press 'ctrl+a' in 'contenteditable' should only select his content", async
     const { el } = await setupEditor(
         `<div contenteditable="false"><p contenteditable="true">a[]b</p><p contenteditable="true">cd</p></div>`
     );
-    press(["ctrl", "a"]);
+    await press(["ctrl", "a"]);
     expect(getContent(el)).toBe(
         `<div contenteditable="false"><p contenteditable="true">[ab]</p><p contenteditable="true">cd</p></div>`
     );
@@ -179,6 +179,7 @@ test("restore a selection when you are not in the editable shouldn't move the fo
                 {
                     category: "widget",
                     name: "Test",
+                    description: "Test",
                     action() {
                         p.showOverlay();
                     },
@@ -200,8 +201,8 @@ test("restore a selection when you are not in the editable shouldn't move the fo
     const { editor } = await setupEditor("<p>te[]st</p>", {
         config: { Plugins: [...MAIN_PLUGINS, TestPlugin] },
     });
-    insertText(editor, "/test");
-    press("enter");
+    await insertText(editor, "/test");
+    await press("enter");
     await animationFrame();
     expect(getActiveElement()).toBe(queryOne("input.test"));
 
@@ -209,4 +210,14 @@ test("restore a selection when you are not in the editable shouldn't move the fo
     const cursors = editor.shared.preserveSelection();
     cursors.restore();
     expect(getActiveElement()).toBe(queryOne("input.test"));
+});
+
+test("set a collapse selection in a contenteditable false should move it after this node", async () => {
+    const { el, editor } = await setupEditor(`<p>ab<span contenteditable="false">cd</span>ef</p>`);
+    editor.shared.setSelection({
+        anchorNode: queryOne("span[contenteditable='false']"),
+        anchorOffset: 1,
+    });
+    editor.shared.focusEditable();
+    expect(getContent(el)).toBe(`<p>ab<span contenteditable="false">cd</span>[]ef</p>`);
 });

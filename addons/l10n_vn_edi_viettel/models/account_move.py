@@ -143,6 +143,11 @@ class AccountMove(models.Model):
         check_company=True,
         export_string_translation=False,
     )
+    l10n_vn_edi_reversed_entry_invoice_number = fields.Char(
+        string='Revered Entry SInvoice Number',  # Need string here to avoid same label warning
+        related='reversed_entry_id.l10n_vn_edi_invoice_number',
+        export_string_translation=False,
+    )
 
     @api.depends('l10n_vn_edi_invoice_state')
     def _compute_show_reset_to_draft_button(self):
@@ -706,9 +711,9 @@ class AccountMove(models.Model):
         """ Create and return the tax breakdown of the current invoice. """
         self.ensure_one()
 
-        def grouping_key_generator(base_line, tax_values):
+        def grouping_key_generator(base_line, tax_data):
             # Requirement is to generate a tax breakdown per taxPercentage
-            return {'tax_percentage': tax_values['tax_repartition_line'].tax_id.amount or -2}
+            return {'tax_percentage': tax_data['tax'].amount or -2}
 
         tax_breakdowns = []
 

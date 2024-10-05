@@ -10,7 +10,6 @@ import { InvoiceButton } from "@point_of_sale/app/screens/ticket_screen/invoice_
 import { Orderline } from "@point_of_sale/app/generic_components/orderline/orderline";
 import { OrderWidget } from "@point_of_sale/app/generic_components/order_widget/order_widget";
 import { CenteredIcon } from "@point_of_sale/app/generic_components/centered_icon/centered_icon";
-import { ReprintReceiptButton } from "@point_of_sale/app/screens/ticket_screen/reprint_receipt_button/reprint_receipt_button";
 import { SearchBar } from "@point_of_sale/app/screens/ticket_screen/search_bar/search_bar";
 import { usePos } from "@point_of_sale/app/store/pos_hook";
 import { Component, onMounted, useState } from "@odoo/owl";
@@ -23,8 +22,8 @@ import {
 import { PosOrderLineRefund } from "@point_of_sale/app/models/pos_order_line_refund";
 import { fuzzyLookup } from "@web/core/utils/search";
 import { parseUTCString } from "@point_of_sale/utils";
+import { useTrackedAsync } from "@point_of_sale/app/utils/hooks";
 
-const { DateTime } = luxon;
 const NBR_BY_PAGE = 30;
 
 export class TicketScreen extends Component {
@@ -36,7 +35,6 @@ export class TicketScreen extends Component {
         Orderline,
         OrderWidget,
         CenteredIcon,
-        ReprintReceiptButton,
         SearchBar,
         Numpad,
         BackButton,
@@ -61,6 +59,9 @@ export class TicketScreen extends Component {
         this.ui = useState(useService("ui"));
         this.dialog = useService("dialog");
         this.numberBuffer = useService("number_buffer");
+        this.doPrint = useTrackedAsync((_selectedSyncedOrder) =>
+            this.pos.printReceipt({ order: _selectedSyncedOrder })
+        );
         this.numberBuffer.use({
             triggerAtInput: (event) => this._onUpdateSelectedOrderline(event),
         });
@@ -112,10 +113,6 @@ export class TicketScreen extends Component {
                 this.state.selectedOrderlineIds[clickedOrder.id] = firstLine.id;
             }
         }
-    }
-    onCreateNewOrder() {
-        this.pos.add_new_order();
-        this.pos.showScreen("ProductScreen");
     }
     async onNextPage() {
         if (this.state.page < this.getNbrPages()) {
@@ -302,15 +299,6 @@ export class TicketScreen extends Component {
             return this.state.selectedOrderlineIds[this.state.selectedOrder.id];
         }
     }
-    /**
-     * Override to conditionally show the new order button, or prevent order
-     * creation when leaving the screen.
-     *
-     * @returns {boolean}
-     */
-    get allowNewOrders() {
-        return true;
-    }
     get isOrderSynced() {
         return (
             this.state.selectedOrder?.uiState.locked &&
@@ -342,35 +330,28 @@ export class TicketScreen extends Component {
             orders = fuzzyLookup(this.state.search.searchTerm, orders, repr);
         }
 
-        if (this.state.filter === "SYNCED") {
-            return orders
-                .sort((a, b) => {
-                    const dateA = DateTime.fromFormat(a.date_order, "yyyy-MM-dd HH:mm:ss");
-                    const dateB = DateTime.fromFormat(b.date_order, "yyyy-MM-dd HH:mm:ss");
-
-                    if (b.date_order !== a.date_order) {
-                        return dateB - dateA;
-                    } else {
-                        return (
-                            parseInt(b.name.replace(/\D/g, "")) -
-                            parseInt(a.name.replace(/\D/g, ""))
-                        );
-                    }
-                })
-                .slice((this.state.page - 1) * NBR_BY_PAGE, this.state.page * NBR_BY_PAGE);
-        } else {
+        const sortOrders = (orders, ascending = false) => {
             return orders.sort((a, b) => {
-                const dateA = DateTime.fromFormat(b.date_order, "yyyy-MM-dd HH:mm:ss");
-                const dateB = DateTime.fromFormat(a.date_order, "yyyy-MM-dd HH:mm:ss");
+                const dateA = parseUTCString(a.date_order, "yyyy-MM-dd HH:mm:ss");
+                const dateB = parseUTCString(b.date_order, "yyyy-MM-dd HH:mm:ss");
 
-                if (b.date_order !== a.date_order) {
-                    return dateB - dateA;
+                if (a.date_order !== b.date_order) {
+                    return ascending ? dateA - dateB : dateB - dateA;
                 } else {
-                    return (
-                        parseInt(a.name.replace(/\D/g, "")) - parseInt(b.name.replace(/\D/g, ""))
-                    );
+                    const nameA = parseInt(a.name.replace(/\D/g, "")) || 0;
+                    const nameB = parseInt(b.name.replace(/\D/g, "")) || 0;
+                    return ascending ? nameA - nameB : nameB - nameA;
                 }
             });
+        };
+
+        if (this.state.filter === "SYNCED") {
+            return sortOrders(orders).slice(
+                (this.state.page - 1) * NBR_BY_PAGE,
+                this.state.page * NBR_BY_PAGE
+            );
+        } else {
+            return sortOrders(orders, true);
         }
     }
     getDate(order) {
@@ -396,7 +377,7 @@ export class TicketScreen extends Component {
             return _t("Paid");
         } else {
             const screen = order.get_screen_data();
-            return this._getOrderStates().get(this._getScreenToStatusMap()[screen.name]).text;
+            return this._getOrderStates().get(this._getScreenToStatusMap()[screen.name])?.text;
         }
     }
     /**
@@ -423,7 +404,8 @@ export class TicketScreen extends Component {
             this.isDefaultOrderEmpty(order) ||
             order.payment_ids.some(
                 (payment) => payment.is_electronic() && payment.get_payment_status() === "done"
-            )
+            ) ||
+            order.finalized
         );
     }
     isHighlighted(order) {
@@ -593,7 +575,7 @@ export class TicketScreen extends Component {
                 modelField: "tracking_number",
             },
             RECEIPT_NUMBER: {
-                repr: (order) => order.name,
+                repr: (order) => order.pos_reference,
                 displayName: _t("Receipt Number"),
                 modelField: "pos_reference",
             },
@@ -713,11 +695,7 @@ export class TicketScreen extends Component {
             .filter((orderInfo) => {
                 const order = this.pos.models["pos.order"].get(orderInfo[0]);
 
-                if (
-                    order &&
-                    DateTime.fromFormat(orderInfo[1], "yyyy-MM-dd HH:mm:ss") >
-                        DateTime.fromFormat(order.date_order, "yyyy-MM-dd HH:mm:ss")
-                ) {
+                if (order && parseUTCString(orderInfo[1]) > parseUTCString(order.date_order)) {
                     return true;
                 }
 

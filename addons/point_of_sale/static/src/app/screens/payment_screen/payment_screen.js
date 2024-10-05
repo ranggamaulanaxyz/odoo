@@ -1,4 +1,5 @@
 import { _t } from "@web/core/l10n/translation";
+import { parseFloat } from "@web/views/fields/parsers";
 import { useErrorHandlers, useAsyncLockedMethod } from "@point_of_sale/app/utils/hooks";
 import { registry } from "@web/core/registry";
 import { useService } from "@web/core/utils/hooks";
@@ -14,7 +15,6 @@ import { usePos } from "@point_of_sale/app/store/pos_hook";
 import { Component, useState, onMounted } from "@odoo/owl";
 import { Numpad, enhancedButtons } from "@point_of_sale/app/generic_components/numpad/numpad";
 import { floatIsZero, roundPrecision as round_pr } from "@web/core/utils/numbers";
-import { OrderReceipt } from "@point_of_sale/app/screens/receipt_screen/receipt/order_receipt";
 import { ask } from "@point_of_sale/app/store/make_awaitable_dialog";
 import { handleRPCError } from "@point_of_sale/app/errors/error_handlers";
 import { sprintf } from "@web/core/utils/strings";
@@ -27,7 +27,9 @@ export class PaymentScreen extends Component {
         PaymentScreenPaymentLines,
         PaymentScreenStatus,
     };
-    static props = {};
+    static props = {
+        orderUuid: String,
+    };
 
     setup() {
         this.pos = usePos();
@@ -51,6 +53,7 @@ export class PaymentScreen extends Component {
 
     onMounted() {
         const order = this.pos.get_order();
+        this.pos.addPendingOrder([order.id]);
 
         for (const payment of order.payment_ids) {
             const pmid = payment.payment_method_id.id;
@@ -59,7 +62,7 @@ export class PaymentScreen extends Component {
             }
         }
 
-        if (this.payment_methods_from_config.length == 1) {
+        if (this.payment_methods_from_config.length == 1 && this.paymentLines.length == 0) {
             this.addNewPaymentLine(this.payment_methods_from_config[0]);
         }
     }
@@ -99,7 +102,7 @@ export class PaymentScreen extends Component {
         return config;
     }
     get currentOrder() {
-        return this.pos.get_order();
+        return this.pos.models["pos.order"].getBy("uuid", this.props.orderUuid);
     }
     get paymentLines() {
         return this.currentOrder.payment_ids;
@@ -108,9 +111,17 @@ export class PaymentScreen extends Component {
         return this.currentOrder.get_selected_paymentline();
     }
     async addNewPaymentLine(paymentMethod) {
+        if (this.pos.paymentTerminalInProgress && paymentMethod.use_payment_terminal) {
+            this.dialog.add(AlertDialog, {
+                title: _t("Error"),
+                body: _t("There is already an electronic payment in progress."),
+            });
+            return;
+        }
+
         // original function: click_paymentmethods
         const result = this.currentOrder.add_paymentline(paymentMethod);
-        if (!this.pos.get_order().check_paymentlines_rounding()) {
+        if (!this.currentOrder.check_paymentlines_rounding()) {
             this._display_popup_error_paymentlines_rounding();
         }
         if (result) {
@@ -168,9 +179,6 @@ export class PaymentScreen extends Component {
             this.deletePaymentLine(this.selectedPaymentLine.uuid);
         } else {
             this.selectedPaymentLine.set_amount(amount);
-        }
-        if (!this.pos.get_order().check_paymentlines_rounding()) {
-            this._display_popup_error_paymentlines_rounding();
         }
     }
     toggleIsToInvoice() {
@@ -237,7 +245,7 @@ export class PaymentScreen extends Component {
     async validateOrder(isForceValidate) {
         this.numberBuffer.capture();
         if (this.pos.config.cash_rounding) {
-            if (!this.pos.get_order().check_paymentlines_rounding()) {
+            if (!this.currentOrder.check_paymentlines_rounding()) {
                 this._display_popup_error_paymentlines_rounding();
                 return;
             }
@@ -278,8 +286,8 @@ export class PaymentScreen extends Component {
 
             // 2. Invoice.
             if (this.shouldDownloadInvoice() && this.currentOrder.is_to_invoice()) {
-                if (syncOrderResult[0]?.raw.account_move) {
-                    await this.invoiceService.downloadPdf(syncOrderResult[0].raw.account_move);
+                if (this.currentOrder.raw.account_move) {
+                    await this.invoiceService.downloadPdf(this.currentOrder.raw.account_move);
                 } else {
                     throw {
                         code: 401,
@@ -327,10 +335,11 @@ export class PaymentScreen extends Component {
         // Always show the next screen regardless of error since pos has to
         // continue working even offline.
         let nextScreen = this.nextScreen;
+        let switchScreen = false;
 
         if (
             nextScreen === "ReceiptScreen" &&
-            !this.currentOrder._printed &&
+            this.currentOrder.nb_print === 0 &&
             this.pos.config.iface_print_auto
         ) {
             const invoiced_finalized = this.currentOrder.is_to_invoice()
@@ -338,24 +347,26 @@ export class PaymentScreen extends Component {
                 : true;
 
             if (invoiced_finalized) {
-                const printResult = await this.printer.print(
-                    OrderReceipt,
-                    {
-                        data: this.pos.orderExportForPrinting(this.pos.get_order()),
-                        formatCurrency: this.env.utils.formatCurrency,
-                    },
-                    { webPrintFallback: true }
-                );
+                this.pos.printReceipt(this.currentOrder);
 
-                if (printResult && this.pos.config.iface_print_skip_screen) {
-                    this.currentOrder.set_screen_data({ name: "ReceiptScreen" });
-                    this.pos.add_new_order();
+                if (this.pos.config.iface_print_skip_screen) {
+                    this.currentOrder.uiState.screen_data["value"] = "";
+                    this.currentOrder.uiState.locked = true;
+                    switchScreen = this.currentOrder.uuid === this.pos.selectedOrderUuid;
                     nextScreen = "ProductScreen";
+
+                    if (switchScreen) {
+                        this.pos.add_new_order();
+                    }
                 }
             }
+        } else {
+            switchScreen = true;
         }
 
-        this.pos.showScreen(nextScreen);
+        if (switchScreen) {
+            this.pos.showScreen(nextScreen);
+        }
     }
     /**
      * This method is meant to be overriden by localization that do not want to print the invoice pdf
@@ -515,6 +526,7 @@ export class PaymentScreen extends Component {
     }
     async sendPaymentRequest(line) {
         // Other payment lines can not be reversed anymore
+        this.pos.paymentTerminalInProgress = true;
         this.numberBuffer.capture();
         this.paymentLines.forEach(function (line) {
             line.can_be_reversed = false;
@@ -530,9 +542,10 @@ export class PaymentScreen extends Component {
 
         // Automatically validate the order when after an electronic payment,
         // the current order is fully paid and due is zero.
+        this.pos.paymentTerminalInProgress = false;
         const config = this.pos.config;
         const currency = this.pos.currency;
-        const currentOrder = this.pos.get_order();
+        const currentOrder = line.pos_order_id;
         if (
             isPaymentSuccessful &&
             currentOrder.is_paid() &&

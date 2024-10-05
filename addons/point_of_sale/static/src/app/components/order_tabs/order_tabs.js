@@ -23,20 +23,27 @@ export class OrderTabs extends Component {
     newFloatingOrder() {
         this.pos.selectedTable = null;
         const order = this.pos.add_new_order();
-        order.setBooked(true);
         this.pos.showScreen("ProductScreen");
         this.dialog.closeAll();
+        return order;
     }
     selectFloatingOrder(order) {
         this.pos.set_order(order);
         this.pos.selectedTable = null;
-        this.pos.showScreen("ProductScreen");
+        const previousOrderScreen = order.get_screen_data();
+
+        const props = {};
+        if (previousOrderScreen?.name === "PaymentScreen") {
+            props.orderUuid = order.uuid;
+        }
+
+        this.pos.showScreen(previousOrderScreen?.name || "ProductScreen", props);
         this.dialog.closeAll();
     }
     get orders() {
         return this.props.orders.sort((a, b) => {
-            const noteA = a.note || "";
-            const noteB = b.note || "";
+            const noteA = a.floating_order_name || "";
+            const noteB = b.floating_order_name || "";
             if (noteA && noteB) {
                 // Both have notes
                 const timePattern = /^\d{1,2}:\d{2}/;

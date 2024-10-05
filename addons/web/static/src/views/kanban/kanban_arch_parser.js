@@ -9,7 +9,7 @@ import { Widget } from "@web/views/widgets/widget";
  * NOTE ON 't-name="kanban-box"':
  *
  * "kanban-box" is deprecated. Kanban archs converted to the new (v18) API must
- * define a "kanban-card" template instead.
+ * define a "card" template instead.
  *
  * Multiple roots are supported in kanban box template definitions, however there
  * are a few things to keep in mind when doing so:
@@ -22,9 +22,10 @@ import { Widget } from "@web/views/widgets/widget";
  * fields within all roots to avoid inconsistencies.
  */
 
-export const KANBAN_BOX_ATTRIBUTE = "kanban-box";
-export const KANBAN_CARD_ATTRIBUTE = "kanban-card";
-export const KANBAN_MENU_ATTRIBUTE = "kanban-menu";
+export const LEGACY_KANBAN_BOX_ATTRIBUTE = "kanban-box";
+export const LEGACY_KANBAN_MENU_ATTRIBUTE = "kanban-menu";
+export const KANBAN_CARD_ATTRIBUTE = "card";
+export const KANBAN_MENU_ATTRIBUTE = "menu";
 
 export class KanbanArchParser {
     parse(xmlDoc, models, modelName) {
@@ -148,8 +149,11 @@ export class KanbanArchParser {
         // Concrete kanban box elements in the template
         let cardDoc = templateDocs[KANBAN_CARD_ATTRIBUTE];
         const isLegacyArch = !cardDoc;
+        if (isLegacyArch) {
+            console.warn("'kanban-box' is deprecated, use 'kanban-card' API instead");
+        }
         if (!cardDoc) {
-            cardDoc = templateDocs[KANBAN_BOX_ATTRIBUTE];
+            cardDoc = templateDocs[LEGACY_KANBAN_BOX_ATTRIBUTE];
             if (!cardDoc) {
                 throw new Error(`Missing '${KANBAN_CARD_ATTRIBUTE}' template.`);
             }

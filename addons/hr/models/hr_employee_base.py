@@ -42,10 +42,12 @@ class HrEmployeeBase(models.AbstractModel):
         ("home", "Home"),
         ("office", "Office"),
         ("other", "Other")], compute="_compute_work_location_name_type")
-    user_id = fields.Many2one('res.users')
+    user_id = fields.Many2one('res.users', help="")
     share = fields.Boolean(related='user_id.share')
     resource_id = fields.Many2one('resource.resource')
     resource_calendar_id = fields.Many2one('resource.calendar', check_company=True)
+    is_flexible = fields.Boolean(compute='_compute_is_flexible', store=True)
+    is_fully_flexible = fields.Boolean(compute='_compute_is_flexible', store=True)
     parent_id = fields.Many2one('hr.employee', 'Manager', compute="_compute_parent_id", store=True, readonly=False,
         domain="['|', ('company_id', '=', False), ('company_id', 'in', allowed_company_ids)]")
     coach_id = fields.Many2one(
@@ -157,7 +159,7 @@ class HrEmployeeBase(models.AbstractModel):
         working_now_list = employee_to_check_working._get_employee_working_now()
         for employee in self:
             state = 'out_of_working_hour'
-            if employee.company_id.hr_presence_control_login:
+            if employee.company_id.sudo().hr_presence_control_login:
                 if 'online' in str(employee.user_id.im_status):
                     state = 'present'
                 elif 'offline' in str(employee.user_id.im_status) and employee.id in working_now_list:
@@ -262,6 +264,17 @@ class HrEmployeeBase(models.AbstractModel):
         for employee in self:
             employee.hr_icon_display = 'presence_' + employee.hr_presence_state
             employee.show_hr_icon_display = bool(employee.user_id)
+
+    @api.depends('resource_calendar_id')
+    def _compute_is_flexible(self):
+        for employee in self:
+            employee.is_fully_flexible = not employee.resource_calendar_id
+            employee.is_flexible = employee.is_fully_flexible or employee.resource_calendar_id.flexible_hours
+
+    @api.model
+    def search_panel_select_range(self, field_name, **kwargs):
+        # make sure all the companies/departments accessible by the current user are visible in the search panel since the user can see employees in other companies.
+        return super(HrEmployeeBase, self.with_context(allowed_company_ids=self.env.user._get_company_ids())).search_panel_select_range(field_name, **kwargs)
 
     @api.model
     def _get_employee_working_now(self):

@@ -22,6 +22,7 @@
         'data/product_snippet_template_data.xml',
         'data/digest_data.xml',
         'data/ir_cron_data.xml',
+        'data/tour.xml',
 
         # Reports
         'report/sale_report_views.xml',
@@ -59,6 +60,15 @@
         'views/snippets/s_dynamic_snippet_products.xml',
         'views/snippets/s_dynamic_snippet_products_preview_data.xml',
         'views/snippets/s_popup.xml',
+        'views/snippets/s_mega_menu/big_icons_subtitles.xml',
+        'views/snippets/s_mega_menu/cards.xml',
+        'views/snippets/s_mega_menu/image_menu.xml',
+        'views/snippets/s_mega_menu/images_subtitles.xml',
+        'views/snippets/s_mega_menu/little_icons.xml',
+        'views/snippets/s_mega_menu/logos.xml',
+        'views/snippets/s_mega_menu/multi_menus.xml',
+        'views/snippets/s_mega_menu/odoo_menu.xml',
+        'views/snippets/s_mega_menu/thumbnails.xml',
     ],
     'demo': [
         'data/demo.xml',
@@ -116,6 +126,7 @@
             'sale/static/src/js/product_list/*',
             'sale/static/src/js/product_template_attribute_line/*',
             'sale/static/src/js/quantity_buttons/*',
+            'sale/static/src/js/sale_utils.js',
             'website_sale/static/src/js/combo_configurator_dialog/*',
             'website_sale/static/src/js/product/*',
             'website_sale/static/src/js/product_configurator_dialog/*',
@@ -145,6 +156,7 @@
             'website_sale/static/src/snippets/s_add_to_cart/options.js',
             'website_sale/static/src/js/website_sale.editor.js',
             'website_sale/static/src/js/website_sale_form_editor.js',
+            'website_sale/static/src/js/editor/snippets.options.js',
         ],
         'website.assets_editor': [
             'website_sale/static/src/js/systray_items/*.js',

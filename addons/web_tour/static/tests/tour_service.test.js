@@ -74,6 +74,15 @@ beforeEach(() => {
     onRpc("/web/dataset/call_kw/res.users/switch_tour_enabled", async () => {
         return true;
     });
+    onRpc("/web/dataset/call_kw/web_tour.tour/get_tour_json_by_name", async () => {
+        return {
+            name: "tour1",
+            steps: [
+                { trigger: "button.foo", run: "click" },
+                { trigger: "button.bar", run: "click" },
+            ],
+        };
+    });
 });
 
 afterEach(() => {
@@ -232,6 +241,7 @@ test("next step with new anchor at same position", async () => {
 test("a failing tour logs the step that failed in run", async () => {
     patchWithCleanup(browser.console, {
         groupCollapsed: (s) => expect.step(`log: ${s}`),
+        log: (s) => expect.step(`log: ${s}`),
         warn: (s) => {},
         error: (s) => expect.step(`error: ${s}`),
     });
@@ -339,6 +349,7 @@ test("a failing tour logs the step that failed", async () => {
     patchWithCleanup(browser.console, {
         dir: (s) => expect.step(`runbot: ${s.replace(/[\s-]*/g, "")}`),
         groupCollapsed: (s) => expect.step(`log: ${s}`),
+        log: (s) => expect.step(`log: ${s}`),
         warn: (s) => expect.step(`warn: ${s.replace(/[\s-]*/gi, "")}`),
         error: (s) => expect.step(`error: ${s}`),
     });
@@ -514,11 +525,11 @@ test("pointer is added on top of overlay's stack", async () => {
     await advanceTime(100);
     expect(".o-overlay-item:eq(1) .o_tour_pointer").toHaveCount(1);
 
-    click(".modal .a");
+    await click(".modal .a");
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(1);
 
-    click(".btn-primary");
+    await click(".btn-primary");
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(0);
 });
@@ -588,14 +599,14 @@ test("hovering to the anchor element should show the content and not when conten
     await animationFrame();
     expect(".o_tour_pointer_content.invisible").toHaveCount(1);
 
-    click("button.inc");
+    await click("button.inc");
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(1);
     await contains("button.inc").hover();
     await animationFrame();
     expect(".o_tour_pointer_content.invisible").toHaveCount(1);
 
-    click("button.inc");
+    await click("button.inc");
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(0);
 });
@@ -637,7 +648,7 @@ test("should show only 1 pointer at a time", async () => {
     expect(".o_tour_pointer").toHaveCount(1);
     await contains(".interval input").edit(5);
     expect(".o_tour_pointer").toHaveCount(1);
-    click("button.inc");
+    await click("button.inc");
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(0);
 });
@@ -820,7 +831,7 @@ test("scroller pointer to reach next step", async () => {
     expect(pointer).toHaveCount(1);
     expect(pointer.textContent).toBe("Click to increment");
 
-    click("button.inc");
+    await click("button.inc");
     await animationFrame();
     expect(".o_tour_pointer").toHaveCount(0);
 });
@@ -989,13 +1000,23 @@ test("manual tour with inactive steps", async () => {
 });
 
 test("automatic tour with alternative trigger", async () => {
+    let suppressLog = false;
     patchWithCleanup(browser.console, {
         groupCollapsed: (s) => {
             expect.step("on step");
+            suppressLog = true;
+        },
+        groupEnd: () => {
+            suppressLog = false;
         },
         log: (s) => {
+            if (suppressLog) {
+                return;
+            }
             if (s.toLowerCase().includes("tour tour_des_flandres succeeded")) {
                 expect.step("succeeded");
+            } else if (s !== "tour succeeded") {
+                expect.step("on step");
             }
         },
     });
@@ -1184,13 +1205,6 @@ test("Tour backward when the pointed element disappear and ignore warn step", as
 });
 
 test("Tour started by the URL", async () => {
-    registry.category("web_tour.tours").add("tour1", {
-        steps: () => [
-            { trigger: "button.foo", run: "click" },
-            { trigger: "button.bar", run: "click" },
-        ],
-    });
-
     browser.location.href = `${browser.location.origin}?tour=tour1`;
 
     class Dummy extends Component {
@@ -1334,11 +1348,11 @@ test("check tooltip position", async () => {
     expect(tooltip.getBoundingClientRect().bottom).toBeLessThan(
         button3.getBoundingClientRect().top
     );
+    await contains(".button3").click();
 });
 
 test("check rainbowManMessage", async () => {
     registry.category("web_tour.tours").add("rainbow_tour", {
-        rainbowManMessage: "Congratulations !",
         steps: () => [
             {
                 trigger: ".button0",
@@ -1368,7 +1382,10 @@ test("check rainbowManMessage", async () => {
         static props = ["*"];
     }
     await mountWithCleanup(Root);
-    await getService("tour_service").startTour("rainbow_tour", { mode: "manual" });
+    await getService("tour_service").startTour("rainbow_tour", {
+        mode: "manual",
+        rainbowManMessage: "Congratulations !",
+    });
     await contains(".button0").click();
     await contains(".button1").click();
     await contains(".button2").click();

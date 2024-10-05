@@ -24,7 +24,7 @@ class ResConfigSettings(models.TransientModel):
         string="Gain Exchange Rate Account",
         readonly=False,
         check_company=True,
-        domain="[('deprecated', '=', False), ('account_type', 'in', ('income', 'income_other'))]")
+        domain="[('deprecated', '=', False), ('internal_group', '=', 'income')]")
     expense_currency_exchange_account_id = fields.Many2one(
         comodel_name="account.account",
         related="company_id.expense_currency_exchange_account_id",
@@ -68,27 +68,6 @@ class ResConfigSettings(models.TransientModel):
         help='Bank Transactions are posted immediately after import or synchronization. '
              'Their counterparty is the bank suspense account.\n'
              'Reconciliation replaces the latter by the definitive account(s).')
-    account_journal_payment_debit_account_id = fields.Many2one(
-        comodel_name='account.account',
-        string='Outstanding Receipts',
-        readonly=False,
-        check_company=True,
-        related='company_id.account_journal_payment_debit_account_id',
-        domain="[('deprecated', '=', False), ('account_type', '=', 'asset_current')]",
-        help='Incoming payments are posted on an Outstanding Receipts Account. '
-             'In the bank reconciliation widget, they appear as blue lines.\n'
-             'Bank transactions are then reconciled on the Outstanding Receipts Accounts rather than the Receivable '
-             'Account.')
-    account_journal_payment_credit_account_id = fields.Many2one(
-        comodel_name='account.account',
-        string='Outstanding Payments',
-        readonly=False,
-        check_company=True,
-        related='company_id.account_journal_payment_credit_account_id',
-        domain="[('deprecated', '=', False), ('account_type', '=', 'asset_current')]",
-        help='Outgoing Payments are posted on an Outstanding Payments Account. '
-             'In the bank reconciliation widget, they appear as blue lines.\n'
-             'Bank transactions are then reconciled on the Outstanding Payments Account rather the Payable Account.')
     transfer_account_id = fields.Many2one('account.account', string="Internal Transfer",
         related='company_id.transfer_account_id', readonly=False,
         check_company=True,
@@ -112,7 +91,7 @@ class ResConfigSettings(models.TransientModel):
     module_account_batch_payment = fields.Boolean(string='Use batch payments',
         help='This allows you grouping payments into a single batch and eases the reconciliation process.\n'
              '-This installs the account_batch_payment module.')
-    module_account_sepa = fields.Boolean(string='SEPA Credit Transfer (SCT)')
+    module_account_iso20022 = fields.Boolean(string='SEPA Credit Transfer / ISO20022')
     module_account_sepa_direct_debit = fields.Boolean(string='Use SEPA Direct Debit')
     module_account_bank_statement_import_qif = fields.Boolean("Import .qif files")
     module_account_bank_statement_import_ofx = fields.Boolean("Import in .ofx format")
@@ -145,8 +124,6 @@ class ResConfigSettings(models.TransientModel):
     account_fiscal_country_id = fields.Many2one(string="Fiscal Country Code", related="company_id.account_fiscal_country_id", readonly=False, store=False)
 
     qr_code = fields.Boolean(string='Display SEPA QR-code', related='company_id.qr_code', readonly=False)
-    invoice_is_download = fields.Boolean(string='Download', related='company_id.invoice_is_download', readonly=False)
-    invoice_is_email = fields.Boolean(string='Send Email', related='company_id.invoice_is_email', readonly=False)
     incoterm_id = fields.Many2one('account.incoterms', string='Default incoterm', related='company_id.incoterm_id', help='International Commercial Terms are a series of predefined commercial terms used in international transactions.', readonly=False)
     invoice_terms = fields.Html(related='company_id.invoice_terms', string="Terms & Conditions", readonly=False)
     invoice_terms_html = fields.Html(related='company_id.invoice_terms_html', string="Terms & Conditions as a Web page",
@@ -254,16 +231,17 @@ class ResConfigSettings(models.TransientModel):
 
     @api.depends('company_id')
     def _compute_account_default_credit_limit(self):
-        for setting in self:
-            setting.account_default_credit_limit = self.env['ir.property']._get('credit_limit', 'res.partner')
+        ResPartner = self.env['res.partner']
+        company_limit = ResPartner._fields['credit_limit'].get_company_dependent_fallback(ResPartner)
+        self.account_default_credit_limit = company_limit
 
     def _inverse_account_default_credit_limit(self):
         for setting in self:
-            self.env['ir.property']._set_default(
-                'credit_limit',
+            self.env['ir.default'].set(
                 'res.partner',
+                'credit_limit',
                 setting.account_default_credit_limit,
-                setting.company_id.id
+                company_id=setting.company_id.id
             )
 
     @api.depends('company_id')

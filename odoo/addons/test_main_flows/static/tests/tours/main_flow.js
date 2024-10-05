@@ -43,7 +43,7 @@ registry.category("web_tour.tours").add('main_flow_tour', {
     content: _t("Let's create products."),
     tooltipPosition: "bottom",
     run: "click",
-}, 
+},
 {
     trigger: ".o_breadcrumb .active:contains('Products')",
 },
@@ -95,13 +95,13 @@ registry.category("web_tour.tours").add('main_flow_tour', {
     isActive: ["desktop"],
     trigger: ".o_field_widget[name=taxes_id] input",
     content: _t("Focus on customer taxes field."),
-    run: function (actions) {
-        actions.click();
+    async run(actions) {
+        await actions.click();
         const e = queryFirst(".ui-menu-item:not(.o_m2o_dropdown_option) > a.ui-state-active");
         if (e) {
-            actions.click(e);
+            await actions.click(e);
         } else {
-            actions.click(); // close dropdown
+            await actions.click(); // close dropdown
         }
     },
 }, {
@@ -526,15 +526,15 @@ stepUtils.autoExpandMoreButtons(),
     isActive: ["desktop"],
     trigger: ".o_field_widget[name=taxes_id] input",
     content: _t("Focus on customer taxes field."),
-    run: function (actions) {
-        actions.click();
+    async run(actions) {
+        await actions.click();
         const e = queryFirst(
             ".o_field_widget[name=taxes_id] .o-autocomplete--dropdown-item:not(.o_m2o_dropdown_option) > a"
         );
         if (e) {
-            actions.click(e);
+            await actions.click(e);
         } else {
-            actions.click(); // close dropdown
+            await actions.click(); // close dropdown
         }
     },
 }, {
@@ -689,13 +689,7 @@ stepUtils.autoExpandMoreButtons(),
     run: "click",
 }, {
     isActive: ["mobile"],
-    trigger: ".o_statusbar_status .dropdown-toggle:visible",
-    content: _t("Change status from New to proposition."),
-    tooltipPosition: "bottom",
-    run: "click",
-}, {
-    isActive: ["mobile"],
-    trigger: ".dropdown-item:contains('Proposition')",
+    trigger: ".o_statusbar_status button:contains('Proposition')",
     content: _t("Change status from New to proposition."),
     tooltipPosition: "bottom",
     run: "click",
@@ -815,7 +809,7 @@ stepUtils.autoExpandMoreButtons(),
 {
     trigger: "body:not(:has(.modal))",
 },
-...stepUtils.statusbarButtonsSteps('Send by Email', _t("Try to send it to email"), ".o_statusbar_status .dropdown-toggle:contains('Quotation')"),
+...stepUtils.statusbarButtonsSteps('Send by Email', _t("Try to send it to email"), ".o_statusbar_status .o_arrow_button_current:contains('Quotation')"),
 {
     isActive: ["body:not(:has(.modal-footer button[name='action_send_mail']))"],
     trigger: ".modal .modal-footer button[name='document_layout_save']",
@@ -932,8 +926,8 @@ stepUtils.autoExpandMoreButtons(),
     tooltipPosition: 'bottom',
     run: "click",
 },
-...stepUtils.statusbarButtonsSteps('Confirm Order', _t("Confirm quotation")),
-...stepUtils.statusbarButtonsSteps('Receive Products', _t("Receive Product"), ".o_statusbar_status .dropdown-toggle:contains('Purchase Order')"),
+...stepUtils.statusbarButtonsSteps('Confirm Order', _t("Confirm quotation"), ".o_statusbar_status .o_arrow_button_current:contains('RFQ')"),
+...stepUtils.statusbarButtonsSteps('Receive Products', _t("Receive Product"), ".o_statusbar_status .o_arrow_button_current:contains('Purchase Order')"),
 ...stepUtils.statusbarButtonsSteps('Validate', _t("Validate"), ".o_statusbar_status:contains('Ready')"),
 {
     trigger: ".o_back_button:enabled, .breadcrumb-item:not('.active'):last",
@@ -998,7 +992,7 @@ stepUtils.autoExpandMoreButtons(),
 },
 {
     isActive: ["mobile"],
-    trigger: '.o_kanban_record .o_kanban_record_title:contains("the_flow.product"):first',
+    trigger: '.o_kanban_record:contains("the_flow.product"):first',
     content: _t('Select the generated manufacturing order'),
     tooltipPosition: 'bottom',
     run: "click",
@@ -1008,7 +1002,7 @@ stepUtils.autoExpandMoreButtons(),
     tooltipPosition: "right",
     run: "edit 1 && click body",
 },
-...stepUtils.statusbarButtonsSteps('Produce All', _t("Produce All"), ".o_statusbar_status .dropdown-toggle:contains('To Close')"),
+...stepUtils.statusbarButtonsSteps('Produce All', _t("Produce All"), ".o_statusbar_status .o_arrow_button_current:contains('To Close')"),
 ...stepUtils.toggleHomeMenu(),
 ...stepUtils.goToAppSteps('sale.sale_menu_root', markup(_t('Organize your sales activities with the <b>Sales app</b>.'))),
 {
@@ -1176,7 +1170,7 @@ stepUtils.autoExpandMoreButtons(true),
     stepUtils.goToAppSteps('accountant.menu_accounting', _t('Go to Accounting'))[2], // 2 -> Ent only
 {
     isActive: ["enterprise", "desktop"],
-    trigger: "div.o_account_kanban div.o_kanban_card_header a.oe_kanban_action span:contains('Bank')",
+    trigger: "div.o_account_kanban a.oe_kanban_action span:contains('Bank')",
     content: _t("Open the bank reconciliation widget"),
     run: "click",
 }, {

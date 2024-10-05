@@ -23,12 +23,14 @@ const threadPatch = {
                 );
             },
             sort(m1, m2) {
-                return this.store.sortOnlineMembers(m1, m2);
+                return this.store.sortMembers(m1, m2);
             },
         });
         this.offlineMembers = Record.many("ChannelMember", {
             compute: this._computeOfflineMembers,
-            sort: (m1, m2) => (m1.persona?.name < m2.persona?.name ? -1 : 1),
+            sort(m1, m2) {
+                return this.store.sortMembers(m1, m2);
+            },
         });
     },
     _computeOfflineMembers() {
@@ -82,6 +84,11 @@ const threadPatch = {
         } finally {
             this.isLoadingAttachments = false;
         }
+    },
+    get notifyOnLeave() {
+        // Skip notification if display name is unknown (might depend on
+        // knowledge of members for groups).
+        return Boolean(this.displayName);
     },
     /** @param {string} body */
     async post(body) {

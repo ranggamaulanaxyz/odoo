@@ -45,28 +45,13 @@ export class KanbanCompiler extends ViewCompiler {
      * @override
      */
     compileButton(el, params) {
-        /**
-         * WOWL FIXME
-         * For some reason, buttons in some arch have a data-something instead of just a normal attribute.
-         * The new system only uses normal attributes.
-         * This is an ugly small compatibility trick to fix this.
-         */
-        if (el.hasAttribute("data-type")) {
-            for (const { name, value } of el.attributes) {
-                el.setAttribute(name.replace(/^data-/, ""), value);
-            }
-        }
-
         const type = el.getAttribute("type");
         if (!SPECIAL_TYPES.includes(type)) {
-            // Not a supported action type.
+            // Not a kanban-specific action type.
             return super.compileButton(el, params);
         }
 
-        combineAttributes(el, "class", [
-            "oe_kanban_action",
-            `oe_kanban_action_${getTag(el, true)}`,
-        ]);
+        combineAttributes(el, "class", ["oe_kanban_action"]);
 
         if (ACTION_TYPES.includes(type)) {
             if (!el.hasAttribute("debounce")) {
@@ -143,22 +128,25 @@ export class KanbanCompiler extends ViewCompiler {
             }
         }
 
-        const { bold, display } = extractAttributes(el, ["bold", "display"]);
-        const classNames = [];
-        if (display === "right") {
-            classNames.push("float-end");
-        } else if (display === "full") {
-            classNames.push("o_text_block");
+        if (params.isLegacy) {
+            const { bold, display } = extractAttributes(el, ["bold", "display"]);
+            const classNames = [];
+            if (display === "right") {
+                classNames.push("float-end");
+            } else if (display === "full") {
+                classNames.push("o_text_block");
+            }
+            if (bold) {
+                classNames.push("o_text_bold");
+            }
+            if (classNames.length > 0) {
+                const clsFormatted = isSpan
+                    ? classNames.join(" ")
+                    : toStringExpression(classNames.join(" "));
+                compiled.setAttribute("class", clsFormatted);
+            }
         }
-        if (bold) {
-            classNames.push("o_text_bold");
-        }
-        if (classNames.length > 0) {
-            const clsFormatted = isSpan
-                ? classNames.join(" ")
-                : toStringExpression(classNames.join(" "));
-            compiled.setAttribute("class", clsFormatted);
-        }
+
         const attrs = {};
         for (const attr of el.attributes) {
             attrs[attr.name] = attr.value;

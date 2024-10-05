@@ -175,10 +175,14 @@ export class ControlPanel extends Component {
         onMounted(async () => {
             if (this.state.embeddedInfos.embeddedActions?.length > 0) {
                 // If there is no visible embedded actions, the current action (if it exists) is put by default
+                const embeddedActionKey =
+                    this.state.embeddedInfos.currentEmbeddedAction?.id || false;
                 if (
-                    !Object.keys(this.state.embeddedInfos.visibleEmbeddedActions).includes("false")
+                    !Object.keys(this.state.embeddedInfos.visibleEmbeddedActions).includes(
+                        embeddedActionKey.toString()
+                    )
                 ) {
-                    this._setVisibility(false);
+                    this._setVisibility(embeddedActionKey);
                 }
                 const embeddedOrderLocalStorageKey = browser.localStorage.getItem(
                     this.embeddedOrderKey
@@ -237,14 +241,10 @@ export class ControlPanel extends Component {
     }
 
     getDropdownClass(action) {
-        const isSelected =
-            (!this.env.isSmall && this._checkValueLocalStorage(action)) ||
+        return (!this.env.isSmall && this._checkValueLocalStorage(action)) ||
             (this.env.isSmall && this.state.embeddedInfos.currentEmbeddedAction?.id === action.id)
-                ? "selected"
-                : "";
-        const isClickable =
-            action.id === false && !this.env.isSmall ? "cursor-default text-muted" : "";
-        return `${isSelected} ${isClickable}`;
+            ? "selected"
+            : "";
     }
 
     getScrollingElement() {
@@ -445,25 +445,32 @@ export class ControlPanel extends Component {
         }
         const userId = newActionIsShared ? false : user.userId;
 
-        const extractValues = ({ parent_action_id, action_id, parent_res_model }) => ({
+        const {
+            parent_action_id,
+            action_id,
+            parent_res_model,
+            python_method,
+            domain,
+            context,
+            groups_ids,
+        } = currentEmbeddedAction;
+        const values = {
             parent_action_id: parent_action_id[0],
-            action_id: action_id[0] || this.env.config.actionId,
             parent_res_model,
             parent_res_id: this.env.searchModel.globalContext.active_id,
             user_id: userId,
             is_deletable: true,
             default_view_mode: this.env.config.viewType,
-        });
-        const { parent_action_id, action_id, python_method, domain, context, groups_ids } =
-            currentEmbeddedAction;
-        const values = {
-            ...extractValues(currentEmbeddedAction),
-            python_method,
             domain,
             context,
             groups_ids,
             name: newActionName,
         };
+        if (python_method) {
+            values.python_method = python_method;
+        } else {
+            values.action_id = action_id[0] || this.env.config.actionId;
+        }
         const embeddedActionId = await this.orm.create("ir.embedded.actions", [values]);
         const description = `${newActionName}`;
         this.env.searchModel.createNewFavorite({
@@ -604,19 +611,16 @@ export class ControlPanel extends Component {
      * @param {HTMLElement} params.previous
      */
     _sortEmbeddedActionDrop({ element, previous }) {
-        const order = this.state.embeddedInfos.embeddedActions
-            .map((el) => el.id)
-            .filter((el) => el !== false);
-        const elementId = Number(element.dataset.id);
+        const order = this.state.embeddedInfos.embeddedActions.map((el) => el.id);
+        const elementId = Number(element.dataset.id) || false;
         const elementIndex = order.indexOf(elementId);
         order.splice(elementIndex, 1);
         if (previous) {
-            const prevIndex = order.indexOf(Number(previous.dataset.id));
+            const prevIndex = order.indexOf(Number(previous.dataset.id) || false);
             order.splice(prevIndex + 1, 0, elementId);
         } else {
             order.splice(0, 0, elementId);
         }
-        order.unshift(false);
         this._sortEmbeddedActions(order);
         browser.localStorage.setItem(this.embeddedOrderKey, JSON.stringify(order));
     }

@@ -33,13 +33,13 @@ test("project.project (kanban): check that ProjectStateSelectionField does not p
         arch: `
             <kanban class="o_kanban_test">
                 <template>
-                    <t t-name="kanban-card">
+                    <t t-name="card">
                         <field name="last_update_status" widget="project_state_selection"/>
                     </t>
                 </template>
             </kanban>
         `,
     });
-    click("div[name='last_update_status'] button.dropdown-toggle");
+    await click("div[name='last_update_status'] button.dropdown-toggle");
     expect(".dropdown-menu .dropdown-item:contains('Set Status')").toHaveCount(0);
 });

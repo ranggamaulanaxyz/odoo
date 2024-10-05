@@ -7,40 +7,36 @@ import * as ProductScreenResto from "@pos_restaurant/../tests/tours/utils/produc
 const ProductScreen = { ...ProductScreenPos, ...ProductScreenResto };
 import * as SplitBillScreen from "@pos_restaurant/../tests/tours/utils/split_bill_screen_util";
 import * as Order from "@point_of_sale/../tests/tours/utils/generic_components/order_widget_util";
-import * as Chrome from "@point_of_sale/../tests/tours/utils/chrome_util";
+import * as ChromePos from "@point_of_sale/../tests/tours/utils/chrome_util";
+import * as ChromeRestaurant from "@pos_restaurant/../tests/tours/utils/chrome";
+const Chrome = { ...ChromePos, ...ChromeRestaurant };
 import { registry } from "@web/core/registry";
-
-function activeTableIs(tableNumber) {
-    return {
-        trigger: `.table-free-order-label:contains("${tableNumber}")`,
-    };
-}
 
 registry.category("web_tour.tours").add("ControlButtonsTour", {
     test: true,
     steps: () =>
         [
-            // Test TransferOrderButton
+            // Test merging table, transfer is already tested in pos_restaurant_sync_second_login.
             Chrome.startPoS(),
             Dialog.confirm("Open Register"),
             FloorScreen.clickTable("2"),
-            activeTableIs("2"),
+            Chrome.activeTableOrOrderIs("2"),
             ProductScreen.addOrderline("Water", "5", "2", "10.0"),
+            Chrome.clickPlanButton(),
+            FloorScreen.clickTable("4"),
+            Chrome.activeTableOrOrderIs("4"),
+            ProductScreen.addOrderline("Minute Maid", "3", "2", "6.0"),
+            // Extra line is added to test merging table.
+            // Merging this order to another should also include this extra line.
+            ProductScreen.clickDisplayedProduct("Coca-Cola"),
+            ProductScreen.selectedOrderlineHas("Coca-Cola", "1"),
+
             ProductScreen.clickControlButton("Transfer"),
-            FloorScreen.clickTable("4"),
-            activeTableIs("4"),
-            Order.hasLine({ productName: "Water", withClass: ".selected" }),
-            Chrome.clickPlanButton(),
             FloorScreen.clickTable("2"),
-            activeTableIs("2"),
-            ProductScreen.orderIsEmpty(),
-            Chrome.clickPlanButton(),
-            FloorScreen.isShown(),
-            FloorScreen.clickTable("4"),
-            Order.hasLine({
-                productName: "Water",
-                quantity: "5",
-            }),
+            Chrome.activeTableOrOrderIs("2"),
+            Order.hasLine({ productName: "Water", quantity: "5" }),
+            Order.hasLine({ productName: "Minute Maid", quantity: "3" }),
+            Order.hasLine({ productName: "Coca-Cola", quantity: "1" }),
 
             // Test SplitBillButton
             ProductScreen.clickControlButton("Split"),
@@ -58,7 +54,7 @@ registry.category("web_tour.tours").add("ControlButtonsTour", {
             }),
             // Check that note is imported if come back to the table
             Chrome.clickPlanButton(),
-            FloorScreen.clickTable("4"),
+            FloorScreen.clickTable("2"),
             Order.hasLine({
                 productName: "Water",
                 quantity: "5",

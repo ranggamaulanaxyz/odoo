@@ -32,6 +32,8 @@ import { getTaxesAfterFiscalPosition, getTaxesValues } from "../models/utils/tax
 import { QRPopup } from "@point_of_sale/app/utils/qr_code_popup/qr_code_popup";
 import { ActionScreen } from "@point_of_sale/app/screens/action_screen";
 import { FormViewDialog } from "@web/views/view_dialogs/form_view_dialog";
+import { CashMovePopup } from "@point_of_sale/app/navbar/cash_move_popup/cash_move_popup";
+import { ClosePosPopup } from "../navbar/closing_popup/closing_popup";
 
 const { DateTime } = luxon;
 
@@ -129,6 +131,11 @@ export class PosStore extends Reactive {
         this.ready = new Promise((resolve) => {
             this.markReady = resolve;
         });
+        this.isScaleScreenVisible = false;
+        this.scaleData = null;
+        this.scaleWeight = 0;
+        this.scaleTare = 0;
+        this.totalPriceOnScale = 0;
 
         // FIXME POSREF: the hardwareProxy needs the pos and the pos needs the hardwareProxy. Maybe
         // the hardware proxy should just be part of the pos service?
@@ -255,7 +262,18 @@ export class PosStore extends Reactive {
         this.computeProductPricelistCache();
         await this.processProductAttributes();
     }
+    cashMove() {
+        this.hardwareProxy.openCashbox(_t("Cash in / out"));
+        return makeAwaitable(this.dialog, CashMovePopup);
+    }
+    async closeSession() {
+        const info = await this.getClosePosInfo();
+        await this.data.resetIndexedDB();
 
+        if (info) {
+            this.dialog.add(ClosePosPopup, info);
+        }
+    }
     async processProductAttributes() {
         const productIds = new Set();
         const productTmplIds = new Set();
@@ -325,6 +343,7 @@ export class PosStore extends Reactive {
                 }
 
                 const cancelled = this.removeOrder(order, true);
+                this.removePendingOrder(order);
                 if (!cancelled) {
                     return false;
                 } else if (typeof order.id === "number") {
@@ -343,7 +362,6 @@ export class PosStore extends Reactive {
         }
 
         if (ids.size > 0) {
-            this.pendingOrder.delete.clear();
             await this.data.call("pos.order", "action_pos_order_cancel", [Array.from(ids)]);
         }
 
@@ -472,6 +490,15 @@ export class PosStore extends Reactive {
     }
 
     async afterProcessServerData() {
+        // Adding the not synced paid orders to the pending orders
+        const paidUnsyncedOrderIds = this.models["pos.order"]
+            .filter((order) => order.isUnsyncedPaid)
+            .map((order) => order.id);
+
+        if (paidUnsyncedOrderIds.length > 0) {
+            this.addPendingOrder(paidUnsyncedOrderIds);
+        }
+
         const openOrders = this.data.models["pos.order"].filter((order) => !order.finalized);
 
         if (!this.config.module_pos_restaurant) {
@@ -523,10 +550,9 @@ export class PosStore extends Reactive {
         return {
             attribute_value_ids: attributeLinesValues.map((values) => values[0].id),
             attribute_custom_values: [],
-            price_extra: attributeLinesValues.reduce(
-                (acc, values) => acc + values[0].price_extra,
-                0
-            ),
+            price_extra: attributeLinesValues
+                .filter((attr) => attr[0].attribute_id.create_variant !== "always")
+                .reduce((acc, values) => acc + values[0].price_extra, 0),
             quantity: 1,
         };
     }
@@ -635,7 +661,9 @@ export class PosStore extends Reactive {
                             if (productFound) {
                                 const attr =
                                     this.data.models["product.template.attribute.value"].get(a);
-                                return attr.is_custom;
+                                return (
+                                    attr.is_custom || attr.attribute_id.create_variant !== "always"
+                                );
                             }
                             return true;
                         })
@@ -657,7 +685,7 @@ export class PosStore extends Reactive {
                             ];
                         }
                     ),
-                    price_extra: productFound ? 0 : values.price_extra + payload.price_extra,
+                    price_extra: values.price_extra + payload.price_extra,
                     qty: payload.qty || values.qty,
                     product_id: productFound || values.product_id,
                 });
@@ -666,10 +694,9 @@ export class PosStore extends Reactive {
             }
         } else if (values.product_id.product_template_variant_value_ids.length > 0) {
             // Verify price extra of variant products
-            const priceExtra = values.product_id.product_template_variant_value_ids.reduce(
-                (acc, attr) => acc + attr.price_extra,
-                0
-            );
+            const priceExtra = values.product_id.product_template_variant_value_ids
+                .filter((attr) => attr.attribute_id.create_variant !== "always")
+                .reduce((acc, attr) => acc + attr.price_extra, 0);
             values.price_extra += priceExtra;
         }
 
@@ -768,14 +795,26 @@ export class PosStore extends Reactive {
         // This actions cannot be handled inside pos_order.js or pos_order_line.js
         if (values.product_id.to_weight && this.config.iface_electronic_scale && configure) {
             if (values.product_id.isScaleAvailable) {
-                const weight = await makeAwaitable(this.env.services.dialog, ScaleScreen, {
-                    product: values.product_id,
-                    taxIncluded: this.config.iface_tax_included === "total",
-                });
+                this.isScaleScreenVisible = true;
+                this.scaleData = {
+                    productName: values.product_id?.display_name,
+                    uomName: values.product_id.uom_id?.name,
+                    uomRounding: values.product_id.uom_id?.rounding,
+                    productPrice: this.getProductPrice(values.product_id),
+                };
+                const weight = await makeAwaitable(
+                    this.env.services.dialog,
+                    ScaleScreen,
+                    this.scaleData
+                );
                 if (!weight) {
                     return;
                 }
                 values.qty = weight;
+                this.isScaleScreenVisible = false;
+                this.scaleWeight = 0;
+                this.scaleTare = 0;
+                this.totalPriceOnScale = 0;
             } else {
                 await values.product_id._onScaleNotAvailable();
             }
@@ -785,8 +824,8 @@ export class PosStore extends Reactive {
         if (!values.product_id.isCombo() && vals.price_unit === undefined) {
             values.price_unit = values.product_id.get_price(order.pricelist_id, values.qty);
         }
-
-        if (values.price_extra) {
+        const isScannedProduct = opts.code && opts.code.type === "product";
+        if (values.price_extra && !isScannedProduct) {
             const price = values.product_id.get_price(
                 order.pricelist_id,
                 values.qty,
@@ -872,6 +911,12 @@ export class PosStore extends Reactive {
             this.selectedCategory = this.models["pos.category"].get(categoryId);
         }
     }
+    setScaleWeight(weight) {
+        this.scaleWeight = weight;
+    }
+    setScaleTare(tare) {
+        this.scaleTare = tare;
+    }
 
     /**
      * Remove the order passed in params from the list of orders
@@ -892,6 +937,7 @@ export class PosStore extends Reactive {
      * @returns {name: string, id: int, role: string}
      */
     get_cashier() {
+        this.user.role = this.user._raw.role;
         return this.user;
     }
     get_cashier_user_id() {
@@ -994,30 +1040,28 @@ export class PosStore extends Reactive {
     }
 
     getPendingOrder() {
-        // With the relational model, the record ID looks like this: pos.order_2.
-        // If the ID is a string, this means that it has not yet been sent to the server.
-        const paidOrdersNotSent = this.models["pos.order"].filter(
-            (order) =>
-                order.finalized &&
-                typeof order.id === "string" &&
-                !this.pendingOrder.create.has(order.id) &&
-                !this.pendingOrder.write.has(order.id)
-        );
         const orderToCreate = this.models["pos.order"].filter(
             (order) =>
                 this.pendingOrder.create.has(order.id) &&
                 (order.lines.length > 0 ||
                     order.payment_ids.some((p) => p.payment_method_id.type === "pay_later"))
         );
-        const orderToUpdate = this.models["pos.order"].filter((order) =>
-            this.pendingOrder.write.has(order.id)
+        const orderToUpdate = this.models["pos.order"].readMany(
+            Array.from(this.pendingOrder.write)
+        );
+        const orderToDelele = this.models["pos.order"].readMany(
+            Array.from(this.pendingOrder.delete)
         );
 
         return {
+            orderToDelele,
             orderToCreate,
             orderToUpdate,
-            paidOrdersNotSent,
         };
+    }
+
+    getOrderIdsToDelete() {
+        return [...this.pendingOrder.delete];
     }
 
     removePendingOrder(order) {
@@ -1025,6 +1069,14 @@ export class PosStore extends Reactive {
         this.pendingOrder["write"].delete(order.id);
         this.pendingOrder["delete"].delete(order.id);
         return true;
+    }
+
+    clearPendingOrder() {
+        this.pendingOrder = {
+            create: new Set(),
+            write: new Set(),
+            delete: new Set(),
+        };
     }
 
     getSyncAllOrdersContext(orders, options = {}) {
@@ -1039,15 +1091,16 @@ export class PosStore extends Reactive {
     postSyncAllOrders(orders) {}
     async syncAllOrders(options = {}) {
         try {
-            const { orderToCreate, orderToUpdate, paidOrdersNotSent } = this.getPendingOrder();
-            const orders = [...orderToCreate, ...orderToUpdate, ...paidOrdersNotSent];
-
-            this.preSyncAllOrders(orders);
-            const context = this.getSyncAllOrdersContext(orders, options);
-
-            if (this.pendingOrder.delete.size) {
-                await this.deleteOrders([], Array.from(this.pendingOrder.delete));
+            const orderIdsToDelete = this.getOrderIdsToDelete();
+            if (orderIdsToDelete.length > 0) {
+                await this.deleteOrders([], orderIdsToDelete);
             }
+
+            const { orderToCreate, orderToUpdate } = this.getPendingOrder();
+            const orders = [...orderToCreate, ...orderToUpdate];
+            const context = this.getSyncAllOrdersContext(orders, options);
+            this.preSyncAllOrders(orders);
+
             // Allow us to force the sync of the orders In the case of
             // pos_restaurant is usefull to get unsynced orders
             // for a specific table
@@ -1069,14 +1122,6 @@ export class PosStore extends Reactive {
             const missingRecords = await this.data.missingRecursive(data);
             const newData = this.models.loadData(missingRecords);
 
-            for (const order of [...orders, ...data["pos.order"]]) {
-                if (!["invoiced", "paid", "done", "cancel"].includes(order.state)) {
-                    this.addPendingOrder([order.id]);
-                } else {
-                    this.removePendingOrder(order);
-                }
-            }
-
             for (const line of newData["pos.order.line"]) {
                 const refundedOrderLine = line.refunded_orderline_id;
 
@@ -1096,6 +1141,7 @@ export class PosStore extends Reactive {
                 session.delete();
             }
 
+            this.clearPendingOrder();
             return newData["pos.order"];
         } catch (error) {
             if (options.throw) {
@@ -1135,11 +1181,15 @@ export class PosStore extends Reactive {
             });
             if (confirmed) {
                 this.mobile_pane = "right";
-                this.env.services.pos.showScreen("PaymentScreen");
+                this.env.services.pos.showScreen("PaymentScreen", {
+                    orderUuid: this.selectedOrderUuid,
+                });
             }
         } else {
             this.mobile_pane = "right";
-            this.env.services.pos.showScreen("PaymentScreen");
+            this.env.services.pos.showScreen("PaymentScreen", {
+                orderUuid: this.selectedOrderUuid,
+            });
         }
     }
     async getServerOrders() {
@@ -1295,11 +1345,16 @@ export class PosStore extends Reactive {
      * @param {str} terminalName
      */
     getPendingPaymentLine(terminalName) {
-        return this.get_order().payment_ids.find(
-            (paymentLine) =>
-                paymentLine.payment_method_id.use_payment_terminal === terminalName &&
-                !paymentLine.is_done()
-        );
+        for (const order of this.models["pos.order"].getAll()) {
+            const paymentLine = order.payment_ids.find(
+                (paymentLine) =>
+                    paymentLine.payment_method_id.use_payment_terminal === terminalName &&
+                    !paymentLine.is_done()
+            );
+            if (paymentLine) {
+                return paymentLine;
+            }
+        }
     }
 
     get linesToRefund() {
@@ -1334,12 +1389,13 @@ export class PosStore extends Reactive {
             this.ticket_screen_mobile_pane === "left" ? "right" : "left";
     }
     async logEmployeeMessage(action, message) {
-        await this.data.call("pos.session", "log_partner_message", [
-            this.session.id,
-            this.user.partner_id.id,
-            action,
-            message,
-        ]);
+        await this.data.call(
+            "pos.session",
+            "log_partner_message",
+            [this.session.id, this.user.partner_id.id, action, message],
+            {},
+            true
+        );
     }
     showScreen(name, props) {
         this.previousScreen = this.mainScreen.component?.name;
@@ -1355,18 +1411,19 @@ export class PosStore extends Reactive {
         const baseUrl = this.session._base_url;
         return order.export_for_printing(baseUrl, headerData);
     }
-    async printReceipt() {
-        const isPrinted = await this.printer.print(
+    async printReceipt({ basic = false, order = this.get_order() } = {}) {
+        await this.printer.print(
             OrderReceipt,
             {
-                data: this.orderExportForPrinting(this.get_order()),
+                data: this.orderExportForPrinting(order),
                 formatCurrency: this.env.utils.formatCurrency,
+                basic_receipt: basic,
             },
             { webPrintFallback: true }
         );
-        if (isPrinted) {
-            this.get_order()._printed = true;
-        }
+        const nbrPrint = order.nb_print;
+        await this.data.write("pos.order", [order.id], { nb_print: nbrPrint + 1 });
+        return true;
     }
     getOrderChanges(skipped = false, order = this.get_order()) {
         return getOrderChanges(order, skipped, this.orderPreparationCategories);
@@ -1401,19 +1458,26 @@ export class PosStore extends Reactive {
         }
     }
     async sendOrderInPreparationUpdateLastChange(o, cancelled = false) {
-        const uuid = o.uuid;
         this.addPendingOrder([o.id]);
-        await this.syncAllOrders({ cancel_table_notification: true });
+        const uuid = o.uuid;
+        const orders = await this.syncAllOrders();
+        const order = orders.find((order) => order.uuid === uuid);
 
-        const order = this.models["pos.order"].find((order) => order.uuid === uuid);
-        await this.sendOrderInPreparation(order, cancelled);
-        order.updateLastOrderChange();
-        await this.syncAllOrders();
+        if (order) {
+            await this.sendOrderInPreparation(order, cancelled);
+            order.updateLastOrderChange();
+            this.addPendingOrder([order.id]);
+            await this.syncAllOrders();
+        }
     }
     closeScreen() {
         this.addOrderIfEmpty();
         const { name: screenName } = this.get_order().get_screen_data();
-        this.showScreen(screenName);
+        const props = {};
+        if (screenName === "PaymentScreen") {
+            props.orderUuid = this.selectedOrderUuid;
+        }
+        this.showScreen(screenName, props);
     }
 
     addOrderIfEmpty() {
@@ -1493,8 +1557,12 @@ export class PosStore extends Reactive {
         this.dialog.add(FormViewDialog, {
             resModel: "pos.order",
             resId: order.id,
-            onRecordSaved: (record) => {
-                this.data.read("pos.order", [record.evalContext.id]);
+            onRecordSaved: async (record) => {
+                await this.data.read("pos.order", [record.evalContext.id]);
+                await this.data.read(
+                    "pos.payment",
+                    order.payment_ids.map((p) => p.id)
+                );
                 this.action.doAction({
                     type: "ir.actions.act_window_close",
                 });

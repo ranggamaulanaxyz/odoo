@@ -14,6 +14,7 @@ from odoo.osv import expression
 from odoo.tools import format_list, SQL
 from odoo.addons.resource.models.utils import filter_domain_leaf
 from odoo.addons.project.controllers.project_sharing_chatter import ProjectSharingChatter
+from odoo.addons.mail.tools.discuss import Store
 
 
 PROJECT_TASK_READABLE_FIELDS = {
@@ -286,7 +287,10 @@ class Task(models.Model):
     repeat_until = fields.Date(string="End Date", compute='_compute_repeat', compute_sudo=True, readonly=False)
 
     # Quick creation shortcuts
-    display_name = fields.Char(compute='_compute_display_name', inverse='_inverse_display_name',
+    display_name = fields.Char(
+        compute='_compute_display_name',
+        inverse='_inverse_display_name',
+        search='_search_display_name',
         help="""Use these keywords in the title to set new tasks:\n
             #tags Set tags on the task
             @user Assign the task to a user
@@ -597,12 +601,12 @@ class Task(models.Model):
             ['working_hours_open', 'working_hours_close', 'working_days_open', 'working_days_close'], 0.0))
 
     def _compute_access_url(self):
-        super(Task, self)._compute_access_url()
+        super()._compute_access_url()
         for task in self:
             task.access_url = f'/my/tasks/{task.id}'
 
     def _compute_access_warning(self):
-        super(Task, self)._compute_access_warning()
+        super()._compute_access_warning()
         for task in self.filtered(lambda x: x.project_id.privacy_visibility != 'portal'):
             visibility_field = self.env['ir.model.fields'].search([('model', '=', 'project.project'), ('name', '=', 'privacy_visibility')], limit=1)
             visibility_public = self.env['ir.model.fields.selection'].search([('field_id', '=', visibility_field.id), ('value', '=', 'portal')])
@@ -797,6 +801,8 @@ class Task(models.Model):
 
             if not default.get('stage_id'):
                 vals['stage_id'] = task.stage_id.id
+            if 'active' not in default and not task['active'] and not self.env.context.get('copy_project'):
+                vals['active'] = True
             vals['name'] = task.name if self.env.context.get('copy_project') else _("%s (copy)", task.name)
             if task.recurrence_id and not default.get('recurrence_id'):
                 vals['recurrence_id'] = task.recurrence_id.copy().id
@@ -876,7 +882,7 @@ class Task(models.Model):
             empty_list_help_model='project.project',
             empty_list_help_document_name=tname,
         )
-        return super(Task, self).get_empty_list_help(help)
+        return super().get_empty_list_help(help)
 
     # ----------------------------------------
     # Case management
@@ -931,7 +937,7 @@ class Task(models.Model):
 
     @api.model
     def default_get(self, default_fields):
-        vals = super(Task, self).default_get(default_fields)
+        vals = super().default_get(default_fields)
 
         # prevent creating new task in the waiting state
         if 'state' in default_fields and vals.get('state') == '04_waiting_normal':
@@ -1374,7 +1380,7 @@ class Task(models.Model):
         })
         filtered_domain = _change_operator(filtered_domain)
         if not filtered_domain:
-            return False
+            return self.env[comodel]
         if additional_domain:
             filtered_domain = expression.AND([filtered_domain, additional_domain])
         return self.env[comodel].search(filtered_domain)
@@ -1518,7 +1524,7 @@ class Task(models.Model):
         return new_followers
 
     def _track_template(self, changes):
-        res = super(Task, self)._track_template(changes)
+        res = super()._track_template(changes)
         test_task = self[0]
         if 'stage_id' in changes and test_task.stage_id.mail_template_id:
             res['stage_id'] = (test_task.stage_id.mail_template_id, {
@@ -1553,7 +1559,7 @@ class Task(models.Model):
             return self.env.ref('project.mt_task_stage')
         elif 'state' in init_values and self.state in mail_message_subtype_per_state:
             return self.env.ref(mail_message_subtype_per_state[self.state])
-        return super(Task, self)._track_subtype(init_values)
+        return super()._track_subtype(init_values)
 
     def _mail_get_message_subtypes(self):
         res = super()._mail_get_message_subtypes()
@@ -1665,7 +1671,7 @@ class Task(models.Model):
         email_list = self.email_split(msg)
         partner_ids = [p.id for p in self.env['mail.thread']._mail_find_partner_from_emails(email_list, records=self, force_create=False) if p]
         self.message_subscribe(partner_ids)
-        return super(Task, self).message_update(msg, update_vals=update_vals)
+        return super().message_update(msg, update_vals=update_vals)
 
     def _message_get_suggested_recipients(self):
         recipients = super()._message_get_suggested_recipients()
@@ -1675,7 +1681,7 @@ class Task(models.Model):
         return recipients
 
     def _notify_by_email_get_headers(self, headers=None):
-        headers = super(Task, self)._notify_by_email_get_headers(headers=headers)
+        headers = super()._notify_by_email_get_headers(headers=headers)
         if self.project_id:
             current_objects = [h for h in headers.get('X-Odoo-Objects', '').split(',') if h]
             current_objects.insert(0, 'project.project-%s, ' % self.project_id.id)
@@ -1691,9 +1697,14 @@ class Task(models.Model):
                 self.displayed_image_id = image_attachments[0]
 
         # use the sanitized body of the email from the message thread to populate the task's description
-        if not self.description and message.subtype_id == self._creation_subtype() and self.partner_id == message.author_id:
+        if (
+           not self.description
+           and message.subtype_id == self._creation_subtype()
+           and self.partner_id == message.author_id
+           and msg_vals['message_type'] == 'email'
+        ):
             self.description = message.body
-        return super(Task, self)._message_post_after_hook(message, msg_vals)
+        return super()._message_post_after_hook(message, msg_vals)
 
     def _get_projects_to_make_billable_domain(self, additional_domain=None):
         return expression.AND([
@@ -1921,14 +1932,14 @@ class Task(models.Model):
                 task.rating_send_request(rating_template, lang=task.partner_id.lang, force_send=force_send)
 
     def _rating_get_partner(self):
-        res = super(Task, self)._rating_get_partner()
+        res = super()._rating_get_partner()
         if not res and self.project_id.partner_id:
             return self.project_id.partner_id
         return res
 
     def rating_apply(self, rate, token=None, rating=None, feedback=None,
                      subtype_xmlid=None, notify_delay_send=False):
-        rating = super(Task, self).rating_apply(
+        rating = super().rating_apply(
             rate, token=token, rating=rating, feedback=feedback,
             subtype_xmlid=subtype_xmlid, notify_delay_send=notify_delay_send)
         if self.stage_id and self.stage_id.auto_validation_state:
@@ -2009,3 +2020,25 @@ class Task(models.Model):
             ):
                 kwargs["token"] = token
         return super()._get_thread_with_access(thread_id, mode, **kwargs)
+
+    def get_mention_suggestions(self, search, limit=8):
+        """Return the 'limit'-first followers of the given task or followers of its project matching
+        a 'search' string as a list of partner data (returned by `_to_store()`).
+        See similar method for all partners `get_mention_suggestions()`.
+        """
+        self.ensure_one()
+        project = self.project_id
+        if not (
+            project
+            and project._check_project_sharing_access()
+            and project._get_thread_with_access(project.id)
+        ):
+            return {}
+        # sudo: mail.followers - reading message_follower_ids on accessible task/project is allowed
+        followers = project.sudo().message_follower_ids | self.sudo().message_follower_ids
+        domain = expression.AND([
+            self.env["res.partner"]._get_mention_suggestions_domain(search),
+            [("id", "in", followers.partner_id.ids)],
+        ])
+        partners = self.env["res.partner"].sudo()._search_mention_suggestions(domain, limit)
+        return Store(partners).get_result()

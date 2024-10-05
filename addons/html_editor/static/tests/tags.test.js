@@ -2,7 +2,7 @@ import { describe, expect, test } from "@odoo/hoot";
 import { manuallyDispatchProgrammaticEvent, press, queryFirst } from "@odoo/hoot-dom";
 import { setupEditor, testEditor } from "./_helpers/editor";
 import { getContent, setSelection } from "./_helpers/selection";
-import { insertText, tripleClick } from "./_helpers/user_actions";
+import { insertText, tripleClick, undo } from "./_helpers/user_actions";
 import { animationFrame, tick } from "@odoo/hoot-mock";
 
 function setTag(tagName) {
@@ -96,11 +96,11 @@ describe("to paragraph", () => {
 
     test("apply 'Text' command", async () => {
         const { el, editor } = await setupEditor("<h1>ab[]cd</h1>");
-        insertText(editor, "/text");
+        await insertText(editor, "/text");
         await animationFrame();
         expect(".active .o-we-command-name").toHaveText("Text");
 
-        press("enter");
+        await press("enter");
         expect(getContent(el)).toBe("<p>ab[]cd</p>");
     });
 });
@@ -358,11 +358,11 @@ describe("to pre", () => {
 
     test("apply 'Code' command", async () => {
         const { el, editor } = await setupEditor("<p>ab[]cd</p>");
-        insertText(editor, "/code");
+        await insertText(editor, "/code");
         await animationFrame();
         expect(".active .o-we-command-name").toHaveText("Code");
 
-        press("enter");
+        await press("enter");
         expect(getContent(el)).toBe("<pre>ab[]cd</pre>");
     });
 });
@@ -464,7 +464,7 @@ describe("to blockquote", () => {
         // Simulate selection trigger by triple click
         // @todo @phoenix need to adapt when hoot add detail => 6 x click
         const anchorNode = queryFirst("div p");
-        manuallyDispatchProgrammaticEvent(anchorNode, "mousedown", { detail: 6 });
+        await manuallyDispatchProgrammaticEvent(anchorNode, "mousedown", { detail: 6 });
         setSelection({
             anchorNode,
             anchorOffset: 0,
@@ -480,19 +480,69 @@ describe("to blockquote", () => {
 
     test("apply 'Quote' command", async () => {
         const { el, editor } = await setupEditor("<p>ab[]cd</p>");
-        insertText(editor, "/quote");
+        await insertText(editor, "/quote");
         await animationFrame();
         expect(".active .o-we-command-name").toHaveText("Quote");
 
-        press("enter");
+        await press("enter");
         expect(getContent(el)).toBe("<blockquote>ab[]cd</blockquote>");
     });
 
     test("setTag should work after control+a", async () => {
         const { el, editor } = await setupEditor("<p>[]abcd</p>");
-        press(["ctrl", "a"]);
+        await press(["ctrl", "a"]);
         expect(getContent(el)).toBe("[<p>abcd</p>]");
         setTag("h1")(editor);
         expect(getContent(el)).toBe("[<h1>abcd</h1>]");
+    });
+});
+
+describe("transform", () => {
+    test("should transform space preceding by a hashtag to heading 1", async () => {
+        const { el, editor } = await setupEditor("<p>[]</p>");
+        await insertText(editor, "# ");
+        expect(getContent(el)).toBe(`<h1 placeholder="Heading 1" class="o-we-hint">[]<br></h1>`);
+
+        undo(editor);
+        expect(getContent(el)).toBe(`<p># []</p>`);
+    });
+
+    test("should transform space preceding by two hashtags to heading 2", async () => {
+        const { el, editor } = await setupEditor("<p>[]</p>");
+        await insertText(editor, "## ");
+        expect(getContent(el)).toBe(`<h2 placeholder="Heading 2" class="o-we-hint">[]<br></h2>`);
+    });
+
+    test("should transform space preceding by three hashtags to heading 3", async () => {
+        const { el, editor } = await setupEditor("<p>[]<br></p>");
+        await insertText(editor, "### ");
+        expect(getContent(el)).toBe(`<h3 placeholder="Heading 3" class="o-we-hint">[]<br></h3>`);
+    });
+
+    test("should transform space preceding by a hashtag at the starting of text to heading 1", async () => {
+        const { el, editor } = await setupEditor("<p>[]abc</p>");
+        await insertText(editor, "# ");
+        expect(getContent(el)).toBe(`<h1>[]abc</h1>`);
+
+        undo(editor);
+        expect(getContent(el)).toBe(`<p># []abc</p>`);
+    });
+
+    test("should transform space preceding by two hashtags at the starting of text to heading 2", async () => {
+        const { el, editor } = await setupEditor("<p>[]abc</p>");
+        await insertText(editor, "## ");
+        expect(getContent(el)).toBe(`<h2>[]abc</h2>`);
+    });
+
+    test("should transform space preceding by three hashtags at the starting of text to heading 3", async () => {
+        const { el, editor } = await setupEditor("<p>[]abc</p>");
+        await insertText(editor, "### ");
+        expect(getContent(el)).toBe(`<h3>[]abc</h3>`);
+    });
+
+    test("typing space inside formated text with a hashtag at the starting of text should not transform to heading", async () => {
+        const { el, editor } = await setupEditor("<p># a<strong>b[]cd</strong>e</p>");
+        await insertText(editor, " ");
+        expect(getContent(el)).toBe(`<p># a<strong>b []cd</strong>e</p>`);
     });
 });

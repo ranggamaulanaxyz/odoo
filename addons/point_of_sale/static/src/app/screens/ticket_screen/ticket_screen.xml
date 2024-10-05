@@ -6,15 +6,11 @@
         <div class="ticket-screen screen h-100 bg-100">
             <div class="screen-full-width d-flex w-100 h-100">
                 <div t-if="!ui.isSmall || pos.ticket_screen_mobile_pane === 'left'" class="rightpane pane-border d-flex flex-column flex-grow-1 w-100 h-100 h-lg-100 bg-200 overflow-y-auto">
-                    <div t-attf-class="controls {{getNbrPages() ? 'd-grid' : 'd-flex'}} d-sm-flex align-items-center justify-content-between gap-2 gap-sm-3 p-2 bg-300">
+                    <div class="controls d-grid d-sm-flex align-items-center justify-content-between gap-2 gap-sm-3 p-2 bg-300">
                         <div class="buttons d-flex gap-2">
                             <button class="discard btn btn-lg btn-light text-nowrap" t-on-click="() => this.closeTicketScreen()">
                                 <i class="oi oi-chevron-left"/>
                                 <span t-if="!ui.isSmall" class="ms-2">Back</span>
-                            </button>
-                            <button t-if="allowNewOrders" class="highlight btn btn-lg btn-light text-nowrap" t-on-click="() => this.onCreateNewOrder()">
-                                <i class="fa fa-plus"/>
-                                <span t-if="!ui.isSmall" class="ms-2">New Order</span>
                             </button>
                         </div>
                         <SearchBar
@@ -22,7 +18,7 @@
                             placeholder.translate="Search Orders..."
                             onSearch.bind="onSearch"
                             onFilterSelected.bind="onFilterSelected" />
-                        <div t-if="getNbrPages()" class="item d-flex align-items-center justify-content-end">
+                        <div class="item d-flex align-items-center justify-content-end">
                             <span class="page me-2"><t t-esc="getPageNumber()" /></span>
                             <div class="page-controls d-flex align-items-center gap-1">
                                 <button class="previous btn btn-light btn-lg" t-on-click="() => this.onPrevPage()">
@@ -54,7 +50,7 @@
                                         <div><t t-esc="getDate(order)"></t></div>
                                     </div>
                                     <div class="col wide p-2">
-                                        <div><t t-esc="order.name"></t></div>
+                                        <div><t t-esc="order.pos_reference"></t></div>
                                     </div>
                                     <div class="col wide p-2">
                                         <div><t t-esc="order.tracking_number"></t></div>
@@ -85,7 +81,7 @@
                                 <div class="mobileOrderList order-row rounded-3" t-att-class="{ 'highlight bg-primary text-white': isHighlighted(order) }"
                                     t-on-click="() => this.onClickOrder(order)" t-on-dblclick="() =>  order.uiState.locked ? ()=>{} : this._setOrder(order)" >
                                     <div class="col p-2 d-flex justify-content-between align-items-center">
-                                        <div><t t-esc="order.name"></t> / <t t-esc="order.tracking_number"></t></div>
+                                        <div><t t-esc="order.pos_reference"></t> / <t t-esc="order.tracking_number"></t></div>
                                         <div><t t-esc="getTotal(order)"></t></div>
                                     </div>
                                     <div class="col p-2 d-flex justify-content-between align-items-center">
@@ -117,8 +113,7 @@
                     </div>
                 </div>
                 <!-- Hide the cart pane if no orders to list after having a search term -->
-                <t t-set="_shouldHideCart" t-value="_filteredOrderList.length === 0 and !this.state.search.searchTerm" />
-                <div t-if="(!ui.isSmall || pos.ticket_screen_mobile_pane === 'right') and !_shouldHideCart" class="leftpane d-flex flex-column flex-grow-1 gap-2 w-100 h-100 h-lg-100 bg-200 p-2">
+                <div t-if="(!ui.isSmall || pos.ticket_screen_mobile_pane === 'right')" class="leftpane d-flex flex-column flex-grow-1 gap-2 w-100 h-100 h-lg-100 bg-200 p-2">
                     <t t-set="_selectedSyncedOrder" t-value="getSelectedOrder()" />
                     <t t-set="_selectedOrderlineId" t-value="getSelectedOrderlineId()" />
                     <t t-if="_selectedSyncedOrder?.get_orderlines()?.length" > 
@@ -127,7 +122,8 @@
                         </div>
                         <OrderWidget lines="_selectedSyncedOrder.lines" t-slot-scope="scope"
                             total="env.utils.formatCurrency(_selectedSyncedOrder.get_total_with_tax())"
-                            tax="!env.utils.floatIsZero(_selectedSyncedOrder.get_total_tax()) and env.utils.formatCurrency(_selectedSyncedOrder.get_total_tax()) or ''">
+                            tax="!env.utils.floatIsZero(_selectedSyncedOrder.get_total_tax()) and env.utils.formatCurrency(_selectedSyncedOrder.get_total_tax()) or ''"
+                            generalNote="_selectedSyncedOrder?.general_note or ''">
                             <t t-set="line" t-value="scope.line" />
                             <Orderline line="line.getDisplayData()"
                                 class="{'selected': line.id === getSelectedOrderlineId()}"
@@ -162,7 +158,9 @@
                                     <InvoiceButton
                                         onInvoiceOrder.bind="onInvoiceOrder"
                                         order="_selectedSyncedOrder" />
-                                    <ReprintReceiptButton order="_selectedSyncedOrder" />
+                                    <button class="control-button btn btn-light btn-lg lh-lg flex-grow-1 flex-shrink-1" t-on-click="() => doPrint.call(_selectedSyncedOrder)">
+                                        <i t-attf-class="fa {{doPrint.status === 'loading' ? 'fa-fw fa-spin fa-circle-o-notch' : 'fa-print'}} me-1" />Print Receipt
+                                    </button>
                                 </div>
                                 <div class="subpads d-flex flex-column">
                                     <Numpad class="'pb-2'" buttons="getNumpadButtons()"/>

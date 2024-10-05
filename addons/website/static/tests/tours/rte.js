@@ -3,7 +3,7 @@
 import {
     clickOnEditAndWaitEditMode,
     clickOnSave,
-    dragNDrop,
+    insertSnippet,
     goToTheme,
     registerWebsitePreviewTour,
 } from "@website/js/tours/tour_utils";
@@ -32,7 +32,7 @@ registerWebsitePreviewTour('rte_translator', {
     content: 'select Parseltongue',
     trigger: '.dropdown-item:contains(Parseltongue)',
     run: "click",
-}, 
+},
 {
     trigger: '.modal-dialog div[name="lang_ids"] .rounded-pill .o_tag_badge_text:contains(Parseltongue)',
 },
@@ -67,7 +67,7 @@ registerWebsitePreviewTour('rte_translator', {
     run: "click",
 }, {
     content: "click on Use this template",
-    trigger: ".o_page_template button.btn-primary",
+    trigger: ".o_page_template .o_button_area",
     run: "click",
 }, {
     content: "insert file name",
@@ -99,7 +99,7 @@ registerWebsitePreviewTour('rte_translator', {
     run: "click",
 }, {
     content: "click on Use this template",
-    trigger: ".o_page_template button.btn-primary",
+    trigger: ".o_page_template .o_button_area",
     run: "click",
 }, {
     content: "insert page name",
@@ -117,7 +117,7 @@ registerWebsitePreviewTour('rte_translator', {
 {
     trigger: "body:not(:has(.modal))",
 },
-...dragNDrop({
+...insertSnippet({
     id: "s_cover",
     name: "Cover",
     groupName: "Intro",
@@ -175,8 +175,8 @@ registerWebsitePreviewTour('rte_translator', {
 {
     content: "translate text",
     trigger: ':iframe #wrap p font:first',
-    run(actionHelper) {
-        actionHelper.editor('translated Parseltongue text');
+    async run(actionHelper) {
+        await actionHelper.editor('translated Parseltongue text');
         const {Wysiwyg} = odoo.loader.modules.get('@web_editor/js/wysiwyg/wysiwyg');
         Wysiwyg.setRange(this.anchor.childNodes[0], 22);
         this.anchor.dispatchEvent(new KeyboardEvent("keyup", {bubbles: true, key: "_"}));
@@ -185,8 +185,8 @@ registerWebsitePreviewTour('rte_translator', {
 }, {
     content: "translate text with special char",
     trigger: ':iframe #wrap input + p span:first',
-    run(actionHelper) {
-        actionHelper.click();
+    async run(actionHelper) {
+        await actionHelper.click();
         this.anchor.textContent = '<{translated}>' + this.anchor.textContent;
         const {Wysiwyg} = odoo.loader.modules.get('@web_editor/js/wysiwyg/wysiwyg');
         Wysiwyg.setRange(this.anchor.childNodes[0], 0);
@@ -254,8 +254,8 @@ registerWebsitePreviewTour('rte_translator', {
 {
     content: "select text",
     trigger: ':iframe #wrap p',
-    run: function (actionHelper) {
-        actionHelper.click();
+    async run(actionHelper) {
+        await actionHelper.click();
         var el = this.anchor;
         var mousedown = document.createEvent('MouseEvents');
         mousedown.initMouseEvent('mousedown', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, el);

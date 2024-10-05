@@ -12,12 +12,13 @@ import { registry } from "@web/core/registry";
 
 registry.category("web_tour.tours").add("TicketScreenTour", {
     test: true,
+    checkDelay: 50,
     steps: () =>
         [
             Chrome.startPoS(),
             Dialog.confirm("Open Register"),
             Chrome.clickMenuOption("Orders"),
-            TicketScreen.clickNewTicket(),
+            Chrome.createFloatingOrder(),
             ProductScreen.addOrderline("Desk Pad", "1", "3"),
             Chrome.clickMenuOption("Orders"),
             TicketScreen.deleteOrder("-0002"),
@@ -37,7 +38,7 @@ registry.category("web_tour.tours").add("TicketScreenTour", {
             ProductScreen.clickCustomer("Partner Test 1"),
             Chrome.clickMenuOption("Orders"),
             TicketScreen.nthRowContains(2, "Partner Test 1", false),
-            TicketScreen.clickNewTicket(),
+            Chrome.createFloatingOrder(),
             ProductScreen.addOrderline("Desk Pad", "1", "3"),
             ProductScreen.clickPartnerButton(),
             ProductScreen.clickCustomer("Partner Test 2"),
@@ -45,7 +46,7 @@ registry.category("web_tour.tours").add("TicketScreenTour", {
             PaymentScreen.isShown(),
             Chrome.clickMenuOption("Orders"),
             TicketScreen.nthRowContains(3, "Partner Test 2", false),
-            TicketScreen.clickNewTicket(),
+            Chrome.createFloatingOrder(),
             ProductScreen.addOrderline("Desk Pad", "2", "4"),
             ProductScreen.clickPayButton(),
             PaymentScreen.clickPaymentMethod("Bank"),
@@ -76,10 +77,6 @@ registry.category("web_tour.tours").add("TicketScreenTour", {
             TicketScreen.selectFilter("Paid"),
             TicketScreen.nthRowContains(2, "-0005"),
             TicketScreen.selectOrder("-0005"),
-            TicketScreen.clickControlButton("Print Receipt"),
-            TicketScreen.receiptTotalIs("8.00"),
-            ReceiptScreen.clickBack(),
-            { ...ProductScreen.back(), isActive: ["mobile"] },
             // Pay the order that was in PaymentScreen.
             TicketScreen.selectFilter("Payment"),
             TicketScreen.selectOrder("-0004"),
@@ -101,11 +98,6 @@ registry.category("web_tour.tours").add("TicketScreenTour", {
             Dialog.confirm(),
             PartnerList.clickPartner("Partner Test 3"),
             TicketScreen.invoicePrinted(),
-            { ...ProductScreen.back(), isActive: ["mobile"] },
-            // Reprint receipt
-            TicketScreen.clickControlButton("Print Receipt"),
-            ReceiptScreen.isShown(),
-            ReceiptScreen.clickBack(),
             TicketScreen.back(),
             // When going back, the ticket screen should be in its previous state.
             TicketScreen.filterIs("Paid"),
@@ -169,6 +161,7 @@ registry.category("web_tour.tours").add("TicketScreenTour", {
 
 registry.category("web_tour.tours").add("FiscalPositionNoTaxRefund", {
     test: true,
+    checkDelay: 50,
     steps: () =>
         [
             Chrome.startPoS(),
@@ -194,6 +187,7 @@ registry.category("web_tour.tours").add("FiscalPositionNoTaxRefund", {
 
 registry.category("web_tour.tours").add("LotRefundTour", {
     test: true,
+    checkDelay: 50,
     steps: () =>
         [
             Chrome.startPoS(),
@@ -219,6 +213,7 @@ registry.category("web_tour.tours").add("LotRefundTour", {
 
 registry.category("web_tour.tours").add("RefundFewQuantities", {
     test: true,
+    checkDelay: 50,
     steps: () =>
         [
             Chrome.startPoS(),

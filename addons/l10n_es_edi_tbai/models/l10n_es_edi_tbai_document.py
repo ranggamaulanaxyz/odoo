@@ -1,15 +1,11 @@
 import gzip
 import json
 import re
-import math
-from base64 import b64encode
-from collections import defaultdict
+import base64
 from datetime import datetime
 from uuid import uuid4
 
 import requests
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.x509.oid import NameOID
 from lxml import etree
 from pytz import timezone
 from requests.exceptions import RequestException
@@ -18,8 +14,11 @@ from odoo import _, api, fields, models, release
 from odoo.addons.l10n_es_edi_sii.models.account_edi_format import PatchedHTTPAdapter
 from odoo.addons.l10n_es_edi_tbai.models.l10n_es_edi_tbai_agencies import get_key
 from odoo.addons.l10n_es_edi_tbai.models.xml_utils import (
-    NS_MAP, bytes_as_block, calculate_references_digests,
-    cleanup_xml_signature, fill_signature, int_as_bytes)
+    NS_MAP,
+    calculate_references_digests,
+    canonicalize_node,
+    cleanup_xml_signature,
+)
 from odoo.exceptions import UserError
 from odoo.tools import get_lang
 from odoo.tools.float_utils import float_repr, float_round
@@ -48,7 +47,6 @@ CRC8_TABLE = [
 class L10nEsEdiTbaiDocument(models.Model):
     _name = 'l10n_es_edi_tbai.document'
     _description = 'TicketBAI Document'
-    _inherit = 'sequence.mixin'
 
     name = fields.Char(
         required=True,
@@ -115,6 +113,9 @@ class L10nEsEdiTbaiDocument(models.Model):
             return _("Please configure the Tax ID on your company for TicketBAI.")
 
         if values['is_sale'] and not self.is_cancel:
+            if any(not base_line['tax_ids'] for base_line in values['base_lines']):
+                return self.env._("There should be at least one tax set on each line in order to send to TicketBAI.")
+
             # Chain integrity check: chain head must have been REALLY posted
             chain_head_doc = self.company_id._get_l10n_es_tbai_last_chained_document()
             if chain_head_doc and chain_head_doc != self and chain_head_doc.state != 'accepted':
@@ -288,7 +289,7 @@ class L10nEsEdiTbaiDocument(models.Model):
             'sender_vat': sender.vat[2:] if sender.vat.startswith('ES') else sender.vat,
             'fiscal_year': str(self.date.year),
         }
-        lroe_values.update({'tbai_b64_list': [b64encode(self.xml_attachment_id.raw).decode()]})
+        lroe_values.update({'tbai_b64_list': [base64.b64encode(self.xml_attachment_id.raw).decode()]})
         lroe_str = self.env['ir.qweb']._render('l10n_es_edi_tbai.template_LROE_240_main', lroe_values)
         lroe_xml = cleanup_xml_node(lroe_str)
 
@@ -394,7 +395,6 @@ class L10nEsEdiTbaiDocument(models.Model):
     def _get_sale_values(self, values):
         sale_values = {
             'prev_doc': self.company_id._get_l10n_es_tbai_last_chained_document(),
-            **self._get_lines_values(values['base_lines'], values['rate'], values['is_refund']),
             **self._get_regime_code_value(values['taxes'], values['is_simplified']),
         }
 
@@ -404,41 +404,6 @@ class L10nEsEdiTbaiDocument(models.Model):
             sale_values.update(**self._get_importe_desglose_foreign_partner(values['base_lines'], values['is_refund']))
 
         return sale_values
-
-    def _get_lines_values(self, base_lines, rate, is_refund):
-
-        def get_base_line_price_total(base_line):
-            taxes = base_line['taxes'].filtered(lambda t: t.l10n_es_type != "retencion")
-            line_discount_price_unit = base_line['price_unit'] * (1 - (base_line['discount'] / 100.0))
-            if taxes:
-                taxes_res = taxes.compute_all(
-                    line_discount_price_unit,
-                    quantity=base_line['quantity'],
-                    currency=base_line['currency'],
-                    product=base_line['product'],
-                    partner=base_line['partner'],
-                    is_refund=base_line['is_refund'],
-                )
-                return taxes_res['total_included']
-            return base_line['quantity'] * line_discount_price_unit
-
-        lines = []
-        sign = -1 if is_refund else 1
-        for base_line in base_lines:
-            discount = base_line['price_subtotal'] - base_line['quantity'] * base_line['price_unit']
-            if not any(t.l10n_es_type == 'sujeto_isp' for t in base_line['taxes']):
-                total = get_base_line_price_total(base_line)
-            else:
-                total = base_line['price_subtotal']
-            lines.append({
-                'quantity': base_line['quantity'],
-                'discount': -sign * (discount / rate),
-                'unit_price': sign * (base_line['price_unit'] / rate) if base_line['quantity'] > 0 else 0,
-                'total': sign * (total / rate),
-                'description': re.sub(r'[^0-9a-zA-Z ]+', '', base_line['product'].display_name or '')[:250]
-            })
-
-        return {'lines': lines}
 
     def _get_regime_code_value(self, taxes, is_simplified):
         regime_key = []
@@ -451,206 +416,189 @@ class L10nEsEdiTbaiDocument(models.Model):
         return {'regime_key': regime_key}
 
     @api.model
-    def _get_importe_desglose_es_partner(self, base_lines, is_refund):
-        tbai_tax_details = self._get_tbai_tax_details(base_lines, is_refund)
+    def _add_base_lines_tax_amounts(self, base_lines, company, tax_lines=None):
+        AccountTax = self.env['account.tax']
+        AccountTax._add_tax_details_in_base_lines(base_lines, company)
+        AccountTax._round_base_lines_tax_details(base_lines, company, tax_lines=tax_lines)
 
-        sign = -1 if is_refund else 1
+        for base_line in base_lines:
+            discount = base_line['discount']
+            price_unit = base_line['price_unit'] / base_line['rate'] if base_line['rate'] else 0.0
+            quantity = base_line['quantity']
+            price_subtotal = base_line['price_subtotal'] = base_line['tax_details']['raw_total_excluded']
+            base_line['price_total'] = base_line['tax_details']['raw_total_included']
+            for tax_data in base_line['tax_details']['taxes_data']:
+                if tax_data['tax'].l10n_es_type == 'retencion':
+                    base_line['price_total'] -= tax_data['tax_amount']
 
-        tax_amount_retention = tbai_tax_details['tax_amount_retention']
-        desglose = {'DesgloseFactura': tbai_tax_details['tax_details_info']}
-        desglose['DesgloseFactura'].update({'S1': tbai_tax_details['S1_list'],
-                                            'S2': tbai_tax_details['S2_list']})
-        importe_total = round(sign * (
-            tbai_tax_details['tax_details']['base_amount']
-            + tbai_tax_details['tax_details']['tax_amount']
-            - tax_amount_retention
-        ), 2)
+            if discount == 100.0:
+                gross_price_subtotal_before_discount = price_unit * quantity
+            else:
+                gross_price_subtotal_before_discount = price_subtotal / (1 - discount / 100.0)
+
+            base_line['gross_price_subtotal'] = gross_price_subtotal_before_discount
+            base_line['discount_amount'] = gross_price_subtotal_before_discount - price_subtotal
+            base_line['description'] = re.sub(r'[^0-9a-zA-Z ]+', '', base_line['name'] or base_line['product_id'].display_name or '')[:250]
+
+            if quantity:
+                base_line['gross_price_unit'] = gross_price_subtotal_before_discount / quantity
+            else:
+                base_line['gross_price_unit'] = 0.0
+
+    @api.model
+    def _build_tax_details_info(self, values_list):
+        sujeta_no_sujeta = {}
+        sujeto = []
+        sujeto_isp = []
+        encountered_l10n_es_type = set()
+        for values in values_list:
+            grouping_key = values['grouping_key']
+            if not grouping_key:
+                continue
+
+            l10n_es_type = grouping_key['l10n_es_type']
+            encountered_l10n_es_type.add(l10n_es_type)
+            if l10n_es_type in ('sujeto', 'sujeto_isp'):
+                tax_info = {
+                    'TipoImpositivo': grouping_key['applied_tax_amount'],
+                    'BaseImponible': float_round(values['base_amount'], 2),
+                    'CuotaRepercutida': float_round(values['tax_amount'], 2),
+                }
+                sujeta_no_sujeta\
+                    .setdefault('Sujeta', {})\
+                    .setdefault('NoExenta', {})\
+                    .setdefault('DesgloseIVA', {'DetalleIVA': []})['DetalleIVA']\
+                    .append(tax_info)
+                if l10n_es_type == 'sujeto':
+                    sujeto.append(tax_info)
+                else:
+                    sujeto_isp.append(tax_info)
+            elif l10n_es_type == 'exento':
+                sujeta_no_sujeta\
+                    .setdefault('Sujeta', {})\
+                    .setdefault('Exenta', {'DetalleExenta': []})['DetalleExenta']\
+                    .append({
+                        'BaseImponible': float_round(values['base_amount'], 2),
+                        'CausaExencion': grouping_key['l10n_es_exempt_reason'],
+                    })
+            elif l10n_es_type == 'recargo':
+                detalle_iva = sujeta_no_sujeta\
+                    .get('Sujeta', {})\
+                    .get('NoExenta', {})\
+                    .get('DesgloseIVA', {})\
+                    .get('DetalleIVA')
+                if detalle_iva:
+                    detalle_iva[-1]['CuotaRecargoEquivalencia'] = float_round(values['tax_amount'], 2)
+                    detalle_iva[-1]['TipoRecargoEquivalencia'] = grouping_key['applied_tax_amount']
+            elif l10n_es_type == 'no_sujeto':
+                no_sujeta = sujeta_no_sujeta.setdefault('NoSujeta', {})
+                no_sujeta.setdefault('ImportePorArticulos7_14_Otros', 0.0)
+                no_sujeta['ImportePorArticulos7_14_Otros'] += float_round(values['base_amount'], 2)
+            elif l10n_es_type == 'no_sujeto_loc':
+                no_sujeta = sujeta_no_sujeta.setdefault('NoSujeta', {})
+                no_sujeta.setdefault('ImporteTAIReglasLocalizacion', 0.0)
+                no_sujeta['ImporteTAIReglasLocalizacion'] += float_round(values['base_amount'], 2)
+
+        if 'sujeto' in encountered_l10n_es_type and 'sujeto_isp' not in encountered_l10n_es_type:
+            sujeta_no_sujeta['Sujeta']['NoExenta']['TipoNoExenta'] = 'S2'
+        elif 'sujeto' not in encountered_l10n_es_type and 'sujeto_isp' in encountered_l10n_es_type:
+            sujeta_no_sujeta['Sujeta']['NoExenta']['TipoNoExenta'] = 'S1'
+        elif 'sujeto' in encountered_l10n_es_type and 'sujeto_isp' in encountered_l10n_es_type:
+            sujeta_no_sujeta['Sujeta']['NoExenta']['TipoNoExenta'] = 'S3'
 
         return {
-            'amount_total': importe_total,
-            'invoice_info': desglose,
-            'amount_retention': tax_amount_retention * -sign,
+            'sujeta_no_sujeta': sujeta_no_sujeta,
+            'sujeto': sujeto,
+            'sujeto_isp': sujeto_isp,
         }
 
     @api.model
-    def _get_importe_desglose_foreign_partner(self, base_lines, is_refund):
-        tbai_tax_details_service = self._get_tbai_tax_details(
-            base_lines,
-            is_refund,
-            filter_invl_to_apply=lambda base_line: any(t.tax_scope == 'service' for t in base_line['taxes'])
-        )
-        tbai_tax_details_consu = self._get_tbai_tax_details(
-            base_lines,
-            is_refund,
-            filter_invl_to_apply=lambda base_line: any(t.tax_scope == 'consu' for t in base_line['taxes'])
-        )
+    def _get_importe_desglose_es_partner(self, base_lines, is_refund):
+        AccountTax = self.env['account.tax']
 
-        sign = -1 if is_refund else 1
+        def grouping_function(base_line, tax_data):
+            tax = tax_data['tax']
 
-        service_retention = tbai_tax_details_service['tax_amount_retention']
-        consu_retention = tbai_tax_details_consu['tax_amount_retention']
-        desglose = {}
-        if tbai_tax_details_service['tax_details_info']:
-            desglose.setdefault('DesgloseTipoOperacion', {})
-            desglose['DesgloseTipoOperacion']['PrestacionServicios'] = tbai_tax_details_service['tax_details_info']
-            desglose['DesgloseTipoOperacion']['PrestacionServicios'].update(
-                {'S1': tbai_tax_details_service['S1_list'],
-                    'S2': tbai_tax_details_service['S2_list']})
-
-        if tbai_tax_details_consu['tax_details_info']:
-            desglose.setdefault('DesgloseTipoOperacion', {})
-            desglose['DesgloseTipoOperacion']['Entrega'] = tbai_tax_details_consu['tax_details_info']
-            desglose['DesgloseTipoOperacion']['Entrega'].update(
-                {'S1': tbai_tax_details_consu['S1_list'],
-                    'S2': tbai_tax_details_consu['S2_list']})
-        importe_total = round(sign * (
-            tbai_tax_details_service['tax_details']['base_amount']
-            + tbai_tax_details_service['tax_details']['tax_amount']
-            - service_retention
-            + tbai_tax_details_consu['tax_details']['base_amount']
-            + tbai_tax_details_consu['tax_details']['tax_amount']
-            - consu_retention
-        ), 2)
-        tax_amount_retention = service_retention + consu_retention
-
-        return {
-            'amount_total': importe_total,
-            'invoice_info': desglose,
-            'amount_retention': tax_amount_retention * -sign,
-        }
-
-    def _get_tbai_tax_details(self, base_lines, is_refund, filter_invl_to_apply=None):
-
-        tax_details = self.get_tax_details(base_lines, filter_invl_to_apply=filter_invl_to_apply)
-
-        recargo_tax_details = self.get_recargo_tax_details(base_lines, tax_details, filter_invl_to_apply=filter_invl_to_apply)
-
-        sign = -1 if is_refund else 1
-
-        tax_details_info = defaultdict(dict)
-
-        tax_amount_deductible = 0.0
-        tax_amount_retention = 0.0
-        base_amount_not_subject = 0.0
-        base_amount_not_subject_loc = 0.0
-        tax_subject_info_list = []
-        tax_subject_isp_info_list = []
-        for tax_values in tax_details['tax_details'].values():
-
-            if tax_values['l10n_es_type'] in ('sujeto', 'sujeto_isp'):
-                tax_amount_deductible += tax_values['tax_amount']
-
-                base_amount = sign * tax_values['base_amount']
-                tax_info = {
-                    'TipoImpositivo': tax_values['applied_tax_amount'],
-                    'BaseImponible': float_round(base_amount, 2),
-                    'CuotaRepercutida': float_round(math.copysign(tax_values['tax_amount'], base_amount), 2),
-                }
-
-                recargo = recargo_tax_details.get(tax_values['group_tax_details'][0]['tax_repartition_line'].tax_id)
-                if recargo:
-                    tax_info['CuotaRecargoEquivalencia'] = float_round(sign * recargo['tax_amount'], 2)
-                    tax_info['TipoRecargoEquivalencia'] = recargo['applied_tax_amount']
-
-                if tax_values['l10n_es_type'] == 'sujeto':
-                    tax_subject_info_list.append(tax_info)
-                else:
-                    tax_subject_isp_info_list.append(tax_info)
-
-            elif tax_values['l10n_es_type'] == 'exento':
-                tax_details_info['Sujeta'].setdefault('Exenta', {'DetalleExenta': []})
-                tax_details_info['Sujeta']['Exenta']['DetalleExenta'].append({
-                    'BaseImponible': float_round(sign * tax_values['base_amount'], 2),
-                    'CausaExencion': tax_values['l10n_es_exempt_reason'],
-                })
-            elif tax_values['l10n_es_type'] == 'retencion':
-                tax_amount_retention += tax_values['tax_amount']
-            elif tax_values['l10n_es_type'] == 'no_sujeto':
-                base_amount_not_subject += tax_values['base_amount']
-            elif tax_values['l10n_es_type'] == 'no_sujeto_loc':
-                base_amount_not_subject_loc += tax_values['base_amount']
-
-        if tax_subject_isp_info_list and not tax_subject_info_list:  # Only for sale_invoices
-            tax_details_info['Sujeta']['NoExenta'] = {'TipoNoExenta': 'S2'}
-        elif not tax_subject_isp_info_list and tax_subject_info_list:
-            tax_details_info['Sujeta']['NoExenta'] = {'TipoNoExenta': 'S1'}
-        elif tax_subject_isp_info_list and tax_subject_info_list:
-            tax_details_info['Sujeta']['NoExenta'] = {'TipoNoExenta': 'S3'}
-
-        if tax_subject_info_list:
-            tax_details_info['Sujeta']['NoExenta'].setdefault('DesgloseIVA', {})
-            tax_details_info['Sujeta']['NoExenta']['DesgloseIVA'].setdefault('DetalleIVA', [])
-            tax_details_info['Sujeta']['NoExenta']['DesgloseIVA']['DetalleIVA'] += tax_subject_info_list
-        if tax_subject_isp_info_list:
-            tax_details_info['Sujeta']['NoExenta'].setdefault('DesgloseIVA', {})
-            tax_details_info['Sujeta']['NoExenta']['DesgloseIVA'].setdefault('DetalleIVA', [])
-            tax_details_info['Sujeta']['NoExenta']['DesgloseIVA']['DetalleIVA'] += tax_subject_isp_info_list
-
-        if not self.company_id.currency_id.is_zero(base_amount_not_subject):
-            tax_details_info['NoSujeta']['ImportePorArticulos7_14_Otros'] = float_round(sign * base_amount_not_subject, 2)
-        if not self.company_id.currency_id.is_zero(base_amount_not_subject_loc):
-            tax_details_info['NoSujeta']['ImporteTAIReglasLocalizacion'] = float_round(sign * base_amount_not_subject_loc, 2)
-
-        return {
-            'tax_details': tax_details,
-            'tax_details_info': tax_details_info,
-            'tax_amount_deductible': tax_amount_deductible,
-            'tax_amount_retention': tax_amount_retention,
-            'base_amount_not_subject': base_amount_not_subject,
-            'S1_list': tax_subject_info_list,
-            'S2_list': tax_subject_isp_info_list,
-        }
-
-    def get_tax_details(self, base_lines, filter_invl_to_apply=None):
-
-        def filter_tax_values_to_apply(base_line, tax_values):
-            # For intra-community, we do not take into account the negative repartition line
-            return (
-                tax_values['tax_repartition_line'].factor_percent > 0.0
-                and tax_values['tax_repartition_line'].tax_id.amount != -100.0
-            )
-
-        def grouping_key_generator(base_line, tax_values):
-            tax = tax_values['tax_repartition_line'].tax_id
             return {
                 'applied_tax_amount': tax.amount,
                 'l10n_es_type': tax.l10n_es_type,
                 'l10n_es_exempt_reason': tax.l10n_es_exempt_reason if tax.l10n_es_type == 'exento' else False,
                 'l10n_es_bien_inversion': tax.l10n_es_bien_inversion,
+                'is_reverse_charge': tax_data['is_reverse_charge'],
+                'tax_scope': tax.tax_scope,
             }
 
-        to_process = []
-        base_lines_full_filtered = [base_line for base_line in base_lines if filter_invl_to_apply(base_line)] if filter_invl_to_apply else base_lines
-        for base_line in base_lines_full_filtered:
-            tax_details_results = self.env['account.tax']._prepare_base_line_tax_details(base_line, self.company_id)
-            to_process.append((base_line, tax_details_results))
+        base_lines_aggregated_values = AccountTax._aggregate_base_lines_tax_details(base_lines, grouping_function)
+        values_per_grouping_key = AccountTax._aggregate_base_lines_aggregated_values(base_lines_aggregated_values)
 
-        return self.env['account.tax']._aggregate_taxes(
-            to_process,
-            self.company_id,
-            filter_tax_values_to_apply=filter_tax_values_to_apply,
-            grouping_key_generator=grouping_key_generator,
-        )
+        total_amount = 0.0
+        total_retention = 0.0
+        for values in values_per_grouping_key.values():
+            if values['grouping_key'] and values['grouping_key']['l10n_es_type'] == 'retention':
+                total_retention += values['tax_amount']
+            else:
+                total_amount += values['base_amount'] + values['tax_amount']
 
-    def get_recargo_tax_details(self, base_lines, tax_details, filter_invl_to_apply=None):
-        # Detect for which is the main tax for 'recargo'. Since only a single combination tax + recargo is allowed
-        # on the same invoice, this can be deduced globally.
+        tax_details_info = self._build_tax_details_info(values_per_grouping_key.values())
+        invoice_info = {
+            'DesgloseFactura': {
+                **tax_details_info['sujeta_no_sujeta'],
+                'S1': tax_details_info['sujeto'],
+                'S2': tax_details_info['sujeto_isp'],
+            },
+        }
+        return {
+            'invoice_info': invoice_info,
+            'total_amount': total_amount,
+            'total_retention': total_retention,
+        }
 
-        recargo_tax_details = {}  # Mapping between main tax and recargo tax details
+    @api.model
+    def _get_importe_desglose_foreign_partner(self, base_lines, is_refund):
+        AccountTax = self.env['account.tax']
 
-        base_lines_filtered = [base_line for base_line in base_lines if filter_invl_to_apply(base_line)] if filter_invl_to_apply else base_lines
-        for base_line in base_lines_filtered:
-            taxes = base_line['taxes'].flatten_taxes_hierarchy()
-            recargo_tax = [t for t in taxes if t.l10n_es_type == 'recargo']
-            if recargo_tax:
-                recargo_main_tax = taxes.filtered(lambda x: x.l10n_es_type in ('sujeto', 'sujeto_isp'))[:1]
-                if not recargo_tax_details.get(recargo_main_tax):
-                    recargo_tax_details[recargo_main_tax] = next(
-                        x for x in tax_details['tax_details'].values()
-                        if x['group_tax_details'][0]['tax_repartition_line'].tax_id == recargo_tax[0]
-                    )
+        def grouping_function(base_line, tax_data):
+            tax = tax_data['tax']
 
-        return recargo_tax_details
+            return {
+                'applied_tax_amount': tax.amount,
+                'l10n_es_type': tax.l10n_es_type,
+                'l10n_es_exempt_reason': tax.l10n_es_exempt_reason if tax.l10n_es_type == 'exento' else False,
+                'l10n_es_bien_inversion': tax.l10n_es_bien_inversion,
+                'is_reverse_charge': tax_data['is_reverse_charge'],
+                'tax_scope': tax.tax_scope,
+            }
+
+        base_lines_aggregated_values = AccountTax._aggregate_base_lines_tax_details(base_lines, grouping_function)
+        values_per_grouping_key = AccountTax._aggregate_base_lines_aggregated_values(base_lines_aggregated_values)
+
+        total_amount = 0.0
+        total_retention = 0.0
+        for values in values_per_grouping_key.values():
+            if values['grouping_key'] and values['grouping_key']['l10n_es_type'] == 'retencion':
+                total_retention += values['tax_amount']
+            else:
+                total_amount += values['base_amount'] + values['tax_amount']
+
+        invoice_info = {}
+        for scope, target_key in (('service', 'PrestacionServicios'), ('consu', 'Entrega')):
+            service_values_list = [
+                values
+                for values in values_per_grouping_key.values()
+                if values['grouping_key'] and values['grouping_key']['tax_scope'] == scope
+            ]
+            if service_values_list:
+                tax_details_info = self._build_tax_details_info(service_values_list)
+                invoice_info.setdefault('DesgloseTipoOperacion', {})[target_key] = {
+                    **tax_details_info['sujeta_no_sujeta'],
+                    'S1': tax_details_info['sujeto'],
+                    'S2': tax_details_info['sujeto_isp'],
+                }
+        return {
+            'invoice_info': invoice_info,
+            'total_amount': total_amount,
+            'total_retention': total_retention,
+        }
 
     def _generate_sale_document_xml(self, values):
         template_name = 'l10n_es_edi_tbai.template_invoice_main' + ('_cancel' if self.is_cancel else '_post')
@@ -665,9 +613,12 @@ class L10nEsEdiTbaiDocument(models.Model):
         return xml_doc
 
     def _sign_sale_document(self, xml_root):
+        self.ensure_one()
+
         company = self.company_id
-        cert_private, cert_public = company.l10n_es_tbai_certificate_id._get_key_pair()
-        public_key = cert_public.public_key()
+        certificate_sudo = company.sudo().l10n_es_tbai_certificate_id
+        if not certificate_sudo:
+            raise UserError(_('No certificate found'))
 
         # Identifiers
         document_id = "Document-" + str(uuid4())
@@ -676,16 +627,16 @@ class L10nEsEdiTbaiDocument(models.Model):
         sigproperties_id = "SignatureProperties-" + document_id
 
         # Render digital signature scaffold from QWeb
-        common_name = cert_public.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
-        org_unit = cert_public.issuer.get_attributes_for_oid(NameOID.ORGANIZATIONAL_UNIT_NAME)[0].value
-        org_name = cert_public.issuer.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)[0].value
-        country_name = cert_public.issuer.get_attributes_for_oid(NameOID.COUNTRY_NAME)[0].value
+
+        e, n = certificate_sudo._get_public_key_numbers_bytes()
+        issuer = certificate_sudo._l10n_es_edi_tbai_get_issuer()
+
         values = {
             'dsig': {
                 'document_id': document_id,
-                'x509_certificate': bytes_as_block(cert_public.public_bytes(encoding=serialization.Encoding.DER)),
-                'public_modulus': bytes_as_block(int_as_bytes(public_key.public_numbers().n)),
-                'public_exponent': bytes_as_block(int_as_bytes(public_key.public_numbers().e)),
+                'x509_certificate': base64.encodebytes(base64.b64decode(certificate_sudo._get_der_certificate_bytes())).decode(),
+                'public_modulus': n.decode(),
+                'public_exponent': e.decode(),
                 'iso_now': datetime.now().isoformat(),
                 'keyinfo_id': keyinfo_id,
                 'signature_id': signature_id,
@@ -693,9 +644,9 @@ class L10nEsEdiTbaiDocument(models.Model):
                 'reference_uri': "Reference-" + document_id,
                 'sigpolicy_url': get_key(company.l10n_es_tbai_tax_agency, 'sigpolicy_url'),
                 'sigpolicy_digest': get_key(company.l10n_es_tbai_tax_agency, 'sigpolicy_digest'),
-                'sigcertif_digest': b64encode(cert_public.fingerprint(hashes.SHA256())).decode(),
-                'x509_issuer_description': f'CN={common_name}, OU={org_unit}, O={org_name}, C={country_name}',
-                'x509_serial_number': cert_public.serial_number,
+                'sigcertif_digest': certificate_sudo._get_fingerprint_bytes(formatting='base64').decode(),
+                'x509_issuer_description': issuer,
+                'x509_serial_number': int(certificate_sudo.serial_number),
             }
         }
         xml_sig_str = self.env['ir.qweb']._render('l10n_es_edi_tbai.template_digital_signature', values)
@@ -708,7 +659,8 @@ class L10nEsEdiTbaiDocument(models.Model):
         calculate_references_digests(xml_sig.find("SignedInfo", namespaces=NS_MAP))
 
         # Sign (writes into SignatureValue)
-        fill_signature(xml_sig, cert_private)
+        signed_info_xml = xml_sig.find('SignedInfo', namespaces=NS_MAP)
+        xml_sig.find('SignatureValue', namespaces=NS_MAP).text = certificate_sudo._sign(canonicalize_node(signed_info_xml)).decode()
 
         return xml_root
 
@@ -735,12 +687,15 @@ class L10nEsEdiTbaiDocument(models.Model):
         """Get the TicketBAI sequence a number values for this invoice."""
         self.ensure_one()
 
-        sequence = self.sequence_prefix.rstrip('/')
+        matching = list(re.finditer(r'\d+', self.name))[-1]
+        sequence_prefix = self.name[:matching.start()]
+        sequence_number = int(matching.group())
 
         # NOTE non-decimal characters should not appear in the number
-        seq_length = self._get_sequence_format_param(self.name)[1]['seq_length']
-        number = f"{self.sequence_number:0{seq_length}d}"
+        seq_length = self.env['sequence.mixin']._get_sequence_format_param(self.name)[1]['seq_length']
+        number = f"{sequence_number:0{seq_length}d}"
 
+        sequence = sequence_prefix.rstrip('/')
         sequence = re.sub(r"[^0-9A-Za-z.\_\-\/]+", "", sequence)  # remove forbidden characters
         sequence = re.sub(r"\s+", " ", sequence)  # no more than one consecutive whitespace allowed
         # NOTE (optional) not recommended to use chars out of ([0123456789ABCDEFGHJKLMNPQRSTUVXYZ.\_\-\/ ])

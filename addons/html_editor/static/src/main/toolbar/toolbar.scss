@@ -1,3 +1,10 @@
+.o-toolbar-above-keyboard {
+    position: fixed;
+    width: 100%;
+    z-index: 2000;
+    bottom: 0;
+}
+
 .o-we-toolbar {
     height: 40px;
     padding: 0 2px;
@@ -23,6 +30,16 @@
                 border-top-right-radius: 0;
                 border-bottom-right-radius: 0;
             }
+
+            &.disabled {
+                pointer-events: auto;
+                cursor: auto;
+                &:active {
+                    border-color: var(--btn-disabled-border-color);
+                    background-color: var(--btn-disabled-bg);;
+                    color: var(--btn-disabled-color);
+                }
+            }
         }
     }
 
@@ -34,4 +51,5 @@
         border-left: 1px solid lightgrey;
 
     }
+
 }

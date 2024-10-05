@@ -3,7 +3,7 @@
 import {
     changeOption,
     clickOnSave,
-    dragNDrop,
+    insertSnippet,
     registerWebsitePreviewTour,
 } from '@website/js/tours/tour_utils';
 
@@ -12,7 +12,7 @@ registerWebsitePreviewTour("website_media_dialog_undraw", {
     url: '/',
     edition: true,
 }, () => [
-...dragNDrop({
+...insertSnippet({
     id: 's_text_image',
     name: 'Text - Image',
     groupName: "Content",
@@ -36,7 +36,7 @@ registerWebsitePreviewTour("website_media_dialog_external_library", {
     url: "/",
     edition: true,
 }, () => [
-    ...dragNDrop({
+    ...insertSnippet({
         id: "s_text_image",
         name: "Text - Image",
         groupName: "Content",
@@ -54,9 +54,9 @@ registerWebsitePreviewTour("website_media_dialog_external_library", {
         trigger: ".o_select_media_dialog .o_we_search_select",
         // This is a standard <select>: we can't simulate a click on the option
         // directly.
-        run(actions) {
-            actions.click();
-            actions.text("Illustrations");
+        async run(actions) {
+            await actions.click();
+            await actions.text("Illustrations");
             this.$anchor.trigger($.Event("keydown", {key: 'Enter', keyCode: 13}));
         },
     }, {
@@ -86,7 +86,7 @@ registerWebsitePreviewTour('website_media_dialog_icons', {
     url: '/',
     edition: true,
 }, () => [
-    ...dragNDrop({
+    ...insertSnippet({
         id: 's_social_media',
         name: 'Social Media',
     }),
@@ -126,7 +126,7 @@ registerWebsitePreviewTour("website_media_dialog_image_shape", {
     url: "/",
     edition: true,
 }, () => [
-    ...dragNDrop({
+    ...insertSnippet({
         id: "s_text_image",
         name: "Text - Image",
         groupName: "Content",

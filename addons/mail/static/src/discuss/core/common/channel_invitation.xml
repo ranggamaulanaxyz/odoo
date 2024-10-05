@@ -2,8 +2,8 @@
 <templates xml:space="preserve">
 
     <t t-name="discuss.ChannelInvitation">
-        <ActionPanel title.translate="Invite people" resizable="false">
-            <div class="d-flex flex-column flex-grow-1 bg-inherit" t-att-class="{ 'o-discuss-ChannelInvitation-has-size-constraints': props.hasSizeConstraints }">
+        <ActionPanel title.translate="Invite people" resizable="false" icon="'fa fa-user-plus'">
+            <div class="d-flex flex-column flex-grow-1 bg-inherit" t-att-class="{ 'o-mail-Discuss-threadActionPopover': props.hasSizeConstraints }">
                 <t t-if="store.self.type === 'partner'">
                     <input class="o-discuss-ChannelInvitation-search form-control lh-1 px-2 bg-view" t-ref="input" placeholder="Type the name of a person" t-on-input="onInput"/>
                     <ul class="d-flex flex-column mx-0 pt-1 pb-0 overflow-auto list-group border-0 flex-grow-1" t-att-class="{ 'align-items-center justify-content-center': state.selectablePartners.length === 0 }">
@@ -19,8 +19,7 @@
                             <li class="o-discuss-ChannelInvitation-selectable o_object_fit_cover d-flex align-items-center px-1 py-0 btn list-group-item border-0 rounded-0" t-att-class="{ 'o-odd': selectablePartner_index % 2 === 1, 'o-selected': selectablePartner.in(state.selectedPartners) }" t-on-click="() => this.onClickSelectablePartner(selectablePartner)">
                                 <div class="d-flex align-items-center p-1 bg-inherit">
                                     <div class="o-discuss-ChannelInvitation-avatar position-relative d-flex flex-shrink-0 bg-inherit">
-                                        <img class="w-100 h-100 rounded o_object_fit_cover"
-                                            t-att-src="selectablePartner.avatarUrl"/>
+                                        <img class="w-100 h-100 rounded o_object_fit_cover" t-att-src="selectablePartner.avatarUrl"/>
                                         <ImStatus persona="selectablePartner" className="'position-absolute top-100 start-100 translate-middle mt-n1 ms-n1'" size="'md'"/>
                                     </div>
                                 </div>

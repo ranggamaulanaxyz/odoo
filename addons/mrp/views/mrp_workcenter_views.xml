@@ -57,17 +57,9 @@
             <field name="arch" type="xml">
                 <kanban class="o_kanban_mobile">
                     <templates>
-                        <t t-name="kanban-box">
-                            <div t-attf-class="oe_kanban_content oe_kanban_global_click">
-                                <div class="row">
-                                    <div class="col-12">
-                                        <strong><field name="name"/></strong>
-                                    </div>
-                                    <div class="col-12" t-if="record.code.raw_value">
-                                        <span><field name="code"/></span>
-                                    </div>
-                                </div>
-                            </div>
+                        <t t-name="card">
+                            <field name="name" class="fw-bolder"/>
+                            <field t-if="record.code.raw_value" name="code"/>
                         </t>
                     </templates>
                 </kanban>
@@ -149,12 +141,12 @@
             <field name="name">mrp.workcenter.kanban</field>
             <field name="model">mrp.workcenter</field>
             <field name="arch" type="xml">
-                <kanban highlight_color="color" class="o_workcenter_kanban" create="0" can_open="0" sample="1">
+                <kanban highlight_color="color" class="o_workcenter_kanban" create="0" can_open="0" sample="0">
                     <field name="workorder_count"/>
                     <field name="working_state"/>
                     <field name="oee_target"/>
                     <templates>
-                        <t t-name="kanban-menu">
+                        <t t-name="menu">
                             <div class="container">
                                 <div class="row">
                                     <div class="col-6">
@@ -193,8 +185,24 @@
                                 </div>
                             </div>
                         </t>
-                        <t t-name="kanban-card">
-                            <field name="name" class="fw-bold fs-4 ms-2"/>
+                        <t t-name="card">
+                            <div class="ms-1">
+                                <div style="display: inline-block" name="wc_stages">
+                                    <a name="%(act_mrp_block_workcenter)d" type="action" class="o_status float-end"
+                                        title="No workorder currently in progress. Click to mark work center as blocked."
+                                        aria-label="No workorder currently in progress. Click to mark work center as blocked."
+                                        invisible="working_state in ('blocked', 'done')"/>
+                                    <a name="unblock" type="object" class=" o_status o_status_red float-end"
+                                        title="Workcenter blocked, click to unblock."
+                                        aria-label="Workcenter blocked, click to unblock."
+                                        invisible="working_state in ('normal', 'done')"/>
+                                    <a name="%(act_mrp_block_workcenter)d" type="action" class="o_status o_status_green float-end"
+                                        title="Work orders in progress. Click to block work center."
+                                        aria-label="Work orders in progress. Click to block work center."
+                                        invisible="working_state in ('normal', 'blocked')"/>
+                                </div>
+                                <field name="name" class="fw-bold fs-4 ms-2"/>
+                            </div>
                             <div class="row mt-3 pb-3">
                                 <div class="col-6">
                                     <div class="btn-group p-1" name="o_wo">
@@ -208,19 +216,19 @@
                                 </div>
                                 <div class="col-6">
                                     <div class="row" t-if="record.workorder_ready_count.raw_value &gt; 0">
-                                        <a name="action_work_order" class="col-8" type="object" context="{'search_default_ready': 1}">
+                                        <a name="action_work_order" class="col-8" type="object" context="{'search_default_ready': 1, 'desktop_list_view': 1}">
                                             To Launch
                                         </a>
                                         <field name="workorder_ready_count" class="col-4 text-end"/>
                                     </div>
                                     <div class="row" t-if="record.workorder_progress_count.raw_value &gt; 0">
-                                        <a name="action_work_order" class="col-8" type="object" context="{'search_default_progress': 1}">
+                                        <a name="action_work_order" class="col-8" type="object" context="{'search_default_progress': 1, 'desktop_list_view': 1}">
                                             In Progress
                                         </a>
                                         <field name="workorder_progress_count" class="col-4 text-end"/>
                                     </div>
                                     <div class="row" t-if="record.workorder_late_count.raw_value &gt; 0">
-                                        <a name="action_work_order" class="col-8" type="object" context="{'search_default_late': 1}">
+                                        <a name="action_work_order" class="col-8" type="object" context="{'search_default_late': 1, 'desktop_list_view': 1}">
                                             Late
                                         </a>
                                         <field name="workorder_late_count" class="col-4 text-end"/>
@@ -237,19 +245,8 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="ms-auto" name="wc_stages">
-                                <a name="%(act_mrp_block_workcenter)d" type="action" class="o_status float-end"
-                                    title="No workorder currently in progress. Click to mark work center as blocked."
-                                    aria-label="No workorder currently in progress. Click to mark work center as blocked."
-                                    invisible="working_state in ('blocked', 'done')"/>
-                                <a name="unblock" type="object" class=" o_status o_status_red float-end"
-                                    title="Workcenter blocked, click to unblock."
-                                    aria-label="Workcenter blocked, click to unblock."
-                                    invisible="working_state in ('normal', 'done')"/>
-                                <a name="%(act_mrp_block_workcenter)d" type="action" class="o_status o_status_green float-end"
-                                    title="Work orders in progress. Click to block work center."
-                                    aria-label="Work orders in progress. Click to block work center."
-                                    invisible="working_state in ('normal', 'blocked')"/>
+                            <div class="row mt-auto">
+                                <field name="kanban_dashboard_graph" graph_type="bar" widget="workcenter_dashboard_graph"/>
                             </div>
                         </t>
                     </templates>
@@ -367,6 +364,7 @@
                             </page>
                         </notebook>
                     </sheet>
+                    <chatter/>
                 </form>
             </field>
         </record>
@@ -461,23 +459,17 @@
         <field name="model">mrp.workcenter.productivity.loss</field>
         <field name="arch" type="xml">
             <kanban>
-                <field name="name"/>
-                <field name="manual"/>
                 <templates>
-                    <t t-name="kanban-box">
-                        <div t-attf-class="oe_kanban_global_click">
-                            <div>
-                                <strong>Reason: </strong><field name="name"/>
-                            </div>
-                            <div>
-                                <strong>Effectiveness Category: </strong><field name="loss_type"/>
-                            </div>
-                            <div>
-                                <strong>Is a Blocking Reason? </strong>
-                                <span class="float-end" title="Is a Blocking Reason?">
-                                    <field name="manual" widget="boolean"/>
-                                </span>
-                            </div>
+                    <t t-name="card">
+                        <div>
+                            <strong>Reason: </strong><field name="name"/>
+                        </div>
+                        <div>
+                            <strong>Effectiveness Category: </strong><field name="loss_type"/>
+                        </div>
+                        <div class="d-flex">
+                            <strong>Is a Blocking Reason? </strong>
+                            <field name="manual" class="ms-auto" widget="boolean"/>
                         </div>
                     </t>
                 </templates>

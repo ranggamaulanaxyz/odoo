@@ -585,6 +585,7 @@ class AccountJournal(models.Model):
             accounts = self.search([('bank_account_id', '=', bank_account.id)])
             if accounts <= self:
                 bank_accounts += bank_account
+        self.env['account.payment.method.line'].search([('journal_id', 'in', self.ids)]).unlink()
         ret = super(AccountJournal, self).unlink()
         bank_accounts.unlink()
         return ret
@@ -910,6 +911,11 @@ class AccountJournal(models.Model):
                 name = f"{name} ({journal.currency_id.name})"
             journal.display_name = name
 
+    def action_archive(self):
+        if self.env['account.payment.method.line'].search_count([('journal_id', '=', self.id)], limit=1):
+            raise ValidationError(_("This journal is associated with a payment method. You cannot archive it"))
+        return super().action_archive()
+
     def action_configure_bank_journal(self):
         """ This function is called by the "configure" button of bank journals,
         visible on dashboard if no bank statement source has been defined yet
@@ -939,7 +945,7 @@ class AccountJournal(models.Model):
             raise UserError(_("No attachment was provided"))
 
         if not self:
-            raise UserError(_("No journal found"))
+            raise UserError(self.env['account.journal']._build_no_journal_error_msg(self.env.company.display_name, [journal_type]))
 
         # As we are coming from the journal, we assume that each attachments
         # will create an invoice with a tentative to enhance with EDI / OCR..
@@ -960,13 +966,7 @@ class AccountJournal(models.Model):
             ).message_post(attachment_ids=attachment.ids)
 
             attachment.write({'res_model': 'account.move', 'res_id': invoice.id})
-            if (
-                invoice.company_id.autopost_bills
-                and invoice.partner_id.autopost_bills == 'always'
-                and not invoice.abnormal_amount_warning
-                and not invoice.restrict_mode_hash_table
-            ):
-                invoice.action_post()
+            invoice._autopost_bill()
 
         return all_invoices
 
@@ -1031,7 +1031,7 @@ class AccountJournal(models.Model):
         self.ensure_one()
         account_ids = set()
         for line in self.inbound_payment_method_line_ids:
-            account_ids.add(line.payment_account_id.id or self.company_id.account_journal_payment_debit_account_id.id)
+            account_ids.add(line.payment_account_id.id)
         return self.env['account.account'].browse(account_ids)
 
     def _get_journal_outbound_outstanding_payment_accounts(self):
@@ -1041,7 +1041,7 @@ class AccountJournal(models.Model):
         self.ensure_one()
         account_ids = set()
         for line in self.outbound_payment_method_line_ids:
-            account_ids.add(line.payment_account_id.id or self.company_id.account_journal_payment_credit_account_id.id)
+            account_ids.add(line.payment_account_id.id)
         return self.env['account.account'].browse(account_ids)
 
     def _get_available_payment_method_lines(self, payment_type):

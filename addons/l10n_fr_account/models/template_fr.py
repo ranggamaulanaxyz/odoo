@@ -14,6 +14,7 @@ class AccountChartTemplate(models.AbstractModel):
             'property_account_payable_id': 'fr_pcg_pay',
             'property_account_expense_categ_id': 'pcg_6071',
             'property_account_income_categ_id': 'pcg_7071',
+            'property_account_downpayment_categ_id': 'pcg_4191',
         }
 
     @template('fr', 'res.company')
@@ -28,8 +29,6 @@ class AccountChartTemplate(models.AbstractModel):
                 'income_currency_exchange_account_id': 'pcg_766',
                 'expense_currency_exchange_account_id': 'pcg_666',
                 'account_journal_suspense_account_id': 'pcg_471',
-                'account_journal_payment_debit_account_id': 'pcg_472',
-                'account_journal_payment_credit_account_id': 'pcg_473',
                 'account_journal_early_pay_discount_loss_account_id': 'pcg_665',
                 'account_journal_early_pay_discount_gain_account_id': 'pcg_765',
                 'deferred_expense_account_id': 'pcg_486',

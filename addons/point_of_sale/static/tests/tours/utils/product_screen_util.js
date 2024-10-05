@@ -205,13 +205,13 @@ export function clickInternalNoteButton() {
         },
         {
             isActive: ["mobile"],
-            trigger: controlButtonTrigger("Internal Note"),
+            trigger: controlButtonTrigger("Kitchen Note"),
             run: "click",
         },
         {
             isActive: ["desktop"],
             content: "click Internal Note button",
-            trigger: controlButtonTrigger("Internal Note"),
+            trigger: controlButtonTrigger("Kitchen Note"),
             run: "click",
         },
     ];
@@ -414,7 +414,7 @@ export function modeIsActive(mode) {
 export function cashDifferenceIs(val) {
     return [
         {
-            trigger: `.payment-methods-overview tr td:nth-child(4):contains(${val})`,
+            trigger: `.payment-methods-overview .cash-difference:contains(${val})`,
         },
     ];
 }

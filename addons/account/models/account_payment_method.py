@@ -21,14 +21,16 @@ class AccountPaymentMethod(models.Model):
     def create(self, vals_list):
         payment_methods = super().create(vals_list)
         methods_info = self._get_payment_method_information()
+        return self._auto_link_payment_methods(payment_methods, methods_info)
+
+    def _auto_link_payment_methods(self, payment_methods, methods_info):
+        # This method was extracted from create so it can be overriden in the upgrade script.
+        # In said script we can then allow for a custom behavior for the payment.method.line on the journals.
         for method in payment_methods:
             information = methods_info.get(method.code, {})
-
             if information.get('mode') == 'multi':
                 method_domain = method._get_payment_method_domain(method.code)
-
                 journals = self.env['account.journal'].search(method_domain)
-
                 self.env['account.payment.method.line'].create([{
                     'name': method.name,
                     'payment_method_id': method.id,
@@ -86,6 +88,10 @@ class AccountPaymentMethod(models.Model):
         """
         return []
 
+    def unlink(self):
+        self.env['account.payment.method.line'].search([('payment_method_id', 'in', self.ids)]).unlink()
+        return super().unlink()
+
 
 class AccountPaymentMethodLine(models.Model):
     _name = "account.payment.method.line"
@@ -100,7 +106,6 @@ class AccountPaymentMethodLine(models.Model):
         comodel_name='account.payment.method',
         domain="[('payment_type', '=?', payment_type), ('id', 'in', available_payment_method_ids)]",
         required=True,
-        ondelete='cascade'
     )
     payment_account_id = fields.Many2one(
         comodel_name='account.account',
@@ -112,7 +117,6 @@ class AccountPaymentMethodLine(models.Model):
     )
     journal_id = fields.Many2one(
         comodel_name='account.journal',
-        ondelete="cascade",
         check_company=True,
     )
 
@@ -123,8 +127,11 @@ class AccountPaymentMethodLine(models.Model):
     available_payment_method_ids = fields.Many2many(related='journal_id.available_payment_method_ids')
 
     @api.depends('journal_id')
+    @api.depends_context('hide_payment_journal_id')
     def _compute_display_name(self):
         for method in self:
+            if self.env.context.get('hide_payment_journal_id'):
+                return super()._compute_display_name()
             method.display_name = f"{method.name} ({method.journal_id.name})"
 
     @api.depends('payment_method_id.name')

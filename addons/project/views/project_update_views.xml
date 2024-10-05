@@ -65,7 +65,7 @@
             <kanban highlight_color="color" sample="1" js_class="project_update_kanban">
                 <field name="color"/>
                 <templates>
-                    <t t-name="kanban-card" class="flex-row align-items-center">
+                    <t t-name="card" class="flex-row align-items-center">
                         <!-- Project Update Kanban View is always ungrouped - see js_class -->
                         <div class="pb-0 mb-2 mr8 o_pupdate_kanban_width">
                             <field name="name_cropped" class="fw-bolder"/>
@@ -115,6 +115,7 @@
     <record id="project_update_all_action" model="ir.actions.act_window">
         <field name="name">Dashboard</field>
         <field name="res_model">project.update</field>
+        <field name="path">project-dashboard</field>
         <field name="view_mode">kanban,list,form</field>
         <field name="domain">[('project_id', '=', active_id)]</field>
         <field name="search_view_id" ref="project_update_view_search"/>

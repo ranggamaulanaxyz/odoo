@@ -10,7 +10,6 @@ from werkzeug.test import EnvironBuilder
 
 import odoo.http
 from odoo.tools.misc import hmac, DotDict, frozendict
-from odoo.tools import config
 
 HOST = '127.0.0.1'
 
@@ -27,6 +26,10 @@ def MockRequest(
     from odoo.tests.common import HttpCase  # noqa: PLC0415
     lang_code = context.get('lang', env.context.get('lang', 'en_US'))
     env = env(context=dict(context, lang=lang_code))
+    if HttpCase.http_port():
+        base_url = HttpCase.base_url()
+    else:
+        base_url = f"http://{HOST}:{odoo.tools.config['http_port']}"
     request = Mock(
         # request
         httprequest=Mock(
@@ -36,7 +39,7 @@ def MockRequest(
             environ=dict(
                 EnvironBuilder(
                     path=path,
-                    base_url=HttpCase.base_url(),
+                    base_url=base_url,
                     environ_base=environ_base,
                 ).get_environ(),
                 REMOTE_ADDR=remote_addr,
@@ -96,7 +99,8 @@ def MockRequest(
         match.side_effect = NotFound
 
     def update_context(**overrides):
-        request.context = dict(request.context, **overrides)
+        request.env = request.env(context=dict(request.context, **overrides))
+        request.context = request.env.context
 
     request.update_context = update_context
 
@@ -240,12 +244,11 @@ def create_image_attachment(env, image_path, image_name):
     :param image_name: the name to give to the image (e.g. 's_banner_default_image.jpg')
     :return: the image attachment
     """
-    IrAttachment = env['ir.attachment']
-    base = 'http://%s:%s' % (HOST, config['http_port'])
-    img = IrAttachment.create({
+    Attachments = env['ir.attachment']
+    img = Attachments.create({
         'public': True,
         'name': image_name,
         'type': 'url',
-        'url': base + image_path,
+        'url': Attachments.get_base_url() + image_path,
     })
     return img

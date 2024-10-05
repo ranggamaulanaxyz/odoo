@@ -680,6 +680,12 @@ def route(route=None, **routing):
 
         * ``'user'``: The user must be authenticated and the current
           request will be executed using the rights of the user.
+        * ``'bearer'``: The user is authenticated using an "Authorization"
+          request header, using the Bearer scheme with an API token.
+          The request will be executed with the permissions of the
+          corresponding user. If the header is missing, the request
+          must belong to an authentication session, as for the "user"
+          authentication method.
         * ``'public'``: The user may or may not be authenticated. If he
           isn't, the current request will be executed using the shared
           Public user.
@@ -1096,6 +1102,16 @@ class Session(collections.abc.MutableMapping):
         """
             :return: dict if a device log has to be inserted, ``None`` otherwise
         """
+        if self._trace_disable:
+            # To avoid generating useless logs, e.g. for automated technical sessions,
+            # a session can be flagged with `_trace_disable`. This should never be done
+            # without a proper assessment of the consequences for auditability.
+            # Non-admin users have no direct or indirect way to set this flag, so it can't
+            # be abused by unprivileged users. Such sessions will of course still be
+            # subject to all other auditing mechanisms (server logs, web proxy logs,
+            # metadata tracking on modified records, etc.)
+            return
+
         user_agent = request.httprequest.user_agent
         platform = user_agent.platform
         browser = user_agent.browser

@@ -10,24 +10,22 @@ class IrEmbeddedActions(models.Model):
     _description = 'Embedded Actions'
     _order = 'sequence, id'
 
-    name = fields.Char(string='Embedded Name', translate=True)
+    name = fields.Char(translate=True)
     sequence = fields.Integer()
     parent_action_id = fields.Many2one('ir.actions.act_window', required=True, string='Parent Action', ondelete="cascade")
     parent_res_id = fields.Integer(string="Active Parent Id")
     parent_res_model = fields.Char(string='Active Parent Model', required=True)
     # It is required to have either action_id or python_method
-    action_id = fields.Many2one('ir.actions.act_window', string="Action Id", ondelete="cascade")
+    action_id = fields.Many2one('ir.actions.actions', string="Action", ondelete="cascade")
     python_method = fields.Char(help="Python method returning an action")
 
-    user_id = fields.Many2one('res.users', string="Embedded user", help="User specific embedded action. If empty, shared embedded action", ondelete="cascade")
+    user_id = fields.Many2one('res.users', string="User", help="User specific embedded action. If empty, shared embedded action", ondelete="cascade")
     is_deletable = fields.Boolean(compute="_compute_is_deletable")
-    default_view_mode = fields.Char(string="Default view", help="Default view (if none, default view of the action is taken)")
+    default_view_mode = fields.Char(string="Default View", help="Default view (if none, default view of the action is taken)")
     filter_ids = fields.One2many("ir.filters", "embedded_action_id", help="Default filter of the embedded action (if none, no filters)")
     is_visible = fields.Boolean(string="Embedded visibility", help="Computed field to check if the record should be visible according to the domain", compute="_compute_is_visible")
-    domain = fields.Char(string='Domain Value', default="[]",
-                         help="Domain applied to the active id of the parent model")
-    context = fields.Char(string='Context Value', default="{}",
-                          help="Context dictionary as Python expression, empty by default (Default: {})")
+    domain = fields.Char(default="[]", help="Domain applied to the active id of the parent model")
+    context = fields.Char(default="{}", help="Context dictionary as Python expression, empty by default (Default: {})")
     groups_ids = fields.Many2many('res.groups', help='Groups that can execute the embedded action. Leave empty to allow everybody.')
 
     _sql_constraints = [
@@ -52,7 +50,13 @@ class IrEmbeddedActions(models.Model):
         # The name by default is computed based on the triggered action if a action_id is defined.
         for vals in vals_list:
             if "name" not in vals:
-                vals["name"] = self.env["ir.actions.act_window"].browse(vals["action_id"]).name
+                vals["name"] = self.env["ir.actions.actions"].browse(vals["action_id"]).name
+            if "python_method" in vals and "action_id" in vals:
+                if vals.get("python_method"):
+                    # then remove the action_id since the action surely given by the python method.
+                    del vals["action_id"]
+                else:  # remove python_method in the vals since the vals is falsy.
+                    del vals["python_method"]
         return super().create(vals_list)
 
     # The record is deletable if it hasn't been created from a xml record (i.e. is not a default embedded action)
@@ -87,7 +91,7 @@ class IrEmbeddedActions(models.Model):
                     record.is_visible = False
 
     # Delete the filters linked to a embedded action.
-    @api.ondelete(at_uninstall=True)
+    @api.ondelete(at_uninstall=False)
     def _unlink_if_action_deletable(self):
         for record in self:
             if not record.is_deletable:

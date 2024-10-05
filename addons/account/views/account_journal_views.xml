@@ -15,6 +15,7 @@
                     <field name="currency_id" groups="base.group_multi_currency" optional="hide"/>
                     <field name="code" optional="show"/>
                     <field name="default_account_id" optional="show"/>
+                    <field name="autocheck_on_post" optional="hide"/>
                     <field name="active" optional="hide"/>
                     <field name="company_id" groups="base.group_multi_company" optional="hide"/>
                     <field name="company_id" groups="!base.group_multi_company" column_invisible="True"/>
@@ -113,7 +114,7 @@
                                         <field name="payment_method_id" options="{'no_create': True, 'no_open': True}"/>
                                         <field name="name"/>
                                         <field name="payment_account_id"
-                                               placeholder="Leave empty to use the default outstanding account"
+                                               placeholder="No payment journal entries"
                                                string="Outstanding Receipts accounts"
                                                options="{'no_quick_create': True}"
                                                groups="account.group_account_readonly"/>
@@ -130,7 +131,7 @@
                                             <field name="payment_method_id" options="{'no_create': True, 'no_open': True}"/>
                                             <field name="name"/>
                                             <field name="payment_account_id"
-                                                   placeholder="Leave empty to use the default outstanding account"
+                                                   placeholder="No payment journal entries"
                                                    string="Outstanding Payments accounts"
                                                    options="{'no_quick_create': True}"
                                                    groups="account.group_account_readonly"/>
@@ -215,7 +216,7 @@
             <field name="arch" type="xml">
                 <kanban class="o_kanban_mobile">
                     <templates>
-                        <t t-name="kanban-card" class="row g-0">
+                        <t t-name="card" class="row g-0">
                             <div class="col-6">
                                 <field class="fw-bolder" name="name"/>
                             </div>

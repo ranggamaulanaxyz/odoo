@@ -209,7 +209,7 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
             'type_tax_use': 'sale',
             'amount_type': 'percent',
             'amount': 10,
-            'price_include': True,
+            'price_include_override': 'tax_included',
             'include_base_amount': True,
         })
         tax_price_exclude = self.env['account.tax'].create({
@@ -379,7 +379,7 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
             'type_tax_use': 'sale',
             'amount_type': 'percent',
             'amount': 10,
-            'price_include': True,
+            'price_include_override': 'tax_included',
             'include_base_amount': True,
         })
         tax_price_include_2 = self.env['account.tax'].create({
@@ -387,7 +387,7 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
             'type_tax_use': 'sale',
             'amount_type': 'percent',
             'amount': 20,
-            'price_include': True,
+            'price_include_override': 'tax_included',
             'include_base_amount': True,
         })
 
@@ -879,7 +879,7 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
         tax = self.env['account.tax'].create({
             'name': '21%',
             'amount': 21.0,
-            'price_include': True,
+            'price_include_override': 'tax_included',
             'include_base_amount': True,
         })
 
@@ -959,7 +959,7 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
             'name': 'Tax 5.5% price included',
             'amount': 5.5,
             'amount_type': 'percent',
-            'price_include': True,
+            'price_include_override': 'tax_included',
         })
 
         # == Single-currency ==
@@ -1710,7 +1710,7 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
             'type_tax_use': 'sale',
             'amount_type': 'fixed',
             'amount': 0.05,
-            'price_include': True,
+            'price_include_override': 'tax_included',
             'include_base_amount': True,
         })
         invoice = self.env['account.move'].create({
@@ -1757,7 +1757,7 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
             'type_tax_use': 'sale',
             'amount_type': 'fixed',
             'amount': 0.05,
-            'price_include': True,
+            'price_include_override': 'tax_included',
             'include_base_amount': True,
         })
         fixed_tax_price_include_2 = self.env['account.tax'].create({
@@ -1765,7 +1765,7 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
             'type_tax_use': 'sale',
             'amount_type': 'fixed',
             'amount': 0.25,
-            'price_include': True,
+            'price_include_override': 'tax_included',
             'include_base_amount': True,
         })
         invoice = self.env['account.move'].create({
@@ -2310,8 +2310,8 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
                 {
                     **self.tax_line_vals_1,
                     'currency_id': self.other_currency.id,
-                    'amount_currency': -180.0,
-                    'credit': 90.0,
+                    'amount_currency': -200.0,
+                    'credit': 100.0,
                 },
                 {
                     **self.tax_line_vals_2,
@@ -2323,8 +2323,8 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
                     **self.term_line_vals_1,
                     'name': move.name,
                     'currency_id': self.other_currency.id,
-                    'amount_currency': 1410.0,
-                    'debit': 705.0,
+                    'amount_currency': 1430.0,
+                    'debit': 715.0,
                     'date_maturity': frozen_today,
                     'account_id': self.company_data['default_account_receivable'].id,
                 },
@@ -2335,8 +2335,8 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
                 'date': frozen_today,
                 'invoice_date': frozen_today,
                 'invoice_date_due': frozen_today,
-                'amount_tax': 210.0,
-                'amount_total': 1410.0,
+                'amount_tax': 230.0,
+                'amount_total': 1430.0,
             })
 
     @freeze_time('2017-01-15')
@@ -4043,8 +4043,7 @@ class TestAccountMoveOutInvoiceOnchanges(AccountTestInvoicingCommon):
         ])
 
         invoice.action_post()
-        wizard = self.env['account.move.send'].create({'move_ids': [Command.set(invoice.ids)]})
-        wizard.action_send_and_print()
+        invoice._generate_and_send(allow_fallback_pdf=False)
         move_form.save()
 
         # The integrity check should work

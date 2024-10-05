@@ -72,7 +72,7 @@ export const tourService = {
             description: _t("Onboarding"),
             callback: async () => {
                 tourState.clear();
-                await orm.call("res.users", "switch_tour_enabled");
+                toursEnabled = await orm.call("res.users", "switch_tour_enabled", [!toursEnabled]);
                 browser.location.reload();
             },
             isChecked: toursEnabled,
@@ -96,9 +96,6 @@ export const tourService = {
                 tourName,
                 tourRegistry.get(tourName),
             ];
-            if (!tour.at(1)) {
-                throw new Error(`Tour '${tourName}' is not found in the registry.`);
-            }
 
             return {
                 ...tour[1],
@@ -136,11 +133,10 @@ export const tourService = {
                 : getTourFromRegistry(tourName);
 
             if (!session.is_public && !toursEnabled && options.mode === "manual") {
-                const result = await orm.call("res.users", "switch_tour_enabled", [!toursEnabled]);
-                toursEnabled = result;
+                toursEnabled = await orm.call("res.users", "switch_tour_enabled", [!toursEnabled]);
             }
 
-            const defaultOptions = {
+            let tourConfig = {
                 stepDelay: 0,
                 keepWatchBrowser: false,
                 mode: "auto",
@@ -149,18 +145,18 @@ export const tourService = {
                 redirect: true,
             };
 
-            options = Object.assign(defaultOptions, options);
-            tourState.setCurrentConfig(options);
+            tourConfig = Object.assign(tourConfig, options);
+            tourState.setCurrentConfig(tourConfig);
             tourState.setCurrentTour(tour.name);
             tourState.setCurrentIndex(0);
-            if (options.debug !== false) {
+            if (tourConfig.debug !== false) {
                 // Starts the tour with a debugger to allow you to choose devtools configuration.
                 // eslint-disable-next-line no-debugger
                 debugger;
             }
 
             const willUnload = callWithUnloadCheck(() => {
-                if (tour.url && options.startUrl != tour.url && options.redirect) {
+                if (tour.url && tourConfig.startUrl != tour.url && tourConfig.redirect) {
                     redirect(tour.url);
                 }
             });
@@ -176,8 +172,12 @@ export const tourService = {
             let tour;
             if (tourConfig.fromDB) {
                 tour = await getTourFromDB(tourName);
-            } else {
+            } else if (tourRegistry.contains(tourName)) {
                 tour = getTourFromRegistry(tourName);
+            }
+
+            if (!tour) {
+                return;
             }
 
             tour.steps.forEach((step) => validateStep(step));
@@ -202,16 +202,21 @@ export const tourService = {
                     pointer.stop();
                     endTour(tour);
 
-                    if (tour.rainbowManMessage) {
+                    if (tourConfig.rainbowManMessage) {
+                        const message = window.DOMPurify.sanitize(tourConfig.rainbowManMessage);
                         effect.add({
                             type: "rainbow_man",
-                            message: markup(tour.rainbowManMessage),
+                            message: markup(message),
                         });
                     }
 
                     const nextTour = await orm.call("web_tour.tour", "consume", [tour.name]);
                     if (nextTour) {
-                        startTour(nextTour.name, { mode: "manual", redirect: false });
+                        startTour(nextTour.name, {
+                            mode: "manual",
+                            redirect: false,
+                            rainbowManMessage: nextTour.rainbowManMessage,
+                        });
                     }
                 });
             }
@@ -236,13 +241,17 @@ export const tourService = {
         if (!window.frameElement) {
             const paramsTourName = new URLSearchParams(browser.location.search).get("tour");
             if (paramsTourName) {
-                startTour(paramsTourName, { mode: "manual" });
+                startTour(paramsTourName, { mode: "manual", fromDB: true });
             }
 
             if (tourState.getCurrentTour()) {
                 resumeTour();
             } else if (session.current_tour) {
-                startTour(session.current_tour.name, { mode: "manual", redirect: false });
+                startTour(session.current_tour.name, {
+                    mode: "manual",
+                    redirect: false,
+                    rainbowManMessage: session.current_tour.rainbowManMessage,
+                });
             }
 
             if (
