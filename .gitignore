@@ -49,3 +49,10 @@ package.json
 /man/
 /share/
 /src/
+
+
+# vendors
+/addons_customize/
+/addons_vendor/
+/addons_community/
+/addons_customer/
