@@ -13,7 +13,6 @@ Lets the user create a custom dashboard.
 
 Allows users to create custom dashboard.
     """,
-    'depends': ['spreadsheet_dashboard'],
     'data': [
         'security/ir.model.access.csv',
         'views/board_views.xml',

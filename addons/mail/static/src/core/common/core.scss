@@ -132,7 +132,7 @@ a.o-discuss-mention {
     align-items: center;
 
     &:hover, &.show {
-        background-color: rgba(0, 0, 0, 0.075);
+        background-color: $o-navbar-background;
     }
 }
 

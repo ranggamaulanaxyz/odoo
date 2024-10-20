@@ -1696,6 +1696,7 @@ class GroupsView(models.Model):
                     user_type_field_name = field_name
                     user_type_readonly = f'{user_type_field_name} != {group_employee.id}'
                     attrs['widget'] = 'radio'
+                    attrs['options'] = "{'horizontal': true}"
                     # Trigger the on_change of this "virtual field"
                     attrs['on_change'] = '1'
                     xml1.append(E.field(name=field_name, **attrs))

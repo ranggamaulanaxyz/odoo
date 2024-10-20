@@ -16,23 +16,6 @@ class ResConfigSettings(models.TransientModel):
         "Default Access Rights",
         config_parameter='base_setup.default_user_rights')
     module_base_import = fields.Boolean("Allow users to import data from CSV/XLS/XLSX/ODS files")
-    module_google_calendar = fields.Boolean(
-        string='Allow the users to synchronize their calendar  with Google Calendar')
-    module_microsoft_calendar = fields.Boolean(
-        string='Allow the users to synchronize their calendar with Outlook Calendar')
-    module_mail_plugin = fields.Boolean(
-        string='Allow integration with the mail plugins'
-    )
-    module_auth_oauth = fields.Boolean("Use external authentication providers (OAuth)")
-    module_auth_ldap = fields.Boolean("LDAP Authentication")
-    module_account_inter_company_rules = fields.Boolean("Manage Inter Company")
-    module_voip = fields.Boolean("VoIP")
-    module_web_unsplash = fields.Boolean("Unsplash Image Library")
-    module_sms = fields.Boolean("SMS")
-    module_partner_autocomplete = fields.Boolean("Partner Autocomplete")
-    module_base_geolocalize = fields.Boolean("GeoLocalize")
-    module_google_recaptcha = fields.Boolean("reCAPTCHA")
-    module_website_cf_turnstile = fields.Boolean("Cloudflare Turnstile")
     report_footer = fields.Html(related="company_id.report_footer", string='Custom Report Footer', help="Footer text displayed at the bottom of all reports.", readonly=False)
     group_multi_currency = fields.Boolean(string='Multi-Currencies',
             implied_group='base.group_multi_currency',

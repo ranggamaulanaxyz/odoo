@@ -1,3 +1,7 @@
+// Floating Toolbar Variables
+$o-we-toolbar-bg: #FFF !default;
+$o-we-toolbar-color-text: $o-we-bg-light !default;
+
 .o_font_color_selector {
     --bg: #{$o-we-toolbar-bg};
     --text-rgb: #{red($o-we-toolbar-color-text)}, #{green($o-we-toolbar-color-text)}, #{blue($o-we-toolbar-color-text)};

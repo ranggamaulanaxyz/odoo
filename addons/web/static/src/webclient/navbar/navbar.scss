@@ -154,6 +154,7 @@
         .o_nav_entry, .dropdown-toggle {
             background: var(--NavBar-entry-backgroundColor, #{$o-navbar-background});
             border: $border-width solid transparent;
+            border-radius: $border-radius;
 
             &:hover {
                 background: var(--NavBar-entry-backgroundColor--hover, #{$o-navbar-entry-bg--hover});

@@ -26,12 +26,17 @@
         </record> 
     </data>
     <data>
+        <menuitem
+            id="dashboard_menu_root"
+            name="Dashboards"
+            web_icon="board,static/description/icon.png"
+            sequence="37"/>
 
         <!--My Dashboard Menu-->
         <menuitem
             id="menu_board_my_dash"
             name="My Dashboard"
-            parent="spreadsheet_dashboard.spreadsheet_dashboard_menu_root"
+            parent="dashboard_menu_root"
             action="open_board_my_dash_action"
             sequence="100"/>
     </data>
