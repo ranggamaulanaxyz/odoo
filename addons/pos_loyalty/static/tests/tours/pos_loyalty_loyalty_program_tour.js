@@ -8,7 +8,6 @@ import { inLeftSide } from "@point_of_sale/../tests/tours/utils/common";
 import { registry } from "@web/core/registry";
 
 registry.category("web_tour.tours").add("PosLoyaltyLoyaltyProgram1", {
-    test: true,
     steps: () =>
         [
             Chrome.startPoS(),
@@ -66,7 +65,6 @@ registry.category("web_tour.tours").add("PosLoyaltyLoyaltyProgram1", {
 });
 
 registry.category("web_tour.tours").add("PosLoyaltyLoyaltyProgram2", {
-    test: true,
     steps: () =>
         [
             // Order1: Immediately set the customer to Test Partner AAA which has 4 points.
@@ -136,7 +134,6 @@ registry.category("web_tour.tours").add("PosLoyaltyLoyaltyProgram2", {
 });
 
 registry.category("web_tour.tours").add("PosLoyaltyChangeRewardQty", {
-    test: true,
     steps: () =>
         [
             Chrome.startPoS(),
@@ -153,7 +150,6 @@ registry.category("web_tour.tours").add("PosLoyaltyChangeRewardQty", {
 });
 
 registry.category("web_tour.tours").add("PosLoyaltyLoyaltyProgram3", {
-    test: true,
     steps: () =>
         [
             Chrome.startPoS(),
@@ -166,7 +162,7 @@ registry.category("web_tour.tours").add("PosLoyaltyLoyaltyProgram3", {
 
             // At this point, the free_product program is triggered.
             // The reward button should be highlighted.
-            PosLoyalty.isRewardButtonHighlighted(true),
+            PosLoyalty.isRewardButtonHighlighted(true, true),
             PosLoyalty.claimReward("Free Product - Whiteboard Pen"),
             PosLoyalty.hasRewardLine("Free Product - Whiteboard Pen", "-1.00", "1.00"),
 
@@ -176,7 +172,6 @@ registry.category("web_tour.tours").add("PosLoyaltyLoyaltyProgram3", {
 });
 
 registry.category("web_tour.tours").add("PosLoyaltyPromotion", {
-    test: true,
     steps: () =>
         [
             Chrome.startPoS(),
@@ -189,7 +184,6 @@ registry.category("web_tour.tours").add("PosLoyaltyPromotion", {
 });
 
 registry.category("web_tour.tours").add("PosLoyaltyDontGrantPointsForRewardOrderLines", {
-    test: true,
     steps: () =>
         [
             Chrome.startPoS(),
@@ -200,7 +194,7 @@ registry.category("web_tour.tours").add("PosLoyaltyDontGrantPointsForRewardOrder
 
             ProductScreen.addOrderline("Desk Organizer", "1"),
             ProductScreen.addOrderline("Whiteboard Pen", "1"),
-            PosLoyalty.isRewardButtonHighlighted(true),
+            PosLoyalty.isRewardButtonHighlighted(true, true),
             PosLoyalty.claimReward("100% on the cheapest product"),
 
             PosLoyalty.orderTotalIs("5.10"),
@@ -209,7 +203,6 @@ registry.category("web_tour.tours").add("PosLoyaltyDontGrantPointsForRewardOrder
 });
 
 registry.category("web_tour.tours").add("PosComboCheapestRewardProgram", {
-    test: true,
     steps: () =>
         [
             Chrome.startPoS(),

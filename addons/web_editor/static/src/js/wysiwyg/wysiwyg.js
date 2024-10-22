@@ -1989,8 +1989,6 @@ export class Wysiwyg extends Component {
         });
         $toolbar.find('#image-crop').click(() => this._showImageCrop());
         $toolbar.find('#image-transform').click(e => {
-            const sel = document.getSelection();
-            sel.removeAllRanges();
             if (!this.lastMediaClicked) {
                 return;
             }
@@ -2218,6 +2216,9 @@ export class Wysiwyg extends Component {
         if (isProtected(anchorNode)) {
             return;
         }
+        if (this.odooEditor.document.querySelector(".transfo-container")) {
+            return;
+        }
 
         this.odooEditor.automaticStepSkipStack();
         // We need to use the editor's window so the tooltip displays in its
@@ -2268,6 +2269,7 @@ export class Wysiwyg extends Component {
             '#colorInputButtonGroup',
             '#media-insert', // "Insert media" should be replaced with "Replace media".
             '#chatgpt', // Chatgpt should be removed when media is in selection.
+            '#translate' // Translate button should be removed when media is in selection.
         ].join(','))){
             el.classList.toggle('d-none', isInMedia);
         }
