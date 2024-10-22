@@ -19,7 +19,7 @@ class ComponentManager {
     async mountComponents() {
         for (const [key, component] of registry.category("public_components").getEntries()) {
             for (const el of document.querySelectorAll(
-                `owl-component[name="${CSS.escape(key)}"]`
+                `.owl-component[name="${CSS.escape(key)}"]`
             )) {
                 if (!this.apps.has(el)) {
                     const props = JSON.parse(el.getAttribute("props") || "{}");

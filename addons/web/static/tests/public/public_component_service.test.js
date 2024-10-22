@@ -24,9 +24,9 @@ test(`render Public Component`, async () => {
     class MyComponent extends Component {
         static template = xml`
             <div>
-                <owl-component name="my_public_comp" props='{"info": "blibli"}'/>
-                <owl-component name="my_public_comp" props='{"info": 3}'/>
-                <owl-component name="my_public_comp" props='{"info": {"test": "plop"}}'/>
+                <div class="owl-component" name="my_public_comp" props='{"info": "blibli"}'/>
+                <div class="owl-component" name="my_public_comp" props='{"info": 3}'/>
+                <div class="owl-component"name="my_public_comp" props='{"info": {"test": "plop"}}'/>
             </div>
         `;
         static props = ["*"];

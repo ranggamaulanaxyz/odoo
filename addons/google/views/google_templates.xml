@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <template id="frontend_layout" inherit_id="web.frontend_layout" name="Google: Assets">
+        <xpath expr="//head/script[@id='web.layout.odooscript']" position="after">
+            <script src="https://accounts.google.com/gsi/client" async=""></script>
+        </xpath>
+    </template>
+
+    <template id="login_layout" inherit_id="web.login" name="Google: Login button">
+        <xpath expr="//div[@class='o_login_auth']" position="inside">
+            <div class="owl-component" name="google.LoginButton" />
+        </xpath>
+    </template>
+</odoo>

@@ -137,8 +137,8 @@
 
     <template id="web.login" name="Login">
         <t t-call="web.login_layout">
-            <owl-component t-if="not login" name="web.user_switch" />
-            <form t-attf-class="oe_login_form #{'' if login else 'd-none'}" role="form" t-attf-action="/web/login" method="post" onsubmit="this.action = '/web/login' + location.hash">
+            <div class="owl-component" t-if="not login" name="web.user_switch" />
+            <form t-attf-class="oe_login_form" role="form" t-attf-action="/web/login" method="post" onsubmit="this.action = '/web/login' + location.hash">
                 <input type="hidden" name="csrf_token" t-att-value="request.csrf_token()"/>
 
                 <div class="mb-3" t-if="databases and len(databases) &gt; 1">
@@ -165,29 +165,12 @@
                 <p class="alert alert-success" t-if="message" role="status">
                     <t t-esc="message"/>
                 </p>
-
                 <div class="oe_login_buttons text-center gap-1 d-grid mb-1 pt-3">
                     <button type="submit" class="btn btn-primary">Log in</button>
                     <t t-if="debug">
-                        <button type="submit" name="redirect" value="/web/become" class="btn btn-link btn-sm">Log in as superuser</button>
+                        <button type="submit" name="redirect" value="/web/become" class="btn btn-danger">Log in as superuser</button>
                     </t>
                     <div class="o_login_auth"/>
-                    <div id="g_id_onload"
-     data-client_id="289766748875-9a9ccdkb4753r6dkib87nof821dfgt7v.apps.googleusercontent.com"
-     data-context="signin"
-     data-ux_mode="popup"
-     data-login_uri="http://localhost.8069/web/login/google"
-     data-itp_support="true">
-</div>
-
-<div class="g_id_signin"
-     data-type="standard"
-     data-shape="rectangular"
-     data-theme="outline"
-     data-text="signin_with"
-     data-size="large"
-     data-logo_alignment="left">
-</div>
                 </div>
 
                 <input type="hidden" name="type" value="password"/>
@@ -398,7 +381,7 @@
                 <link rel="manifest" t-att-href="safe_manifest_url" crossorigin="use-credentials" />
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
             </t>
-            <owl-component name="web.install_scoped_app" />
+            <div class="owl-component" name="web.install_scoped_app" />
         </t>
     </template>
 </odoo>

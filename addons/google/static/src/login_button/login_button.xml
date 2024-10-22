@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="google.LoginButton">
+        <button class="btn btn-outline-primary btn-auth-google" type="button" t-on-click="login">Login with Google</button>
+    </t>
+</templates>
