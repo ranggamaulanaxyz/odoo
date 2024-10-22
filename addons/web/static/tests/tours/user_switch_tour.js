@@ -17,7 +17,7 @@ function logout() {
 
 registry.category("web_tour.tours").add("test_user_switch", {
     test: true,
-    url: "/odoo",
+    url: "/app",
     steps: () => [
         ...logout(),
         {

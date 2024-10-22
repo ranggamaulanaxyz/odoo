@@ -4,7 +4,7 @@
     import { stepUtils } from "@web_tour/tour_service/tour_utils";
 
     registry.category("web_tour.tours").add('sql_constaint', {
-        url: '/odoo/action-test_new_api.action_categories?debug=1',
+        url: '/app/action-test_new_api.action_categories?debug=1',
         test: true,
         steps: () => [
     {

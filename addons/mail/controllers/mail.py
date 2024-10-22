@@ -21,7 +21,7 @@ class MailController(http.Controller):
 
     @classmethod
     def _redirect_to_messaging(cls):
-        url = '/odoo/action-mail.action_discuss'
+        url = '/app/action-mail.action_discuss'
         return request.redirect(url)
 
     @classmethod
@@ -134,7 +134,7 @@ class MailController(http.Controller):
             url_params['view_id'] = view_id
         if cids:
             request.future_response.set_cookie('cids', '-'.join([str(cid) for cid in cids]))
-        url = f'/odoo/{model}/{res_id}?{url_encode(url_params)}'
+        url = f'/app/{model}/{res_id}?{url_encode(url_params)}'
         return request.redirect(url)
 
     @http.route('/mail/view', type='http', auth='public')
@@ -216,7 +216,7 @@ class MailController(http.Controller):
                 raise Unauthorized()
 
         if message.model == 'discuss.channel':
-            url = f'/odoo/action-mail.action_discuss?active_id={message.res_id}&highlight_message_id={message_id}'
+            url = f'/app/action-mail.action_discuss?active_id={message.res_id}&highlight_message_id={message_id}'
         else:
-            url = f'/odoo/{message.model}/{message.res_id}?highlight_message_id={message_id}'
+            url = f'/app/{message.model}/{message.res_id}?highlight_message_id={message_id}'
         return request.redirect(url)

@@ -143,7 +143,7 @@ export class WebClient extends Component {
     registerServiceWorker() {
         if (navigator.serviceWorker) {
             navigator.serviceWorker
-                .register("/web/service-worker.js", { scope: "/odoo" })
+                .register("/web/service-worker.js", { scope: "/app" })
                 .catch((error) => {
                     console.error("Service worker registration failed, error:", error);
                 });

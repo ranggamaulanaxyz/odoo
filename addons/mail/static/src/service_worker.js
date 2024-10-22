@@ -5,10 +5,10 @@ self.addEventListener("notificationclick", (event) => {
     if (event.notification.data) {
         const { action, model, res_id } = event.notification.data;
         if (model === "discuss.channel") {
-            clients.openWindow(`/odoo/${res_id}/action-${action}`);
+            clients.openWindow(`/app/${res_id}/action-${action}`);
         } else {
             const modelPath = model.includes(".") ? model : `m-${model}`;
-            clients.openWindow(`/odoo/${modelPath}/${res_id}`);
+            clients.openWindow(`/app/${modelPath}/${res_id}`);
         }
     }
 });

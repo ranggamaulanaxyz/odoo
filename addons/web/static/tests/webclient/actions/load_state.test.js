@@ -207,13 +207,13 @@ beforeEach(() => {
     patchWithCleanup(browser.location, {
         origin: "http://example.com",
     });
-    redirect("/odoo");
+    redirect("/app");
     startRouter();
 });
 
 describe(`new urls`, () => {
     test(`action loading`, async () => {
-        redirect("/odoo/action-1001");
+        redirect("/app/action-1001");
         logHistoryInteractions();
 
         await mountWebClient();
@@ -228,7 +228,7 @@ describe(`new urls`, () => {
     });
 
     test(`menu loading`, async () => {
-        redirect("/odoo?menu_id=2");
+        redirect("/app?menu_id=2");
         logHistoryInteractions();
 
         await mountWebClient();
@@ -241,7 +241,7 @@ describe(`new urls`, () => {
     });
 
     test(`action and menu loading`, async () => {
-        redirect("/odoo/action-1001?menu_id=2");
+        redirect("/app/action-1001?menu_id=2");
         logHistoryInteractions();
 
         await mountWebClient();
@@ -263,7 +263,7 @@ describe(`new urls`, () => {
     });
 
     test(`initial loading with action id`, async () => {
-        redirect("/odoo/action-1001");
+        redirect("/app/action-1001");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -280,7 +280,7 @@ describe(`new urls`, () => {
     });
 
     test(`initial loading take complete context`, async () => {
-        redirect("/odoo/action-1001");
+        redirect("/app/action-1001");
         logHistoryInteractions();
 
         onRpc("/web/action/load", async (route) => {
@@ -306,7 +306,7 @@ describe(`new urls`, () => {
     });
 
     test(`initial loading with action tag`, async () => {
-        redirect("/odoo/__test__client__action__");
+        redirect("/app/__test__client__action__");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -334,7 +334,7 @@ describe(`new urls`, () => {
 
     test(`correctly sends additional context`, async () => {
         // %2C is a URL-encoded comma
-        redirect("/odoo/4/action-1001");
+        redirect("/app/4/action-1001");
         logHistoryInteractions();
         onRpc("/web/action/load", async (request) => {
             expect.step("/web/action/load");
@@ -363,7 +363,7 @@ describe(`new urls`, () => {
     });
 
     test(`supports action as xmlId`, async () => {
-        redirect("/odoo/action-wowl.client_action");
+        redirect("/app/action-wowl.client_action");
         logHistoryInteractions();
 
         await mountWebClient();
@@ -389,7 +389,7 @@ describe(`new urls`, () => {
             },
         ]);
         // FIXME this is super weird: we open an action in target new from the url?
-        redirect("/odoo/action-wowl.client_action");
+        redirect("/app/action-wowl.client_action");
         logHistoryInteractions();
 
         await mountWebClient();
@@ -403,7 +403,7 @@ describe(`new urls`, () => {
     });
 
     test(`should not crash on invalid state`, async () => {
-        redirect("/odoo/m-partner?view_type=list");
+        redirect("/app/m-partner?view_type=list");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -424,7 +424,7 @@ describe(`new urls`, () => {
         }
         actionRegistry.add("HelloWorldTest", ClientAction);
 
-        redirect("/odoo/HelloWorldTest");
+        redirect("/app/HelloWorldTest");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -450,7 +450,7 @@ describe(`new urls`, () => {
         }
         actionRegistry.add("HelloWorldTest", ClientAction);
 
-        redirect("/odoo/HelloWorldTest");
+        redirect("/app/HelloWorldTest");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -488,7 +488,7 @@ describe(`new urls`, () => {
         }
         actionRegistry.add("HelloWorldTest", ClientAction);
 
-        redirect("/odoo/HelloWorldTest/12");
+        redirect("/app/HelloWorldTest/12");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -526,7 +526,7 @@ describe(`new urls`, () => {
         }
         actionRegistry.add("HelloWorldTest", ClientAction);
 
-        redirect("/odoo/HelloWorldTest");
+        redirect("/app/HelloWorldTest");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -562,7 +562,7 @@ describe(`new urls`, () => {
         }
         actionRegistry.add("HelloWorldTest", ClientAction);
 
-        redirect("/odoo/HelloWorldTest/12");
+        redirect("/app/HelloWorldTest/12");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -597,7 +597,7 @@ describe(`new urls`, () => {
         }
         actionRegistry.add("HelloWorldTest", ClientAction);
 
-        redirect("/odoo/my_client/12");
+        redirect("/app/my_client/12");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -628,7 +628,7 @@ describe(`new urls`, () => {
         }
         actionRegistry.add("HelloWorldTest", ClientAction);
 
-        redirect("/odoo/my_client");
+        redirect("/app/my_client");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -649,7 +649,7 @@ describe(`new urls`, () => {
     });
 
     test(`properly load act window actions`, async () => {
-        redirect("/odoo/action-1");
+        redirect("/app/action-1");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -670,7 +670,7 @@ describe(`new urls`, () => {
     });
 
     test(`properly load records`, async () => {
-        redirect("/odoo/m-partner/2");
+        redirect("/app/m-partner/2");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -718,7 +718,7 @@ describe(`new urls`, () => {
             },
         ]);
 
-        redirect("/odoo/m-partner/2");
+        redirect("/app/m-partner/2");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -739,7 +739,7 @@ describe(`new urls`, () => {
     });
 
     test(`properly load default record`, async () => {
-        redirect("/odoo/action-3/new");
+        redirect("/app/action-3/new");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -759,7 +759,7 @@ describe(`new urls`, () => {
     });
 
     test(`load requested view for act window actions`, async () => {
-        redirect("/odoo/action-3?view_type=kanban");
+        redirect("/app/action-3?view_type=kanban");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -780,7 +780,7 @@ describe(`new urls`, () => {
     });
 
     test(`lazy load multi record view if mono record one is requested`, async () => {
-        redirect("/odoo/action-3/2");
+        redirect("/app/action-3/2");
         logHistoryInteractions();
 
         onRpc("unity_read", ({ kwargs }) => expect.step(`unity_read ${kwargs.method}`));
@@ -862,7 +862,7 @@ describe(`new urls`, () => {
     test(`lazy loaded multi record view with failing mono record one`, async () => {
         expect.errors(1);
 
-        redirect("/odoo/action-3/2");
+        redirect("/app/action-3/2");
         logHistoryInteractions();
         onRpc("web_read", () => Promise.reject());
 
@@ -888,7 +888,7 @@ describe(`new urls`, () => {
 
     test(`should push the correct state at the right time`, async () => {
         // formerly "should not push a loaded state"
-        redirect("/odoo/action-3");
+        redirect("/app/action-3");
         logHistoryInteractions();
 
         await mountWebClient();
@@ -945,7 +945,7 @@ describe(`new urls`, () => {
             },
         ]);
 
-        redirect("/odoo?menu_id=666");
+        redirect("/app?menu_id=666");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -979,7 +979,7 @@ describe(`new urls`, () => {
             },
         ]);
 
-        redirect("/odoo/action-999/new");
+        redirect("/app/action-999/new");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -1014,7 +1014,7 @@ describe(`new urls`, () => {
             },
         ]);
 
-        redirect("/odoo/action-1000/999");
+        redirect("/app/action-1000/999");
         logHistoryInteractions();
 
         await mountWebClient();
@@ -1030,7 +1030,7 @@ describe(`new urls`, () => {
     });
 
     test(`server action loading with id`, async () => {
-        redirect("/odoo/action-2/2");
+        redirect("/app/action-2/2");
         logHistoryInteractions();
 
         onRpc("/web/action/run", async (request) => {
@@ -1068,7 +1068,7 @@ describe(`new urls`, () => {
                 ],
             };
         });
-        redirect("/odoo/my-path/2");
+        redirect("/app/my-path/2");
         logHistoryInteractions();
         await mountWebClient();
         expect(browser.location.href).toBe("http://example.com/odoo/my-path/2", {
@@ -1102,7 +1102,7 @@ describe(`new urls`, () => {
     });
 
     test(`state with integer active_ids should not crash`, async () => {
-        redirect("/odoo/action-2?active_ids=3");
+        redirect("/app/action-2?active_ids=3");
         logHistoryInteractions();
 
         onRpc("/web/action/run", async (request) => {
@@ -1130,7 +1130,7 @@ describe(`new urls`, () => {
             `,
         };
 
-        redirect("/odoo/action-3/new");
+        redirect("/app/action-3/new");
         logHistoryInteractions();
 
         await mountWebClient();
@@ -1166,7 +1166,7 @@ describe(`new urls`, () => {
         }
         registry.category("actions").add("__test__client__action__", Override, { force: true });
 
-        redirect("/odoo/__test__client__action__?menu_id=1");
+        redirect("/app/__test__client__action__?menu_id=1");
         logHistoryInteractions();
 
         await mountWebClient();
@@ -1211,7 +1211,7 @@ describe(`new urls`, () => {
 
     test("all actions crashes", async () => {
         expect.errors(2);
-        redirect("/odoo/m-partner/2/m-partner/1");
+        redirect("/app/m-partner/2/m-partner/1");
         logHistoryInteractions();
         stepAllNetworkCalls();
         onRpc("web_read", () => Promise.reject());
@@ -1259,7 +1259,7 @@ describe(`new urls`, () => {
             },
         ]);
 
-        redirect("/odoo/partners/2/action-28/1");
+        redirect("/app/partners/2/action-28/1");
         logHistoryInteractions();
         stepAllNetworkCalls();
 
@@ -1301,7 +1301,7 @@ describe(`new urls`, () => {
 
     test(`don't load controllers when load action new`, async () => {
         stepAllNetworkCalls();
-        redirect("/odoo/action-3/2");
+        redirect("/app/action-3/2");
         logHistoryInteractions();
         Partner._views["form,false"] = /* xml */ `
             <form string="Partner">
@@ -1361,7 +1361,7 @@ describe(`new urls`, () => {
         // So it will try to perform the previous action : action-3 with id 1.
         // This one will give an error, and it should directly try the previous one : action-3
         expect.errors(1);
-        redirect("/odoo/action-3/1/m-partner");
+        redirect("/app/action-3/1/m-partner");
         logHistoryInteractions();
         stepAllNetworkCalls();
         onRpc("web_read", () => Promise.reject());

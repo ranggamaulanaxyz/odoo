@@ -206,7 +206,7 @@ test.tags("desktop")("clicking quickly on breadcrumbs...", async () => {
 });
 
 test.tags("desktop")("execute a new action while loading a lazy-loaded controller", async () => {
-    redirect("/odoo/action-4/2?cids=1");
+    redirect("/app/action-4/2?cids=1");
 
     let def;
     onRpc("partner", "web_search_read", () => def);

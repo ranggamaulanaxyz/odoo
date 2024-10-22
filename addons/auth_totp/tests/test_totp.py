@@ -51,7 +51,7 @@ class TestTOTP(HttpCaseWithUserDemo, TestTOTPMixin):
 
     def test_totp(self):
         # 1. Enable 2FA
-        self.start_tour('/odoo', 'totp_tour_setup', login='demo')
+        self.start_tour('/app', 'totp_tour_setup', login='demo')
 
         # 2. Verify that RPC is blocked because 2FA is on.
         self.assertFalse(
@@ -89,8 +89,8 @@ class TestTOTP(HttpCaseWithUserDemo, TestTOTPMixin):
 
 
     def test_totp_administration(self):
-        self.start_tour('/odoo', 'totp_tour_setup', login='demo')
-        self.start_tour('/odoo', 'totp_admin_disables', login='admin')
+        self.start_tour('/app', 'totp_tour_setup', login='demo')
+        self.start_tour('/app', 'totp_admin_disables', login='admin')
         self.start_tour('/', 'totp_login_disabled', login=None)
 
     @mute_logger('odoo.http')
@@ -100,7 +100,7 @@ class TestTOTP(HttpCaseWithUserDemo, TestTOTPMixin):
         user.
         """
 
-        self.start_tour('/odoo', 'totp_tour_setup', login='demo')
+        self.start_tour('/app', 'totp_tour_setup', login='demo')
         self.url_open('/web/session/logout')
 
         headers = {

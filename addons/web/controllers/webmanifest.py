@@ -30,7 +30,7 @@ class WebManifest(http.Controller):
             if data:
                 shortcuts.append({
                     'name': module.display_name,
-                    'url': '/odoo?menu_id=%s' % data.mapped('res_id')[0],
+                    'url': '/app?menu_id=%s' % data.mapped('res_id')[0],
                     'description': module.summary,
                     'icons': [{
                         'sizes': '100x100',
@@ -44,8 +44,8 @@ class WebManifest(http.Controller):
         web_app_name = request.env['ir.config_parameter'].sudo().get_param('web.web_app_name', 'Odoo')
         manifest = {
             'name': web_app_name,
-            'scope': '/odoo',
-            'start_url': '/odoo',
+            'scope': '/app',
+            'start_url': '/app',
             'display': 'standalone',
             'background_color': '#714B67',
             'theme_color': '#714B67',
@@ -76,13 +76,13 @@ class WebManifest(http.Controller):
             self._get_service_worker_content(),
             [
                 ('Content-Type', 'text/javascript'),
-                ('Service-Worker-Allowed', '/odoo'),
+                ('Service-Worker-Allowed', '/app'),
             ]
         )
         return response
 
     def _get_service_worker_content(self):
-        """ Returns a ServiceWorker javascript file scoped for the backend (aka. '/odoo')
+        """ Returns a ServiceWorker javascript file scoped for the backend (aka. '/app')
         """
         with file_open('web/static/src/service_worker.js') as f:
             body = f.read()
@@ -91,7 +91,7 @@ class WebManifest(http.Controller):
     def _icon_path(self):
         return 'web/static/img/odoo-icon-192x192.png'
 
-    @http.route('/odoo/offline', type='http', auth='public', methods=['GET'])
+    @http.route('/app/offline', type='http', auth='public', methods=['GET'])
     def offline(self):
         """ Returns the offline page delivered by the service worker """
         return request.render('web.webclient_offline', {

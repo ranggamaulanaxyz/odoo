@@ -279,7 +279,7 @@ class TestMailComposerUI(MailCommon, HttpCase):
         user = self.env["res.users"].create({"name": "Not A Demo User", "login": "nadu"})
         with self.mock_mail_app():
             self.start_tour(
-                f"/odoo/res.partner/{partner.id}",
+                f"/app/res.partner/{partner.id}",
                 "mail/static/tests/tours/mail_composer_test_tour.js",
                 login=self.user_employee.login
             )

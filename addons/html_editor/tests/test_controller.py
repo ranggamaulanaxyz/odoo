@@ -159,7 +159,7 @@ class TestController(HttpCase):
             '/html_editor/link_preview_internal',
             data=json_safe.dumps({
                 "params": {
-                    "preview_url": f"/odoo/users/{self.portal_user.id}",
+                    "preview_url": f"/app/users/{self.portal_user.id}",
                 }
             }),
             headers=self.headers
@@ -172,7 +172,7 @@ class TestController(HttpCase):
             '/html_editor/link_preview_internal',
             data=json_safe.dumps({
                 "params": {
-                    "preview_url": "/odoo/actionInvalid/1",
+                    "preview_url": "/app/actionInvalid/1",
                 }
             }),
             headers=self.headers
@@ -185,7 +185,7 @@ class TestController(HttpCase):
             '/html_editor/link_preview_internal',
             data=json_safe.dumps({
                 "params": {
-                    "preview_url": "/odoo/users/9999",
+                    "preview_url": "/app/users/9999",
                 }
             }),
             headers=self.headers
@@ -198,7 +198,7 @@ class TestController(HttpCase):
             '/html_editor/link_preview_internal',
             data=json_safe.dumps({
                 "params": {
-                    "preview_url": "/odoo/users",
+                    "preview_url": "/app/users",
                 }
             }),
             headers=self.headers

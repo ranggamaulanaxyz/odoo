@@ -24,9 +24,9 @@ describe(parseUrl(import.meta.url), () => {
         mockFetch(expect.step);
 
         await fetch("http://some.url");
-        await fetch("/odoo");
+        await fetch("/app");
         await fetch(URL.createObjectURL(new Blob([""])));
 
-        expect.verifySteps(["http://some.url", "/odoo"]);
+        expect.verifySteps(["http://some.url", "/app"]);
     });
 });

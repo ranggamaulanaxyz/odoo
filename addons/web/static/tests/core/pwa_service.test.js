@@ -63,5 +63,5 @@ test("PWA installation process", async () => {
         },
     });
     expect(pwaService.canPromptToInstall).toBe(false);
-    expect.verifySteps(['{"/odoo":"accepted"}', "onDone call with installation accepted"]);
+    expect.verifySteps(['{"/app":"accepted"}', "onDone call with installation accepted"]);
 });

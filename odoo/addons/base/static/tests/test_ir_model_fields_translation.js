@@ -25,24 +25,24 @@ function checkLoginColumn(translation) {
 
 registry.category("web_tour.tours").add('ir_model_fields_translation_en_tour', {
     test: true,
-    url: '/odoo',
+    url: '/app',
     steps: () => checkLoginColumn('Login')
 });
 
 registry.category("web_tour.tours").add('ir_model_fields_translation_en_tour2', {
     test: true,
-    url: '/odoo',
+    url: '/app',
     steps: () => checkLoginColumn('Login2')
 });
 
 registry.category("web_tour.tours").add('ir_model_fields_translation_fr_tour', {
     test: true,
-    url: '/odoo',
+    url: '/app',
     steps: () => checkLoginColumn('Identifiant')
 });
 
 registry.category("web_tour.tours").add('ir_model_fields_translation_fr_tour2', {
     test: true,
-    url: '/odoo',
+    url: '/app',
     steps: () => checkLoginColumn('Identifiant2')
 });

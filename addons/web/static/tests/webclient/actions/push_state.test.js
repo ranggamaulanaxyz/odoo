@@ -173,7 +173,7 @@ beforeEach(() => {
     patchWithCleanup(browser.location, {
         origin: "http://example.com",
     });
-    redirect("/odoo");
+    redirect("/app");
     startRouter();
 });
 

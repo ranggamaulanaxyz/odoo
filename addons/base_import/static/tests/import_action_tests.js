@@ -318,7 +318,7 @@ QUnit.module("Base Import Tests", (hooks) => {
         patchWithCleanup(browser.location, {
             origin: "http://example.com",
         });
-        redirect("/odoo");
+        redirect("/app");
 
         await createImportAction({
             "partner/get_import_templates": (route, args) => {

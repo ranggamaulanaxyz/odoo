@@ -7,7 +7,7 @@ from odoo.tools.config import configmanager, _get_default_datadir
 
 
 IS_POSIX = 'workers' in odoo.tools.config.options
-ROOT_PATH = odoo.tools.config.options['root_path'].removesuffix('/odoo')
+ROOT_PATH = odoo.tools.config.options['root_path'].removesuffix('/app')
 
 
 class TestConfigManager(TransactionCase):
